@@ -25,6 +25,11 @@ Bond: 10% | Mistakes: 0 | Coins: 0
 stages, turns to look straight at you when you type, reacts to your keyboard
 rhythm through four senses — and holds you accountable.
 
+<p align="center">
+  <img src="docs/screenshots/onboarding.png" alt="KOMO species picker with live auto-morph evolution preview" width="47%" />
+  <img src="docs/screenshots/habitat.png" alt="KOMO main habitat — an adult companion lives inside a retro handheld LCD frame" width="47%" />
+</p>
+
 The rule here is simple: **neglect has real consequences.**
 
 * A fallen companion can only be revived **once, ever**, with the Phoenix Tear.

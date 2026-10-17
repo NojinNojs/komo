@@ -27,6 +27,14 @@ impl PetGaze {
             Self::Right => "Looking Right ▶",
         }
     }
+
+    pub fn short(&self) -> &'static str {
+        match self {
+            Self::Left => "Left ◀",
+            Self::Center => "At You ●",
+            Self::Right => "Right ▶",
+        }
+    }
 }
 
 /// Real-time snapshot of what the companion perceives right now.

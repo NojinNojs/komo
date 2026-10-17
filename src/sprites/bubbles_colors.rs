@@ -71,19 +71,13 @@ pub fn speech_bubble(pet: &Pet, tick: usize) -> String {
     }
 
     let chatter = [
-        format!(
-            "💬 \"You're back at the desk, {caretaker}. Let's talk [Y] whenever you have a minute.\""
-        ),
+        format!("💬 \"You're back, {caretaker}. Let's talk [Y] anytime.\""),
         format!(
             "💬 \"I can smell {} from the pantry [M].\"",
             pet.species.favorite_snack()
         ),
-        format!(
-            "💬 \"Want to run a round in the Arcade [G], {caretaker}?\""
-        ),
-        format!(
-            "💬 \"Looking right at you, {caretaker}. Everything feels calm in here.\""
-        ),
+        format!("💬 \"Want to run a round in the Arcade [G], {caretaker}?\""),
+        format!("💬 \"Looking right at you, {caretaker}. Everything feels calm in here.\""),
     ];
     chatter[(tick / 48) % chatter.len()].clone()
 }

@@ -80,11 +80,27 @@ pub(super) fn draw_habitat_screen(f: &mut Frame, device: Rect, app: &App) {
         thought.clone()
     } else {
         match (app.tick_count / 28) % 3 {
-            0 => format!("👁 Sight ({}) • {}", snap.gaze.label(), snap.sight),
+            0 => format!("👁 Sight ({}) • {}", snap.gaze.short(), snap.sight),
             1 => format!("👂 Hearing • {}", snap.hearing),
             _ => format!("🫳 Feeling • {}", snap.feeling),
         }
     };
+
+    // Word-aware fit so the retro LCD never shows a cut word in the sensory/speech feed.
+    let fit_text = |text: String, max: usize| -> String {
+        let chars: Vec<char> = text.chars().collect();
+        if chars.len() > max {
+            let cut = chars[..max.saturating_sub(1)]
+                .iter()
+                .rposition(|c| c.is_whitespace());
+            let take = cut.unwrap_or(max.saturating_sub(1));
+            format!("{}…", chars[..take].iter().collect::<String>().trim_end())
+        } else {
+            text
+        }
+    };
+    let text_budget = (lcd_zones[0].width as usize).saturating_sub(6).max(36);
+    let sensory_line = fit_text(sensory_line, text_budget);
 
     let speech_line = if !pet.light_on && pet.is_alive && pet.last_pet_speech.is_none() {
         Line::from(Span::styled(
@@ -93,7 +109,7 @@ pub(super) fn draw_habitat_screen(f: &mut Frame, device: Rect, app: &App) {
         ))
     } else {
         Line::from(Span::styled(
-            speech_bubble(pet, app.tick_count),
+            fit_text(speech_bubble(pet, app.tick_count), text_budget),
             Style::default()
                 .fg(mood_color(pet.mood))
                 .add_modifier(Modifier::BOLD),

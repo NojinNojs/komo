@@ -65,7 +65,7 @@ pub fn sense_environment(
     } else {
         match gaze {
             PetGaze::Center => format!("Looking right at {caretaker} with steady eyes."),
-            PetGaze::Left => "Watching dust motes drift past the left window.".to_string(),
+            PetGaze::Left => "Watching dust motes drift past the window.".to_string(),
             PetGaze::Right => "Inspecting the mossy stones on the right side.".to_string(),
         }
     };
