@@ -201,7 +201,10 @@ fn onboarding_wizard_auto_morphs_evolution_and_adopts_into_sanctuary() {
 
     app.handle_key(KeyCode::Down);
     app.handle_key(KeyCode::Down);
-    assert_eq!(ShellTheme::all()[app.selected_theme_idx], ShellTheme::SkyBlue);
+    assert_eq!(
+        ShellTheme::all()[app.selected_theme_idx],
+        ShellTheme::SkyBlue
+    );
 
     app.handle_key(KeyCode::Enter);
     assert_eq!(app.onboarding_step, OnboardingStep::EnterName);
@@ -303,7 +306,8 @@ fn three_in_one_arcade_modes_work_and_reward_pet() {
         let px = game.player_x;
         game.spawn_item(px, ItemKind::FeverGem);
         for _ in 0..game.height {
-            game.items.retain(|i| i.x == px && i.kind == ItemKind::FeverGem);
+            game.items
+                .retain(|i| i.x == px && i.kind == ItemKind::FeverGem);
             game.step();
         }
         assert!(game.score >= 45);

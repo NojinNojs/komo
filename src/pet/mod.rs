@@ -1,0 +1,35 @@
+//! Core living-companion model for **Mochigotchi v1.0.0** — featuring:
+//! - **14 Rich Emotions (`PetMood`)** (`Joyful`, `Ecstatic`, `Affectionate`,
+mod actions_discipline;
+mod actions_egg_light;
+mod actions_feed;
+mod actions_heal;
+mod actions_light;
+mod actions_love;
+mod actions_play;
+mod actions_sleep_clean;
+mod actions_train;
+mod actions_vigil;
+mod advisor;
+mod cooldown_mood;
+mod decay_offline;
+mod decay_tick;
+mod dialogue;
+mod evolution;
+mod food_action;
+mod icons_rank;
+mod model;
+mod model_setters;
+mod sanctuary;
+mod sanctuary_ops;
+mod species;
+mod stage;
+mod summary;
+mod theme_mood;
+pub use food_action::*;
+pub use icons_rank::*;
+pub use model::*;
+pub use sanctuary::*;
+pub use species::*;
+pub use stage::*;
+pub use theme_mood::*;
