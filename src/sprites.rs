@@ -871,6 +871,21 @@ fn build_grid(
         }
     }
 
+    // Ground-align the sprite so its feet rest directly on the bottom row (above the pedestal!)
+    let mut last_non_empty = 0usize;
+    for (y, row) in grid.iter().enumerate() {
+        if row.iter().any(|&c| c != '.') {
+            last_non_empty = y;
+        }
+    }
+    let shift_down = (CANVAS_H - 1).saturating_sub(last_non_empty);
+    if shift_down > 0 {
+        let mut aligned = [['.'; CANVAS_W]; CANVAS_H];
+        aligned[shift_down..(last_non_empty + shift_down + 1)]
+            .copy_from_slice(&grid[..(last_non_empty + 1)]);
+        grid = aligned;
+    }
+
     // Blink / sleeping eye transform: ONLY turn `E` and `K` eye pixels into closed eyelids `O`!
     // White body/fangs/claws/pearl pixels (`W`) and fierce red iris (`R`) remain untouched on wake!
     let blink = frame_idx % 2 == 1 || mood == PetMood::Sleeping;
@@ -884,7 +899,7 @@ fn build_grid(
         }
     }
 
-    // Gentle 1-pixel vertical breathing bounce on frame 1 when awake & hatched
+    // Gentle 1-pixel vertical breathing hop on frame 1 when awake & hatched
     if stage != EvolutionStage::Egg && mood != PetMood::Sleeping && frame_idx % 2 == 1 {
         let mut shifted = [['.'; CANVAS_W]; CANVAS_H];
         shifted[..CANVAS_H - 1].copy_from_slice(&grid[1..CANVAS_H]);
@@ -1156,72 +1171,70 @@ pub fn speech_bubble(pet: &Pet, tick: usize) -> String {
 }
 
 /// Inner thought bubble (`💭`) revealing what your companion is secretly thinking!
-/// Rotates slowly every 48 ticks (~12 seconds) so you have plenty of time to read it.
+/// Rotates slowly every 48 ticks (~12 seconds) and stays <= 58 chars so it never clips.
 pub fn thought_bubble(pet: &Pet, tick: usize) -> String {
     if pet.stage == EvolutionStage::Egg {
-        return "💭 (Thinking: It's so cozy in here... I want to meet my keeper soon!)"
-            .to_string();
+        return "💭 (Thinking: So warm inside... can't wait to hatch!)".to_string();
     }
     if pet.has_toothache {
-        return "💭 (Thinking: Note to self... 3 sweet snacks in a row was a mistake!)"
-            .to_string();
+        return "💭 (Thinking: 3 sweet snacks in a row was a mistake!)".to_string();
     }
     if pet.is_sleeping {
         return format!(
-            "💭 (Dreaming of flying over a mountain of {}...)",
+            "💭 (Dreaming of a mountain of {}...)",
             pet.species.favorite_snack()
         );
     }
     let species_thoughts = match pet.species {
         PetSpecies::MochiCat => [
-            "💭 (Thinking: If I purr louder, maybe I'll get extra Taiyaki...)",
-            "💭 (Thinking: Soon I'll awaken my Byakko Tiger Shogun form!)",
-            "💭 (Thinking: My keeper's keyboard clicks sound like a lullaby!)",
+            "💭 (Thinking: Purring louder for extra Taiyaki...)",
+            "💭 (Thinking: Soon I'll awaken my Byakko Tiger form!)",
+            "💭 (Thinking: Your keyboard clicks sound cozy!)",
         ],
         PetSpecies::BobaPup => [
-            "💭 (Thinking: Is it playtime yet?! My tail won't stop wagging!)",
-            "💭 (Thinking: One day I'll grow into a mighty Fenrir Dire Wolf!)",
-            "💭 (Thinking: I'll guard the Sanctuary while my keeper works!)",
+            "💭 (Thinking: Is it playtime yet?! Tail wagging!)",
+            "💭 (Thinking: Soon I'll grow into a Fenrir Dire Wolf!)",
+            "💭 (Thinking: Guarding the Sanctuary while you work!)",
         ],
         PetSpecies::CloudBun => [
             "💭 (Thinking: My ears feel extra fluffy today~)",
-            "💭 (Thinking: In my Elder form, I'll command the storm clouds!)",
+            "💭 (Thinking: In Elder form, I'll command the storm!)",
             "💭 (Thinking: Press [Y] to chat with me anytime!)",
         ],
         PetSpecies::StarPengu => [
-            "💭 (Thinking: I counted 42 shooting stars in the aurora last night!)",
-            "💭 (Thinking: Training hard to earn my Frost Kaiser trident crown!)",
-            "💭 (Thinking: Snowberries taste best when shared with a friend!)",
+            "💭 (Thinking: I counted 42 shooting stars last night!)",
+            "💭 (Thinking: Training hard for my Frost Kaiser crown!)",
+            "💭 (Thinking: Snowberries taste best with a friend!)",
         ],
         PetSpecies::IgnisDragon => [
-            "💭 (Thinking: My flame breath is getting hotter! Soon I'll be Bahamut!)",
-            "💭 (Thinking: Every true dragon hoards shiny coins and spicy chilies!)",
-            "💭 (Thinking: I love when my keeper polishes my golden horns.)",
+            "💭 (Thinking: Flame breath rising — Bahamut awaits!)",
+            "💭 (Thinking: True dragons hoard coins & spicy chili!)",
+            "💭 (Thinking: I love when you polish my golden horns!)",
         ],
         PetSpecies::AzureWyrm => [
-            "💭 (Thinking: The tides and stars are awakening my Leviathan power...)",
-            "💭 (Thinking: My moon pearl glows brighter whenever you visit!)",
-            "💭 (Thinking: Ancient dragons value patience, wisdom, and snacks.)",
+            "💭 (Thinking: The tides awaken my Leviathan power...)",
+            "💭 (Thinking: My moon pearl glows whenever you visit!)",
+            "💭 (Thinking: Ancient dragons love wisdom and snacks.)",
         ],
         PetSpecies::EmberFox => [
-            "💭 (Thinking: Soon I'll unleash all nine tails of cyan foxfire!)",
-            "💭 (Thinking: Inari tofu is the secret to Kyuubi spirit power~)",
-            "💭 (Thinking: Should I play a tiny harmless prank, or behave?)",
+            "💭 (Thinking: Soon I'll unleash all nine foxfire tails!)",
+            "💭 (Thinking: Inari tofu is the secret to Kyuubi power~)",
+            "💭 (Thinking: Should I play a tiny prank, or behave?)",
         ],
         PetSpecies::PhoenixChick => [
-            "💭 (Thinking: My wings burn like sunrise — Solar Garuda awaits!)",
-            "💭 (Thinking: Even a legendary solar firebird loves headpats.)",
-            "💭 (Thinking: Let's set a new high score in Hurdle Dash [G]!)",
+            "💭 (Thinking: Wings burning bright — Garuda awaits!)",
+            "💭 (Thinking: Even a solar firebird loves headpats!)",
+            "💭 (Thinking: Let's set a high score in Hurdle Dash!)",
         ],
         PetSpecies::CrystalUni => [
-            "💭 (Thinking: My prism horn is evolving into a Celestial Kirin lance!)",
+            "💭 (Thinking: My horn is evolving into a Kirin lance!)",
             "💭 (Thinking: Starlight sugar makes my hooves sparkle~)",
-            "💭 (Thinking: Our bond feels stronger every single day!)",
+            "💭 (Thinking: Our bond feels stronger every day!)",
         ],
         PetSpecies::SlimeKing => [
-            "💭 (Thinking: Soon I'll grow into a colossal Titan Slime Emperor!)",
-            "💭 (Thinking: Make sure my golden crown isn't tilted!)",
-            "💭 (Thinking: Crystal dew keeps my royal gel 100% powerful!)",
+            "💭 (Thinking: Soon I'll be a Titan Slime Emperor!)",
+            "💭 (Thinking: Make sure my golden crown sits straight!)",
+            "💭 (Thinking: Crystal dew keeps my royal gel strong!)",
         ],
     };
     species_thoughts[(tick / 48) % species_thoughts.len()].to_string()

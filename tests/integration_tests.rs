@@ -274,8 +274,8 @@ fn full_pet_lifecycle_from_egg_to_cyber_elder() {
     }
 
     assert_eq!(pet.stage, EvolutionStage::CyberElder);
-    assert!(pet.xp >= 3_500);
-    assert!(pet.bond >= 90);
+    assert!(pet.xp >= 1_200);
+    assert!(pet.bond >= 50);
 }
 
 #[test]
@@ -400,6 +400,14 @@ fn tui_renders_every_screen_cleanly() {
     }
     assert!(rendered_text.contains("ASTRA"));
     assert!(rendered_text.contains("Thinking"));
+    assert!(
+        rendered_text.contains("Talk"),
+        "Rightmost bezel icon 💬Talk must never be truncated to 💬Tal"
+    );
+    assert!(
+        rendered_text.contains("[?] Keys"),
+        "Advisor footer [?] Keys must never be truncated"
+    );
 
     let _ = MiniGame::new(20, 8, 10);
     let _ = render_animated_sprite(&app.pet, 0);

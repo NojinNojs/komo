@@ -51,8 +51,8 @@ pub const MIN_TERM_WIDTH: u16 = 68;
 pub const MIN_TERM_HEIGHT: u16 = 24;
 
 /// Preferred retro handheld frame dimensions (centered inside larger terminals).
-const HANDHELD_MAX_W: u16 = 78;
-const HANDHELD_MAX_H: u16 = 29;
+const HANDHELD_MAX_W: u16 = 76;
+const HANDHELD_MAX_H: u16 = 25;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LayoutTier {
@@ -964,13 +964,13 @@ fn custom_meter_line(
 
 fn render_unified_bezel(selected: LcdIcon, pet: &Pet) -> Line<'static> {
     let mut spans = Vec::with_capacity(18);
-    for &icon in LcdIcon::selectable() {
+    for (idx, &icon) in LcdIcon::selectable().iter().enumerate() {
         let is_sel = icon == selected;
         let label = if icon == LcdIcon::Lights {
             if pet.light_on {
-                "💡Light"
+                "💡Lit"
             } else {
-                "🌙Dark"
+                "🌙Off"
             }
         } else {
             icon.label()
@@ -983,8 +983,10 @@ fn render_unified_bezel(selected: LcdIcon, pet: &Pet) -> Line<'static> {
         } else {
             Style::default().fg(Color::Cyan)
         };
-        spans.push(Span::styled(format!(" {label} "), style));
-        spans.push(Span::raw(" "));
+        spans.push(Span::styled(label.to_string(), style));
+        if idx + 1 < LcdIcon::selectable().len() {
+            spans.push(Span::raw(" "));
+        }
     }
     Line::from(spans)
 }

@@ -62,11 +62,11 @@ impl LcdIcon {
     pub fn label(&self) -> &'static str {
         match self {
             Self::Food => "🍙Food",
-            Self::Lights => "💡Light",
+            Self::Lights => "💡Lit",
             Self::Play => "🎮Game",
             Self::Medicine => "💉Meds",
             Self::Bath => "🚽Bath",
-            Self::Meter => "📏Meter",
+            Self::Meter => "📏Stat",
             Self::Discipline => "📢Scold",
             Self::Talk => "💬Talk",
             Self::Attention => "🔔Call",
@@ -190,9 +190,9 @@ impl EvolutionStage {
         match self {
             Self::Egg => 0,
             Self::Baby => 100,
-            Self::Teen => 450,
-            Self::Adult => 1_400,
-            Self::CyberElder => 3_500,
+            Self::Teen => 250,
+            Self::Adult => 600,
+            Self::CyberElder => 1_200,
         }
     }
 
@@ -200,20 +200,14 @@ impl EvolutionStage {
         match self {
             Self::Egg => 0,
             Self::Baby => 12,
-            Self::Teen => 35,
-            Self::Adult => 65,
-            Self::CyberElder => 90,
+            Self::Teen => 18,
+            Self::Adult => 32,
+            Self::CyberElder => 50,
         }
     }
 
     pub fn min_age_seconds(&self) -> u64 {
-        match self {
-            Self::Egg => 0,
-            Self::Baby => 0,
-            Self::Teen => 6 * 3_600,
-            Self::Adult => 24 * 3_600,
-            Self::CyberElder => 72 * 3_600,
-        }
+        0
     }
 
     pub fn next_stage(&self) -> Option<EvolutionStage> {
@@ -996,6 +990,7 @@ impl Pet {
     }
 
     pub fn refresh_mood(&mut self) {
+        let _ = self.check_evolution();
         if self.weight_grams < self.stage.base_weight_grams() {
             self.weight_grams = self.stage.base_weight_grams();
         }
@@ -1171,12 +1166,12 @@ impl Pet {
             );
         }
         if self.energy <= 25 {
-            return "🥱 Getting sleepy! Press [S] to sleep, then [K] Light OFF.".to_string();
+            return "🥱 Getting sleepy! Press [S] Sleep, then [K] Light OFF.".to_string();
         }
         if self.happy_hearts() <= 1 {
             return "🎾 Happy Hearts low! Press [P] Play or [Y] Talk.".to_string();
         }
-        "🌟 Cozy! Press [Y] to Talk, [G] for 3-in-1 Arcade, [I] Meter, or [?] Keys.".to_string()
+        "🌟 Cozy! [Y] Talk • [G] 3-in-1 Arcade • [I] Meter • [?] Keys".to_string()
     }
 
     pub fn perform_action(&mut self, action: PetAction) -> String {
