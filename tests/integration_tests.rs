@@ -1,11 +1,8 @@
-//! End-to-end integration tests for **Mochigotchi v0.5.1**:
+//! End-to-end integration tests for **Mochigotchi v0.5.2**:
 //! - Zero ZWJ (`U+200D`) or Variation Selector (`U+FE0F`) glyph desyncs
-//! - Minimum terminal size guard (`90 × 26`) + unclipped tabular Adoption Wizard
-//! - Authentic Bandai Tamagotchi reverse-engineered mechanics (8 LCD bezel
-//!   icons, 4 Hungry/Happy Hearts, Meal vs. Sweet Snack Weight & Toothache,
-//!   Room Light switch, Discipline Scold/Praise, Care Mistakes)
-//! - Lifecycle rules, realistic multi-hour/day cooldowns, offline welcome-back
-//!   reports, TrueColor sprites, the multi-pet Sanctuary, persistence, and TUI.
+//! - Minimum terminal size guard (`80 × 24`) + unclipped tabular Adoption Wizard
+//! - Dedicated Egg Incubator view when unhatched vs. Tamagotchi Vitals when hatched
+//! - Unified single-row 7-icon Bandai Tamagotchi LCD Bezel & 4-page Health Meter
 
 use chrono::{Duration, Utc};
 use crossterm::event::KeyCode;
@@ -43,8 +40,6 @@ fn assert_no_zwj_or_fe0f(s: &str, context: &str) {
         "{context} contains U+FE0F variation selector which breaks terminal column alignment: {s:?}"
     );
 }
-
-// ── 1. Species catalogue, zero ZWJ/FE0F & TrueColor sprites ───────────────
 
 #[test]
 fn all_ten_species_are_described_and_free_of_zwj_or_fe0f_glyphs() {
@@ -85,8 +80,6 @@ fn all_ten_species_are_described_and_free_of_zwj_or_fe0f_glyphs() {
         assert_no_zwj_or_fe0f(theme.display_name(), "theme.display_name");
     }
 }
-
-// ── 2. Egg stage: guarding, realistic incubation, hatching ─────────────────
 
 #[test]
 fn unhatched_egg_refuses_every_care_action() {
@@ -169,8 +162,6 @@ fn passive_incubation_never_hatches_the_egg_by_itself() {
     assert_eq!(pet.stage, EvolutionStage::Baby);
 }
 
-// ── 3. Reverse-engineered Tamagotchi mechanics (Weight, Toothache, Light, Discipline) ─
-
 #[test]
 fn authentic_tamagotchi_weight_toothache_light_and_discipline() {
     let mut pet = Pet::new("Mochi");
@@ -228,8 +219,6 @@ fn authentic_tamagotchi_weight_toothache_light_and_discipline() {
     assert!(light_msg.contains("light OFF"), "{light_msg}");
     assert!(!pet.light_on);
 }
-
-// ── 4. Anti-spam care guards & Pantry choices ─────────────────────────────
 
 #[test]
 fn care_actions_cannot_be_spammed_for_free_xp() {
@@ -313,8 +302,6 @@ fn pantry_meals_and_poop_cleaning_cycle() {
     assert_eq!(pet.cleanliness, 100);
 }
 
-// ── 5. Evolution needs real multi-hour age, bond and XP ───────────────────
-
 #[test]
 fn evolution_requires_xp_bond_and_time_together() {
     let mut pet = Pet::new("Mochi");
@@ -366,8 +353,6 @@ fn offline_decay_generates_welcome_back_report_and_exploration_gifts() {
     assert!(!rep.events.is_empty());
 }
 
-// ── 6. Multi-pet Sanctuary & Persistence ──────────────────────────────────
-
 #[test]
 fn sanctuary_holds_many_companions_and_survives_save_load() {
     let (_dir, paths) = temp_paths();
@@ -404,8 +389,6 @@ fn sanctuary_holds_many_companions_and_survives_save_load() {
     assert_eq!(upgraded.pets.len(), 1);
     assert_eq!(upgraded.active_pet().name, "Pebble");
 }
-
-// ── 7. Mini-game, Minimum Terminal Size Guard & TUI Bezel Navigation ──────
 
 #[test]
 fn snack_catcher_arcade_and_lcd_bezel_navigation_work() {
@@ -454,8 +437,8 @@ fn minimum_terminal_size_guard_and_full_ui_render_cleanly() {
     assert_eq!(LayoutTier::from_width(MIN_TERM_WIDTH), LayoutTier::Standard);
     assert_eq!(LayoutTier::from_width(130), LayoutTier::Wide);
 
-    // 1. Below minimum size (< 90x26): renders the Window Size Notice card cleanly.
-    let mut small_term = Terminal::new(TestBackend::new(72, 22)).expect("small term");
+    // 1. Below minimum size (< 80x24): renders the Window Size Notice card cleanly.
+    let mut small_term = Terminal::new(TestBackend::new(72, 20)).expect("small term");
     small_term.draw(|f| draw_ui(f, &app)).expect("draw small");
     let small_text: String = small_term
         .backend()
@@ -466,12 +449,12 @@ fn minimum_terminal_size_guard_and_full_ui_render_cleanly() {
         .collect();
     assert!(
         small_text.contains("Window Size Notice"),
-        "expected resize notice on 72x22"
+        "expected resize notice on 72x20"
     );
 
-    // 2. At and above minimum size (>= 90x26): renders the full UI with all 5 shell themes visible!
+    // 2. At and above minimum size (>= 80x24): renders the full UI with all 5 shell themes visible!
     app.onboarding_step = OnboardingStep::SelectTheme;
-    for (width, height) in [(MIN_TERM_WIDTH, MIN_TERM_HEIGHT), (104, 32), (132, 40)] {
+    for (width, height) in [(MIN_TERM_WIDTH, MIN_TERM_HEIGHT), (96, 28), (132, 40)] {
         let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("terminal");
         terminal.draw(|f| draw_ui(f, &app)).expect("draw");
         let full_text: String = terminal
@@ -490,12 +473,40 @@ fn minimum_terminal_size_guard_and_full_ui_render_cleanly() {
             "5-star rarity column must fit without clipping at {width}x{height}"
         );
 
-        for screen in [
-            AppScreen::Habitat,
-            AppScreen::SanctuaryRoster,
-            AppScreen::MiniGame,
-            AppScreen::Onboarding,
-        ] {
+        // Verify Habitat renders Egg Incubator when stage == Egg
+        app.screen = AppScreen::Habitat;
+        app.pet.stage = EvolutionStage::Egg;
+        terminal.draw(|f| draw_ui(f, &app)).expect("draw egg habitat");
+        let egg_hab: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|c| c.symbol())
+            .collect();
+        assert!(
+            egg_hab.contains("Egg Incubator Status"),
+            "egg stage should render Egg Incubator Status panel"
+        );
+
+        // Verify Habitat renders Tamagotchi Vitals when hatched
+        app.pet.stage = EvolutionStage::Adult;
+        terminal
+            .draw(|f| draw_ui(f, &app))
+            .expect("draw adult habitat");
+        let adult_hab: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|c| c.symbol())
+            .collect();
+        assert!(
+            adult_hab.contains("Tamagotchi Vitals"),
+            "hatched stage should render Tamagotchi Vitals panel"
+        );
+
+        for screen in [AppScreen::SanctuaryRoster, AppScreen::MiniGame] {
             app.screen = screen;
             terminal.draw(|f| draw_ui(f, &app)).expect("draw screen");
         }

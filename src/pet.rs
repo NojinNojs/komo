@@ -58,14 +58,14 @@ impl LcdIcon {
 
     pub fn label(&self) -> &'static str {
         match self {
-            Self::Food => "🍙 Food",
-            Self::Lights => "💡 Light",
-            Self::Play => "🎮 Game",
-            Self::Medicine => "💉 Meds",
-            Self::Bath => "🚽 Bath",
-            Self::Meter => "📏 Meter",
-            Self::Discipline => "📢 Scold",
-            Self::Attention => "🔔 Call",
+            Self::Food => "🍙Food",
+            Self::Lights => "💡Light",
+            Self::Play => "🎮Game",
+            Self::Medicine => "💉Meds",
+            Self::Bath => "🚽Bath",
+            Self::Meter => "📏Meter",
+            Self::Discipline => "📢Scold",
+            Self::Attention => "🔔Call",
         }
     }
 }
@@ -88,9 +88,9 @@ impl AttentionCall {
     pub fn badge(&self) -> &'static str {
         match self {
             Self::None => "🔔 Quiet",
-            Self::NeedsCare => "🔔 CALL: Needs Care!",
-            Self::Misbehaving => "🔔 CALL: Spoiled! [D]",
-            Self::Crying => "🔔 CALL: Crying! [T]",
+            Self::NeedsCare => "🔔 CALL: Care!",
+            Self::Misbehaving => "🔔 CALL: Scold [D]",
+            Self::Crying => "🔔 CALL: Praise [T]",
         }
     }
 }
@@ -139,7 +139,7 @@ impl EvolutionStage {
             Self::Baby => "🍼 Baby",
             Self::Teen => "🌱 Teen",
             Self::Adult => "🌸 Adult",
-            Self::CyberElder => "🌟 Starlight Elder",
+            Self::CyberElder => "🌟 Elder",
         }
     }
 
@@ -579,18 +579,20 @@ pub fn format_duration_human(secs: u64) -> String {
     }
 }
 
-/// Render 0..=4 classic Tamagotchi hearts (`♥ ♥ ♥ ♡`).
+/// Render 0..=4 classic Tamagotchi hearts (`♥ ♥ ♥ · 3/4`) using consistent
+/// single-cell glyphs (`♥` and `·`) so Nerd Fonts never mix two different
+/// heart glyph sizes.
 pub fn format_hearts(filled: u8) -> String {
     let clamped = filled.min(4);
-    let mut parts = Vec::with_capacity(4);
+    let mut out = String::with_capacity(8);
     for i in 0..4 {
         if i < clamped {
-            parts.push("♥");
+            out.push('♥');
         } else {
-            parts.push("♡");
+            out.push('·');
         }
     }
-    parts.join(" ")
+    format!("{out} {clamped}/4")
 }
 
 /// A single companion: everything about one creature in your Sanctuary.
@@ -898,13 +900,13 @@ impl Pet {
     pub fn next_evolution_requirements(&self) -> String {
         if self.stage == EvolutionStage::Egg {
             return format!(
-                "Hatch at 100% Incubation (now {}% • [W] +20% every 3m or passive warmth)",
+                "Goal: Hatch at 100% Incubation (now {}% • [W] +20% / 3m)",
                 self.incubation
             );
         }
         match self.stage.next_stage() {
             Some(next) => format!(
-                "Next: {} • XP {}/{} • Bond {}/{} • Age {}/{} • Disc {}%",
+                "Next {} • XP {}/{} • Bond {}/{} • Age {}/{}",
                 next.badge(),
                 self.xp,
                 next.min_xp(),
@@ -912,7 +914,6 @@ impl Pet {
                 next.min_bond(),
                 format_duration_human(self.age_seconds),
                 format_duration_human(next.min_age_seconds()),
-                self.discipline
             ),
             None => "Max evolution reached — Starlight Elder 🌟".to_string(),
         }
@@ -922,13 +923,12 @@ impl Pet {
         if self.stage == EvolutionStage::Egg {
             let rem = self.warm_cooldown_remaining(now);
             if self.incubation >= 99 {
-                return "🥚 Ready to hatch! Press [W] or [Space] to crack the shell!".to_string();
+                return "🥚 Ready to hatch! Press [W] or [Space] now!".to_string();
             } else if rem == 0 {
-                return "🤲 Egg is ready for warmth! Press [W] or [Space] (+20% incubation)."
-                    .to_string();
+                return "🤲 Press [W] or [Space] to warm the egg (+20%).".to_string();
             } else {
                 return format!(
-                    "🔥 Egg is absorbing warmth ({}%). Next manual warm in {} (passive warmth active).",
+                    "🔥 Egg warming ({}%). Next [W] in {} (passive active).",
                     self.incubation,
                     format_duration_human(rem)
                 );
@@ -936,79 +936,51 @@ impl Pet {
         }
 
         if self.has_toothache {
-            return format!(
-                "🦷 {} has a Toothache from eating too many sweets! Press [H] for Medicine 💉!",
-                self.name
-            );
+            return format!("🦷 {} has a Toothache! Press [H] for Medicine!", self.name);
         }
         if self.is_sick {
-            return format!(
-                "🤒 {} feels unwell! Press [H] to give Medicine 💉 right away.",
-                self.name
-            );
+            return format!("🤒 {} feels sick! Press [H] for Medicine!", self.name);
         }
         if self.is_sleeping && self.light_on {
             return format!(
-                "💡 {} is sleeping with the room light ON! Press [K] to turn the Light OFF 🌙!",
+                "💡 {} is asleep with Light ON! Press [K] to turn OFF!",
                 self.name
             );
         }
         if self.attention_call == AttentionCall::Misbehaving {
-            return format!(
-                "📢 {} is calling for attention just to be mischievous! Press [D] to Scold!",
-                self.name
-            );
+            return format!("📢 {} is acting spoiled! Press [D] to Scold!", self.name);
         }
         if self.attention_call == AttentionCall::Crying {
-            return format!(
-                "🥺 {} is sniffling and wants reassurance! Press [T] to Praise & Headpat!",
-                self.name
-            );
+            return format!("🥺 {} is crying! Press [T] to Praise & Pat!", self.name);
         }
         if self.poop_count > 0 || self.cleanliness < 45 {
             return format!(
-                "🚽 Mess on floor (Poop {}, Clean {}%)! Press [C] to Flush & Bath!",
-                self.poop_count, self.cleanliness
+                "🚽 Mess on floor (Poop {})! Press [C] for a Bath!",
+                self.poop_count
             );
         }
         if self.is_sleeping {
             if self.energy >= 95 {
-                return format!(
-                    "🌞 {} is fully rested ({}% Energy)! Press [S] to wake them up.",
-                    self.name, self.energy
-                );
+                return format!("🌞 {} is fully rested! Press [S] to wake up.", self.name);
             }
-            return format!(
-                "🌙 {} is sleeping peacefully in the dark ({}% Energy).",
-                self.name, self.energy
-            );
+            return format!("🌙 {} is sleeping peacefully ({}% Energy).", self.name, self.energy);
         }
         if self.hungry_hearts() <= 1 {
-            return format!(
-                "🍙 Hungry Hearts low ({})! Press [F] for a Meal or [M] for Pantry.",
-                format_hearts(self.hungry_hearts())
-            );
+            return "🍙 Hungry Hearts low! Press [F] Meal or [M] Pantry.".to_string();
         }
         if self.is_overweight() {
             return format!(
-                "🏋 {} is getting chubby ({}g)! Play [P] or Train [E] to burn weight!",
+                "🏋 {} is chubby ({}g)! Play [P] or Train [E]!",
                 self.name, self.weight_grams
             );
         }
         if self.energy <= 25 {
-            return format!(
-                "🥱 {} is sleepy ({}% Energy). Press [S] to sleep, then [K] to turn off the light!",
-                self.name, self.energy
-            );
+            return "🥱 Getting sleepy! Press [S] to sleep, then [K] Light OFF.".to_string();
         }
         if self.happy_hearts() <= 1 {
-            return format!(
-                "🎾 Happy Hearts low ({})! Press [P] to play or [M] for a Snack.",
-                format_hearts(self.happy_hearts())
-            );
+            return "🎾 Happy Hearts low! Press [P] Play or [M] Snack.".to_string();
         }
-        "🌟 All Tamagotchi meters healthy! Use ←/→ + Enter on the 8 LCD icons, [I] Meter, or [?] Help."
-            .to_string()
+        "🌟 All meters healthy! Use ←/→ + Enter on Bezel, [I] Meter, or [?] Help.".to_string()
     }
 
     pub fn perform_action(&mut self, action: PetAction) -> String {

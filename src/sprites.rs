@@ -19,9 +19,6 @@ const EYES: &str = "{E}";
 const FX: &str = "{X}";
 
 /// Detailed multi-line body templates for every species and stage.
-/// `{E}` is always 5 characters wide, `{X}` is always 2 characters wide, and
-/// every line is <= 28 characters wide so sprites never wrap even in compact
-/// panels.
 fn body_template(species: PetSpecies, stage: EvolutionStage) -> &'static [&'static str] {
     match (species, stage) {
         // ── 🐱 Neko Mochi ───────────────────────────────────────────────
@@ -478,7 +475,6 @@ fn body_template(species: PetSpecies, stage: EvolutionStage) -> &'static [&'stat
 }
 
 /// 5-character expression pair (open, blink/alt) for every mood.
-/// Uses pure 1-cell characters so eye tokens are always 5 cells wide.
 fn mood_expression(mood: PetMood) -> (&'static str, &'static str) {
     match mood {
         PetMood::Idle => ("o . o", "- . -"),
@@ -511,6 +507,7 @@ fn compose(template: &[&str], eyes: &str, fx: &str) -> String {
 }
 
 /// Both animation frames for a species at a given stage & mood.
+/// Frame 1 uses two spaces for `{X}` so there is no stray floating dot.
 pub fn get_sprite_frames(species: PetSpecies, stage: EvolutionStage, mood: PetMood) -> Vec<String> {
     let template = body_template(species, stage);
     let (eyes_open, eyes_blink) = mood_expression(mood);
@@ -518,7 +515,7 @@ pub fn get_sprite_frames(species: PetSpecies, stage: EvolutionStage, mood: PetMo
 
     vec![
         compose(template, eyes_open, fx),
-        compose(template, eyes_blink, "· "),
+        compose(template, eyes_blink, "  "),
     ]
 }
 
@@ -704,42 +701,39 @@ pub fn render_species_preview(species: PetSpecies) -> Vec<String> {
     frames[0].lines().map(|l| l.to_string()).collect()
 }
 
-/// What your companion would say right now.
+/// What your companion would say right now (concise so it never wraps awkwardly).
 pub fn speech_bubble(pet: &Pet, tick: usize) -> String {
     if pet.stage == EvolutionStage::Egg {
         return if pet.incubation >= 80 {
-            "💬 \"*crack* *wiggle* Almost ready to hatch!\"".to_string()
+            "💬 \"*crack* Almost ready to hatch!\"".to_string()
         } else {
-            "💬 \"Inside the shell, a warm heartbeat waits...\"".to_string()
+            "💬 \"A tiny heartbeat waits for warmth...\"".to_string()
         };
     }
     if pet.has_toothache {
-        return "💬 \"Ouch! My tooth hurts from sweets... Medicine [H] please!\"".to_string();
+        return "💬 \"Ouch, toothache! Medicine [H] please!\"".to_string();
     }
     if pet.is_sleeping || pet.mood == PetMood::Sleeping {
         return "💬 \"Zzz... dreaming of sweet snacks...\"".to_string();
     }
     if pet.is_sick || pet.mood == PetMood::Sick {
-        return "💬 \"Ugh... my tummy hurts... could I have medicine [H]?\"".to_string();
+        return "💬 \"Ugh... could I have medicine [H]?\"".to_string();
     }
     if pet.poop_count > 0 {
-        return "💬 \"Eep! My room is messy... a bubble bath [C] would help!\"".to_string();
+        return "💬 \"Eep! A bubble bath [C] would help!\"".to_string();
     }
     if pet.hunger <= 30 {
-        return format!(
-            "💬 \"My tummy is rumbling! Can I have {}?\"",
-            pet.species.favorite_snack()
-        );
+        return format!("💬 \"Hungry for {}!\"", pet.species.favorite_snack());
     }
     if pet.energy <= 25 {
-        return "💬 \"*yawn* So sleepy... time for bed [S]?\"".to_string();
+        return "💬 \"*yawn* Time for bed [S]?\"".to_string();
     }
 
     let chatter = [
-        format!("💬 \"Yay! {} loves spending time with you!\"", pet.name),
-        format!("💬 \"Mmm, thinking about {}...\"", pet.species.favorite_snack()),
-        "💬 \"Let's play the Snack Catcher arcade [G]!\"".to_string(),
-        "💬 \"Headpats [T] make our bond grow stronger!\"".to_string(),
+        format!("💬 \"{} loves spending time with you!\"", pet.name),
+        format!("💬 \"Thinking about {}...\"", pet.species.favorite_snack()),
+        "💬 \"Let's play Snack Catcher [G]!\"".to_string(),
+        "💬 \"Headpats [T] grow our bond!\"".to_string(),
     ];
     chatter[(tick / 3) % chatter.len()].clone()
 }
