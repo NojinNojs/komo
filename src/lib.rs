@@ -1,32 +1,25 @@
-//! # Mochigotchi v1.0.0
-//!
-//! A cozy, collectible pocket-pet simulator for your terminal with
-//! reverse-engineered authentic Bandai Tamagotchi mechanics, a minimalist
-//! step-by-step retro handheld LCD UI (`68 × 22` minimum viewport), and a
-//! 24×16 TrueColor half-block pixel art engine (`▀`, `▄`, `█`).
-
 pub mod minigame;
 pub mod pet;
+pub mod sound;
 pub mod sprites;
 pub mod storage;
 pub mod tui;
 
-pub use minigame::{FallingItem, ItemKind, MiniGame};
+pub use minigame::{FallingItem, GameMode, ItemKind, MiniGame};
 pub use pet::{
-    format_duration_human, format_hearts, AttentionCall, CareRank, EvolutionStage, FoodChoice,
-    LcdIcon, OfflineReport, Pet, PetAction, PetMood, PetSpecies, PetState, Sanctuary, ShellTheme,
-    FEED_COOLDOWN_SECS, PET_COOLDOWN_SECS, PLAY_COOLDOWN_SECS, TRAIN_COOLDOWN_SECS,
-    WARM_COOLDOWN_SECS,
+    format_duration_human, format_hearts, AttentionCall, CareRank, DialoguePrompt, EvolutionStage,
+    FoodChoice, LcdIcon, OfflineReport, Pet, PetAction, PetMood, PetSpecies, PetState, Sanctuary,
+    ShellTheme,
 };
+pub use sound::{synthesize_wav, SoundEffect, SoundEngine};
 pub use sprites::{
     get_mood_particles, get_sprite_frames, mood_color, mood_dialogue, render_animated_sprite,
     render_colored_preview, render_colored_sprite, render_species_preview, sky_scene,
-    speech_bubble, species_palette, stage_color, theme_color,
+    species_palette, speech_bubble, stage_color, theme_color, thought_bubble, CANVAS_H, CANVAS_W,
 };
 pub use storage::{
-    has_existing_save, load_dual, load_json, load_or_create, load_sanctuary, load_sqlite,
-    save_dual, save_json, save_sanctuary, save_sqlite, StoragePaths, DEFAULT_JSON_PATH,
-    DEFAULT_SQLITE_PATH,
+    load_pet, load_sanctuary, save_exists, save_json, save_pet, save_sanctuary, save_sqlite,
+    StoragePaths,
 };
 pub use tui::{
     draw_ui, run_tui, run_tui_with_report, App, AppScreen, LayoutTier, OnboardingStep,

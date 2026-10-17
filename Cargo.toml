@@ -2,7 +2,7 @@
 name = "mochigotchi"
 version = "1.0.0"
 edition = "2021"
-description = "Mochigotchi — Minimalist Retro Handheld V-Pet & 24x16 TrueColor Pixel Art Tamagotchi in the Terminal"
+description = "Mochigotchi — Minimalist Retro Handheld V-Pet & 32x20 TrueColor Pixel Art Tamagotchi in the Terminal"
 authors = ["Muhammad Raffi Aqsan (NojinNojs)"]
 license = "MIT"
 readme = "README.md"

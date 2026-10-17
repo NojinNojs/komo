@@ -1,326 +1,266 @@
-//! Command-line entry point for **Mochigotchi v1.0.0**.
-//!
-//! Running `mochigotchi` (or `mochi` / `tamagotchi`) with no arguments from any
-//! directory in your terminal opens the interactive Retro Handheld LCD habitat
-//! (stored under `~/.local/share/mochigotchi/`).
-
 use std::env;
-use std::error::Error;
 use std::fs;
-use std::path::Path;
+use std::path::PathBuf;
 
 use chrono::Utc;
-use mochigotchi::pet::{Pet, PetAction, PetSpecies, Sanctuary, ShellTheme};
-use mochigotchi::sprites::{render_animated_sprite, speech_bubble};
-use mochigotchi::storage::{has_existing_save, load_sanctuary, save_sanctuary, StoragePaths};
-
-fn print_version() {
-    println!("mochigotchi {}", env!("CARGO_PKG_VERSION"));
-}
+use mochigotchi::{
+    load_sanctuary, render_animated_sprite, run_tui_with_report, save_exists, save_sanctuary,
+    speech_bubble, thought_bubble, Pet, PetAction, PetSpecies, Sanctuary, ShellTheme, StoragePaths,
+};
 
 fn print_help() {
     println!(
-        "🍡 Mochigotchi v{} — Retro Handheld V-Pet & 24×16 TrueColor Pixel Art Edition",
+        "\
+🍡 Mochigotchi v{} — Retro Handheld V-Pet & 32x20 TrueColor Pixel Art Edition
+
+USAGE:
+    mochigotchi [OPTIONS]      (or: mochi / tamagotchi)
+
+OPTIONS:
+    -h, --help                Print this help information
+    -V, --version             Print version information
+    --name <NAME>             Set pet name when creating or adopting a companion
+    --species <SPECIES>       cat | pup | bun | pengu | dragon | wyrm | fox | phoenix | uni | slime
+    --theme <THEME>           pink | matcha | blue | lavender | gold
+    --adopt                   Adopt a new companion into your Sanctuary via CLI
+    --switch <INDEX|NAME>     Switch active companion by 1-based index or name
+    --json-path <PATH>        Custom path for JSON save file
+    --db-path <PATH>          Custom path for SQLite save database
+    --status                  Print active companion status, thoughts, and 32x20 pixel sprite
+    --roster                  List all companions in your Sanctuary
+    --warm                    Warm & incubate your egg (+20% warmth)
+    --feed                    Feed a meal (+1 Hungry Heart, +1g weight)
+    --snack                   Feed a sweet snack (+1 Happy Heart, +2g weight)
+    --play                    Play a game (+18 Happy, -2g weight)
+    --pet                     Praise / cuddle your companion
+    --talk                    Have a heart-to-heart chat & see what your pet is thinking!
+    --train                   Run a training session (+Discipline, -2g weight)
+    --sleep                   Toggle sleep mode
+    --light                   Toggle the room light switch ON/OFF
+    --scold                   Discipline (scold) when misbehaving
+    --clean                   Flush mess, brush teeth & take a bath
+    --heal                    Give herbal medicine (cures sickness & toothache)
+    --reset                   Delete existing save files and start fresh",
         env!("CARGO_PKG_VERSION")
     );
-    println!();
-    println!("USAGE:");
-    println!("  mochigotchi [OPTIONS]   (also available as `mochi` or `tamagotchi`)");
-    println!();
-    println!("OPTIONS:");
-    println!("  -h, --help              Show this help message");
-    println!("  -V, --version           Print version information");
-    println!("  --species <SPECIES>     Select species:");
-    println!("                            Cozy:      cat, pup, bun, pengu");
-    println!("                            Mythical:  dragon, wyrm, fox, phoenix, unicorn, slime");
-    println!("  --theme <THEME>         Shell colorway: pink, matcha, blue, lavender, gold");
-    println!("  --name <NAME>           Name your companion");
-    println!("  --adopt                 Adopt a new companion into the existing Sanctuary");
-    println!("  --switch <INDEX|NAME>   Switch active companion by 1-based number or name");
-    println!("  --status                Print the active companion (hearts, weight, rank, pixel art)");
-    println!("  --roster                Print every companion in the Sanctuary");
-    println!("  --warm                  Warm the egg (+20% incubation, 3m cooldown)");
-    println!("  --feed                  Feed a Meal (+1 Hungry Heart, +1g weight)");
-    println!("  --snack                 Feed a Sweet Snack (+1 Happy Heart, +2g weight; 3 = Toothache!)");
-    println!("  --light                 Toggle the room light ON / OFF");
-    println!("  --scold                 Discipline (Scold) during a mischievous Attention Call");
-    println!("  --play                  Play Left/Right game (-2g weight, +Happy)");
-    println!("  --pet                   Praise / give headpats");
-    println!("  --train                 Run a training session (-2g weight, +Discipline, 4m cooldown)");
-    println!("  --sleep                 Toggle sleep");
-    println!("  --clean                 Flush mess, brush teeth & bubble bath");
-    println!("  --heal                  Give Medicine (cures sickness & toothache)");
-    println!("  --reset                 Delete existing saves and start over");
-    println!();
-    println!("IN-GAME CONTROLS:");
-    println!("  Button A (←/→) select LCD Bezel Icon • Button B (Enter) confirm • Button C (Esc) cancel");
-    println!("  [F] Meal  [M] Pantry  [K] Light  [P] Play  [D] Scold  [T] Praise  [E] Train  [S] Sleep");
-    println!("  [C] Bath  [H] Meds  [I] 4-Page Status Meter  [G] Arcade  [L] Sanctuary  [N] Adopt  [?] Keys");
 }
 
-fn parse_species(value: &str) -> Option<PetSpecies> {
-    match value.trim().to_lowercase().as_str() {
-        "cat" | "mochi" | "neko" | "mochicat" => Some(PetSpecies::MochiCat),
-        "pup" | "boba" | "dog" | "bobapup" => Some(PetSpecies::BobaPup),
-        "bun" | "cloud" | "bunny" | "rabbit" | "cloudbun" => Some(PetSpecies::CloudBun),
-        "pengu" | "star" | "penguin" | "starpengu" => Some(PetSpecies::StarPengu),
-        "dragon" | "ignis" | "drake" | "ignisdragon" => Some(PetSpecies::IgnisDragon),
-        "wyrm" | "azure" | "azurewyrm" => Some(PetSpecies::AzureWyrm),
-        "fox" | "kitsune" | "ember" | "emberfox" => Some(PetSpecies::EmberFox),
-        "phoenix" | "sol" | "phoenixchick" => Some(PetSpecies::PhoenixChick),
-        "unicorn" | "astra" | "uni" | "crystaluni" => Some(PetSpecies::CrystalUni),
-        "slime" | "king" | "jelly" | "slimeking" => Some(PetSpecies::SlimeKing),
-        _ => None,
+fn parse_species(val: &str) -> PetSpecies {
+    match val.to_lowercase().as_str() {
+        "pup" | "dog" | "boba" => PetSpecies::BobaPup,
+        "bun" | "bunny" | "cloud" => PetSpecies::CloudBun,
+        "pengu" | "penguin" | "star" => PetSpecies::StarPengu,
+        "dragon" | "ignis" | "drake" => PetSpecies::IgnisDragon,
+        "wyrm" | "azure" | "seadragon" => PetSpecies::AzureWyrm,
+        "fox" | "kitsune" | "ember" => PetSpecies::EmberFox,
+        "phoenix" | "sol" | "firebird" => PetSpecies::PhoenixChick,
+        "uni" | "unicorn" | "crystal" => PetSpecies::CrystalUni,
+        "slime" | "jelly" | "king" => PetSpecies::SlimeKing,
+        _ => PetSpecies::MochiCat,
     }
 }
 
-fn parse_theme(value: &str) -> Option<ShellTheme> {
-    match value.trim().to_lowercase().as_str() {
-        "pink" | "strawberry" | "strawberrypink" => Some(ShellTheme::StrawberryPink),
-        "matcha" | "green" | "matchagreen" => Some(ShellTheme::MatchaGreen),
-        "blue" | "sky" | "skyblue" => Some(ShellTheme::SkyBlue),
-        "lavender" | "purple" | "lavenderdream" => Some(ShellTheme::LavenderDream),
-        "gold" | "sunset" | "sunsetgold" => Some(ShellTheme::SunsetGold),
-        _ => None,
+fn parse_theme(val: &str) -> ShellTheme {
+    match val.to_lowercase().as_str() {
+        "matcha" | "green" => ShellTheme::MatchaGreen,
+        "blue" | "sky" => ShellTheme::SkyBlue,
+        "lavender" | "purple" => ShellTheme::LavenderDream,
+        "gold" | "sunset" | "yellow" => ShellTheme::SunsetGold,
+        _ => ShellTheme::StrawberryPink,
     }
 }
 
-struct CliArgs {
-    reset: bool,
-    adopt: bool,
-    show_status: bool,
-    show_roster: bool,
-    switch_target: Option<String>,
-    species: Option<PetSpecies>,
-    theme: Option<ShellTheme>,
-    name: Option<String>,
-    actions: Vec<PetAction>,
-    paths: StoragePaths,
-}
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args: Vec<String> = env::args().skip(1).collect();
 
-fn parse_args(raw: &[String]) -> Result<CliArgs, String> {
-    let mut args = CliArgs {
-        reset: false,
-        adopt: false,
-        show_status: false,
-        show_roster: false,
-        switch_target: None,
-        species: None,
-        theme: None,
-        name: None,
-        actions: Vec::new(),
-        paths: StoragePaths::default_paths(),
-    };
+    let mut custom_name: Option<String> = None;
+    let mut custom_species: Option<PetSpecies> = None;
+    let mut custom_theme: Option<ShellTheme> = None;
+    let mut adopt_flag = false;
+    let mut switch_query: Option<String> = None;
+    let mut json_path: Option<PathBuf> = None;
+    let mut db_path: Option<PathBuf> = None;
+    let mut cli_actions: Vec<PetAction> = Vec::new();
+    let mut status_only = false;
+    let mut roster_only = false;
+    let mut reset = false;
 
-    let mut idx = 0;
-    while idx < raw.len() {
-        match raw[idx].as_str() {
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
             "-h" | "--help" => {
                 print_help();
-                std::process::exit(0);
+                return Ok(());
             }
             "-V" | "--version" => {
-                print_version();
-                std::process::exit(0);
-            }
-            "--reset" => args.reset = true,
-            "--adopt" => args.adopt = true,
-            "--status" => args.show_status = true,
-            "--roster" => args.show_roster = true,
-            "--switch" => {
-                let value = raw.get(idx + 1).ok_or("--switch needs an index or name")?;
-                args.switch_target = Some(value.clone());
-                idx += 1;
-            }
-            "--species" => {
-                let value = raw.get(idx + 1).ok_or("--species needs a value")?;
-                args.species =
-                    Some(parse_species(value).ok_or_else(|| format!("unknown species: {value}"))?);
-                idx += 1;
-            }
-            "--theme" => {
-                let value = raw.get(idx + 1).ok_or("--theme needs a value")?;
-                args.theme =
-                    Some(parse_theme(value).ok_or_else(|| format!("unknown theme: {value}"))?);
-                idx += 1;
+                println!("mochigotchi {}", env!("CARGO_PKG_VERSION"));
+                return Ok(());
             }
             "--name" => {
-                let value = raw.get(idx + 1).ok_or("--name needs a value")?;
-                if !value.trim().is_empty() {
-                    args.name = Some(value.trim().to_string());
+                i += 1;
+                if i < args.len() {
+                    custom_name = Some(args[i].clone());
                 }
-                idx += 1;
+            }
+            "--species" => {
+                i += 1;
+                if i < args.len() {
+                    custom_species = Some(parse_species(&args[i]));
+                }
+            }
+            "--theme" => {
+                i += 1;
+                if i < args.len() {
+                    custom_theme = Some(parse_theme(&args[i]));
+                }
+            }
+            "--adopt" => adopt_flag = true,
+            "--switch" => {
+                i += 1;
+                if i < args.len() {
+                    switch_query = Some(args[i].clone());
+                }
             }
             "--json-path" => {
-                let value = raw.get(idx + 1).ok_or("--json-path needs a value")?;
-                args.paths.json_path = value.into();
-                idx += 1;
+                i += 1;
+                if i < args.len() {
+                    json_path = Some(PathBuf::from(&args[i]));
+                }
             }
             "--db-path" => {
-                let value = raw.get(idx + 1).ok_or("--db-path needs a value")?;
-                args.paths.sqlite_path = value.into();
-                idx += 1;
+                i += 1;
+                if i < args.len() {
+                    db_path = Some(PathBuf::from(&args[i]));
+                }
             }
-            "--warm" => args.actions.push(PetAction::WarmEgg),
-            "--feed" => args.actions.push(PetAction::Feed),
-            "--snack" => args.actions.push(PetAction::FeedSnack),
-            "--light" => args.actions.push(PetAction::ToggleLight),
-            "--scold" => args.actions.push(PetAction::DisciplineScold),
-            "--play" => args.actions.push(PetAction::Play),
-            "--pet" => args.actions.push(PetAction::PetLove),
-            "--train" => args.actions.push(PetAction::Train),
-            "--sleep" => args.actions.push(PetAction::ToggleSleep),
-            "--clean" => args.actions.push(PetAction::Clean),
-            "--heal" => args.actions.push(PetAction::Heal),
-            other => return Err(format!("unknown option: {other}")),
+            "--status" => status_only = true,
+            "--roster" => roster_only = true,
+            "--warm" => cli_actions.push(PetAction::WarmEgg),
+            "--feed" => cli_actions.push(PetAction::Feed),
+            "--snack" => cli_actions.push(PetAction::FeedSnack),
+            "--play" => cli_actions.push(PetAction::Play),
+            "--pet" => cli_actions.push(PetAction::PetLove),
+            "--talk" => cli_actions.push(PetAction::Talk),
+            "--train" => cli_actions.push(PetAction::Train),
+            "--sleep" => cli_actions.push(PetAction::ToggleSleep),
+            "--light" => cli_actions.push(PetAction::ToggleLight),
+            "--scold" => cli_actions.push(PetAction::DisciplineScold),
+            "--clean" => cli_actions.push(PetAction::Clean),
+            "--heal" => cli_actions.push(PetAction::Heal),
+            "--reset" => reset = true,
+            _ => {}
         }
-        idx += 1;
+        i += 1;
     }
 
-    Ok(args)
-}
+    let defaults = StoragePaths::default_paths();
+    let paths = StoragePaths::new(
+        json_path.unwrap_or(defaults.json_path),
+        db_path.unwrap_or(defaults.sqlite_path),
+    );
 
-fn main() -> Result<(), Box<dyn Error>> {
-    let raw: Vec<String> = env::args().skip(1).collect();
-    let cli = match parse_args(&raw) {
-        Ok(cli) => cli,
-        Err(err) => {
-            eprintln!("mochigotchi: {err}");
-            print_help();
-            std::process::exit(2);
-        }
-    };
-
-    if cli.reset {
-        for path in [&cli.paths.json_path, &cli.paths.sqlite_path] {
-            if Path::new(path).exists() {
-                fs::remove_file(path)?;
-            }
-        }
+    if reset {
+        let _ = fs::remove_file(&paths.json_path);
+        let _ = fs::remove_file(&paths.sqlite_path);
     }
 
-    let had_save = has_existing_save(&cli.paths);
-    let customised = cli.species.is_some() || cli.theme.is_some() || cli.name.is_some();
-
-    let mut sanctuary = if had_save {
-        load_sanctuary(&cli.paths).unwrap_or_else(|_| Sanctuary::new_with_pet(Pet::default()))
-    } else {
-        let species = cli.species.unwrap_or_default();
-        let theme = cli.theme.unwrap_or_default();
-        let name = cli
-            .name
+    let first_time = !save_exists(&paths);
+    let mut sanctuary = if first_time {
+        let species = custom_species.unwrap_or(PetSpecies::MochiCat);
+        let theme = custom_theme.unwrap_or(ShellTheme::StrawberryPink);
+        let name = custom_name
             .clone()
             .unwrap_or_else(|| species.default_name().to_string());
         Sanctuary::new_with_pet(Pet::new_custom(&name, species, theme))
+    } else {
+        load_sanctuary(&paths)?
     };
 
-    let (elapsed, offline_report) = sanctuary.apply_offline_decay_all_with_report(Utc::now());
-    let mut dirty = elapsed > 0;
+    let (elapsed_offline, offline_report) = sanctuary.apply_offline_decay_all_with_report(Utc::now());
+    if elapsed_offline >= 60 && (!cli_actions.is_empty() || status_only || roster_only) {
+        sanctuary.active_pet_mut().log_action(format!(
+            "⏱ Offline time applied: {} minutes",
+            elapsed_offline / 60
+        ));
+    }
 
-    if had_save && cli.adopt {
-        let species = cli.species.unwrap_or_default();
-        let theme = cli.theme.unwrap_or_else(|| sanctuary.active_pet().theme);
-        let name = cli
-            .name
+    if adopt_flag && !first_time {
+        let species = custom_species.unwrap_or(PetSpecies::MochiCat);
+        let theme = custom_theme.unwrap_or(ShellTheme::StrawberryPink);
+        let name = custom_name
             .clone()
             .unwrap_or_else(|| species.default_name().to_string());
         let new_pet = Pet::new_custom(&name, species, theme);
-        let idx = sanctuary.add_pet(new_pet);
+        sanctuary.add_pet(new_pet);
         println!(
-            "🥚 Adopted {} ({}) into Sanctuary slot #{}!",
-            sanctuary.pets[idx].name,
-            sanctuary.pets[idx].species.display_name(),
-            idx + 1
+            "🥚 Adopted {} ({}) into your Sanctuary! (Total companions: {})",
+            sanctuary.active_pet().name,
+            species.display_name(),
+            sanctuary.pets.len()
         );
-        dirty = true;
-    } else if had_save {
-        if let Some(species) = cli.species {
-            sanctuary.active_pet_mut().species = species;
-            dirty = true;
+    } else {
+        if let Some(ref name) = custom_name {
+            sanctuary.active_pet_mut().rename(name);
         }
-        if let Some(theme) = cli.theme {
-            sanctuary.active_pet_mut().theme = theme;
-            dirty = true;
+        if let Some(sp) = custom_species {
+            sanctuary.active_pet_mut().species = sp;
         }
-        if let Some(name) = cli.name.clone() {
-            sanctuary.active_pet_mut().rename(&name);
-            dirty = true;
-        }
-    } else if customised || cli.adopt {
-        dirty = true;
-    }
-
-    if let Some(ref target) = cli.switch_target {
-        match sanctuary.switch_by_query(target) {
-            Some(idx) => {
-                println!(
-                    "★ Switched active companion to #{}: {} ({})",
-                    idx + 1,
-                    sanctuary.pets[idx].name,
-                    sanctuary.pets[idx].species.display_name()
-                );
-                dirty = true;
-            }
-            None => {
-                eprintln!("mochigotchi: companion '{target}' not found in Sanctuary");
-                std::process::exit(2);
-            }
+        if let Some(th) = custom_theme {
+            sanctuary.active_pet_mut().theme = th;
         }
     }
 
-    if !cli.actions.is_empty() {
-        for action in &cli.actions {
-            let msg = sanctuary.active_pet_mut().apply_action(*action);
-            println!("{msg}");
-        }
-        dirty = true;
-    }
-
-    if dirty {
-        save_sanctuary(&sanctuary, &cli.paths)?;
-    }
-
-    if cli.show_roster {
-        println!(
-            "🏰 Sanctuary — {} companions ({} hatched) · Sanctuary Lv.{}",
-            sanctuary.pets.len(),
-            sanctuary.hatched_count(),
-            sanctuary.sanctuary_level
-        );
-        for (idx, pet) in sanctuary.pets.iter().enumerate() {
-            let marker = if idx == sanctuary.active_index {
-                "★"
-            } else {
-                " "
-            };
+    if let Some(ref query) = switch_query {
+        if let Some(idx) = sanctuary.switch_by_query(query) {
             println!(
-                "{marker} {}. {} — {} · {} · Lv.{} · {}g · {} · hunger {}% · incubation {}%",
+                "🔄 Switched active companion to #{}: {} ({})",
                 idx + 1,
-                pet.name,
-                pet.species.display_name(),
-                pet.stage.badge(),
-                pet.level,
-                pet.weight_grams,
-                pet.care_rank().badge(),
-                pet.hunger,
-                pet.incubation
+                sanctuary.active_pet().name,
+                sanctuary.active_pet().species.display_name()
             );
+        } else {
+            eprintln!("⚠️ Could not find a companion matching '{query}'.");
         }
-        return Ok(());
     }
 
-    if cli.show_status {
-        let pet = sanctuary.active_pet().clone();
-        println!("{}", pet.status_summary());
-        println!("{}", pet.next_evolution_requirements());
-        println!("{}", speech_bubble(&pet, 0));
-        println!();
-        for line in render_animated_sprite(&pet, 0) {
+    if !cli_actions.is_empty() || status_only || roster_only || adopt_flag || switch_query.is_some()
+    {
+        for action in cli_actions {
+            let feedback = sanctuary.active_pet_mut().perform_action(action);
+            println!("{feedback}");
+        }
+        save_sanctuary(&sanctuary, &paths)?;
+
+        if roster_only {
+            println!(
+                "🏰 Mochigotchi Sanctuary (Lv.{}) — {} companions:",
+                sanctuary.sanctuary_level,
+                sanctuary.pets.len()
+            );
+            for (idx, p) in sanctuary.pets.iter().enumerate() {
+                let marker = if idx == sanctuary.active_index {
+                    "★"
+                } else {
+                    "•"
+                };
+                println!("  {} #{}: {}", marker, idx + 1, p.status_summary());
+            }
+            return Ok(());
+        }
+
+        let active = sanctuary.active_pet();
+        println!("{}", active.status_summary());
+        println!("{}", thought_bubble(active, 0));
+        println!("{}", speech_bubble(active, 0));
+        for line in render_animated_sprite(active, 0) {
             println!("  {line}");
         }
         return Ok(());
     }
 
-    let start_onboarding = !had_save && !customised && !cli.adopt && cli.actions.is_empty();
-    mochigotchi::tui::run_tui_with_report(sanctuary, cli.paths, start_onboarding, offline_report)
+    let start_onboarding =
+        first_time && custom_name.is_none() && custom_species.is_none() && custom_theme.is_none();
+    save_sanctuary(&sanctuary, &paths)?;
+    run_tui_with_report(sanctuary, paths, start_onboarding, offline_report)?;
+    Ok(())
 }

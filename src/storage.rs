@@ -57,6 +57,18 @@ pub fn has_existing_save(paths: &StoragePaths) -> bool {
     paths.json_path.exists() || paths.sqlite_path.exists()
 }
 
+pub fn save_exists(paths: &StoragePaths) -> bool {
+    has_existing_save(paths)
+}
+
+pub fn save_pet(pet: &Pet, paths: &StoragePaths) -> Result<(), Box<dyn Error>> {
+    save_dual(pet, paths)
+}
+
+pub fn load_pet(paths: &StoragePaths) -> Result<Pet, Box<dyn Error>> {
+    load_dual(paths)
+}
+
 fn ensure_parent(path: &Path) -> Result<(), Box<dyn Error>> {
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() {

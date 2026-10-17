@@ -1,8 +1,8 @@
-//! Core pet model for **Mochigotchi v1.0.0** — reverse-engineered authentic
-//! Bandai Tamagotchi mechanics (8 LCD bezel icons, 4 Hungry/Happy Hearts,
-//! Meal vs. Sweet Snack weight & toothache system, Room Light switch,
-//! Attention Calls, Discipline scold/praise, Care Mistakes, Care Ranks, and
-//! the multi-pet [`Sanctuary`]).
+//! Core pet model for **Mochigotchi v1.1.0** — reverse-engineered authentic
+//! Bandai Tamagotchi mechanics (8 LCD bezel icons including `💬Talk`, 4 Hungry/
+//! Happy Hearts, Meal vs. Sweet Snack weight & toothache system, Room Light
+//! switch, Attention Calls, Discipline scold/praise, Care Mistakes, Care Ranks,
+//! Interactive Pet Dialogue & Inner Thoughts, and the multi-pet [`Sanctuary`]).
 //!
 //! All emoji icons use single-codepoint East_Asian_Width=Wide glyphs (zero ZWJ
 //! or U+FE0F variation selectors) so terminal column widths match 100% across
@@ -19,10 +19,10 @@ pub const FEED_COOLDOWN_SECS: i64 = 120;
 pub const PLAY_COOLDOWN_SECS: i64 = 150;
 /// Seconds you must wait between two training sessions (4 minutes).
 pub const TRAIN_COOLDOWN_SECS: i64 = 240;
-/// Seconds you must wait between two headpat sessions (45 seconds).
+/// Seconds you must wait between two headpat/chat sessions (45 seconds).
 pub const PET_COOLDOWN_SECS: i64 = 45;
 
-/// The 8 classic LCD bezel icons of an authentic Bandai Tamagotchi.
+/// The interactive LCD bezel icons of an authentic Bandai Tamagotchi + `💬Talk`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub enum LcdIcon {
     #[default]
@@ -33,6 +33,7 @@ pub enum LcdIcon {
     Bath,
     Meter,
     Discipline,
+    Talk,
     Attention,
 }
 
@@ -46,6 +47,7 @@ impl LcdIcon {
             Self::Bath,
             Self::Meter,
             Self::Discipline,
+            Self::Talk,
         ]
     }
 
@@ -54,7 +56,7 @@ impl LcdIcon {
     }
 
     pub fn bottom_row() -> &'static [LcdIcon] {
-        &[Self::Bath, Self::Meter, Self::Discipline, Self::Attention]
+        &[Self::Bath, Self::Meter, Self::Discipline, Self::Talk]
     }
 
     pub fn label(&self) -> &'static str {
@@ -66,9 +68,19 @@ impl LcdIcon {
             Self::Bath => "🚽Bath",
             Self::Meter => "📏Meter",
             Self::Discipline => "📢Scold",
+            Self::Talk => "💬Talk",
             Self::Attention => "🔔Call",
         }
     }
+}
+
+/// Interactive conversation prompt when you open the **Heart-to-Heart Talk** screen (`[Y]`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DialoguePrompt {
+    pub inner_thought: String,
+    pub pet_line: String,
+    pub option_1: String,
+    pub option_2: String,
 }
 
 /// Authentic Tamagotchi Attention Call state (`🔔`).
@@ -511,7 +523,6 @@ impl FoodChoice {
         }
     }
 
-    /// Concise 1-line summary (`<= 52` chars) so it never clips inside a 68-col LCD.
     pub fn summary(&self) -> &'static str {
         match self {
             Self::FavoriteSnack => "Free • +1 Hungry ♥, +1g, resets sweet streak",
@@ -540,6 +551,7 @@ pub enum PetAction {
     FeedSnack,
     Play,
     PetLove,
+    Talk,
     Train,
     ToggleSleep,
     ToggleLight,
@@ -556,6 +568,7 @@ impl PetAction {
             Self::FeedSnack => "Feed Snack",
             Self::Play => "Play Game",
             Self::PetLove => "Praise / Pat",
+            Self::Talk => "Talk / Chat",
             Self::Train => "Train",
             Self::ToggleSleep => "Sleep",
             Self::ToggleLight => "Light Switch",
@@ -597,8 +610,7 @@ pub fn format_duration_human(secs: u64) -> String {
     }
 }
 
-/// Render 0..=4 classic Tamagotchi hearts (`♥♥♥· 3/4`) using consistent
-/// single-cell glyphs (`♥` and `·`).
+/// Render 0..=4 classic Tamagotchi hearts (`♥♥♥· 3/4`).
 pub fn format_hearts(filled: u8) -> String {
     let clamped = filled.min(4);
     let mut out = String::with_capacity(8);
@@ -742,7 +754,6 @@ impl Pet {
         self.weight_grams >= self.stage.base_weight_grams() + 18
     }
 
-    /// Compute the companion's Tamagotchi Care Rank from `care_mistakes` and `discipline`.
     pub fn care_rank(&self) -> CareRank {
         if self.care_mistakes == 0 && self.discipline >= 75 {
             CareRank::PerfectKeeper
@@ -752,6 +763,153 @@ impl Pet {
             CareRank::CozyFriend
         } else {
             CareRank::MischievousRascal
+        }
+    }
+
+    /// Generate a rich, species-aware interactive conversation prompt (`[Y]` / `💬Talk`)
+    /// so you can see what your companion is thinking and respond to them!
+    pub fn dialogue_prompt(&self, tick: usize) -> DialoguePrompt {
+        if self.stage == EvolutionStage::Egg {
+            return DialoguePrompt {
+                inner_thought:
+                    "💭 (Inside the shell, a tiny silhouette curls toward the sound of your voice.)"
+                        .to_string(),
+                pet_line: format!(
+                    "💬 \"*tap... tap...* {}'s egg vibrates softly in response to you!\"",
+                    self.name
+                ),
+                option_1: "1. Hum a cozy lullaby to the egg (+Bond)".to_string(),
+                option_2: "2. Promise to share delicious snacks once hatched (+Warmth)".to_string(),
+            };
+        }
+
+        if self.is_sleeping {
+            return DialoguePrompt {
+                inner_thought: format!(
+                    "💭 ({} is sleep-talking about chasing floating {} in the clouds...)",
+                    self.name,
+                    self.species.favorite_snack()
+                ),
+                pet_line: format!(
+                    "💬 \"*mumble* ...save the biggest {} for my keeper... Zzz...\"",
+                    self.species.favorite_snack()
+                ),
+                option_1: "1. Whisper 'Sweet dreams!' and tuck the blanket (+Bond)".to_string(),
+                option_2: "2. Leave a midnight treat by their pillow (+Happy)".to_string(),
+            };
+        }
+
+        let topic = (tick / 5 + self.xp as usize) % 3;
+        match (self.species, topic) {
+            (PetSpecies::IgnisDragon, 0) => DialoguePrompt {
+                inner_thought:
+                    "💭 (Ignis is puffing tiny golden smoke rings and eyeing the sky eagerly.)"
+                        .to_string(),
+                pet_line: format!(
+                    "💬 \"Hey keeper! My dragon wings feel stronger today! What should {} practice next?\"",
+                    self.name
+                ),
+                option_1: "1. Soar above the clouds together (+12 XP, +4 Bond)".to_string(),
+                option_2: "2. Roast sweet marshmallows with dragonfire (+12 Happy, +5 coins)"
+                    .to_string(),
+            },
+            (PetSpecies::AzureWyrm, 0) => DialoguePrompt {
+                inner_thought:
+                    "💭 (The tidal pearl in Azure Wyrm's claws shimmers with a calm ocean glow.)"
+                        .to_string(),
+                pet_line: format!(
+                    "💬 \"Keeper, listen closely... can you hear the ancient ocean tide inside {}'s pearl?\"",
+                    self.name
+                ),
+                option_1: "1. Meditate by the starlit tide together (+6 Bond, +10 XP)".to_string(),
+                option_2: "2. Polish the moon pearl until it sparkles (+12 Happy, +5 coins)"
+                    .to_string(),
+            },
+            (PetSpecies::EmberFox, 0) => DialoguePrompt {
+                inner_thought:
+                    "💭 (Kitsune's ears twitch as cyan foxfire lanterns dance in a circle.)"
+                        .to_string(),
+                pet_line: format!(
+                    "💬 \"Hehe~ {} learned a new shrine illusion! Want to see a foxfire firework show?\"",
+                    self.name
+                ),
+                option_1: "1. Watch the cyan foxfire fireworks (+14 Happy, +4 Bond)".to_string(),
+                option_2: "2. Practice shrine riddles together (+12 XP, +5% Discipline)"
+                    .to_string(),
+            },
+            (_, 1) => DialoguePrompt {
+                inner_thought: format!(
+                    "💭 ({} is secretly wondering what your favorite part of the day was...)",
+                    self.name
+                ),
+                pet_line: "💬 \"Whenever you open the terminal, my whole habitat lights up! How are you feeling today?\""
+                    .to_string(),
+                option_1: "1. 'Ready for an adventure together!' (+12 XP, +4 Bond)".to_string(),
+                option_2: "2. 'Just relaxing with my favorite companion~' (+14 Happy, +5 Bond)"
+                    .to_string(),
+            },
+            _ => DialoguePrompt {
+                inner_thought: format!(
+                    "💭 ({} is daydreaming about {} and shiny sanctuary treasures!)",
+                    self.name,
+                    self.species.favorite_snack()
+                ),
+                pet_line: "💬 \"Look what I found while exploring the garden! Should we celebrate with a game or a story?\""
+                    .to_string(),
+                option_1: "1. Share a heroic legend of the Sanctuary (+12 XP, +5 coins)".to_string(),
+                option_2: "2. Do a happy victory dance together (+12 Happy, +5 Bond)".to_string(),
+            },
+        }
+    }
+
+    /// Respond to your companion's dialogue prompt (`choice == 1` or `2`).
+    pub fn answer_dialogue(&mut self, choice: u8) -> String {
+        let now = Utc::now();
+        self.last_updated = now;
+
+        if self.stage == EvolutionStage::Egg {
+            self.bond = (self.bond + 3).min(100);
+            self.incubation = (self.incubation + 2).min(99);
+            let msg = format!(
+                "💬 You spoke warmly to {}'s egg! It wiggled happily (+2% warmth, +3 Bond).",
+                self.name
+            );
+            self.log_action(msg.clone());
+            return msg;
+        }
+
+        if choice == 1 {
+            self.bond = (self.bond + 5).min(100);
+            self.happiness = (self.happiness + 8).min(100);
+            self.discipline = (self.discipline + 4).min(100);
+            self.add_xp(12);
+            self.mood = if self.is_sleeping {
+                PetMood::Sleeping
+            } else {
+                PetMood::Happy
+            };
+            let msg = format!(
+                "💬 Had a deep heart-to-heart chat with {}! (+12 XP, +5 Bond, +8 Happy)",
+                self.name
+            );
+            self.log_action(msg.clone());
+            msg
+        } else {
+            self.bond = (self.bond + 5).min(100);
+            self.happiness = (self.happiness + 14).min(100);
+            self.coins = self.coins.saturating_add(5);
+            self.add_xp(8);
+            self.mood = if self.is_sleeping {
+                PetMood::Sleeping
+            } else {
+                PetMood::Happy
+            };
+            let msg = format!(
+                "💬 Shared a joyful moment with {}! They gifted you +5 coins! (+14 Happy, +5 Bond)",
+                self.name
+            );
+            self.log_action(msg.clone());
+            msg
         }
     }
 
@@ -966,7 +1124,7 @@ impl Pet {
                 return "🤲 Press [W] or [Space] to warm the egg (+20%).".to_string();
             } else {
                 return format!(
-                    "🔥 Egg warming ({}%). Next [W] in {} (passive active).",
+                    "🔥 Egg warming ({}%). Next [W] in {} (or [Y] Talk).",
                     self.incubation,
                     format_duration_human(rem)
                 );
@@ -1008,7 +1166,7 @@ impl Pet {
         }
         if self.is_overweight() {
             return format!(
-                "🏋 {} is chubby ({}g)! Play [P] or Train [E]!",
+                "🏋 {} is chubby ({}g)! Play [P] or Arcade [G]!",
                 self.name, self.weight_grams
             );
         }
@@ -1016,9 +1174,9 @@ impl Pet {
             return "🥱 Getting sleepy! Press [S] to sleep, then [K] Light OFF.".to_string();
         }
         if self.happy_hearts() <= 1 {
-            return "🎾 Happy Hearts low! Press [P] Play or [M] Snack.".to_string();
+            return "🎾 Happy Hearts low! Press [P] Play or [Y] Talk.".to_string();
         }
-        "🌟 All meters healthy! Use ←/→ + Enter on Bezel, [I] Meter, or [?] Keys.".to_string()
+        "🌟 Cozy! Press [Y] to Talk, [G] for 3-in-1 Arcade, [I] Meter, or [?] Keys.".to_string()
     }
 
     pub fn perform_action(&mut self, action: PetAction) -> String {
@@ -1028,6 +1186,7 @@ impl Pet {
             PetAction::FeedSnack => self.feed_choice(FoodChoice::WarmMilkTea),
             PetAction::Play => self.play(),
             PetAction::PetLove => self.pet_love(),
+            PetAction::Talk => self.answer_dialogue(1),
             PetAction::Train => self.train(),
             PetAction::ToggleSleep => self.toggle_sleep(),
             PetAction::ToggleLight => self.toggle_light(),
@@ -1562,7 +1721,7 @@ impl Pet {
         self.refresh_mood();
 
         let msg = format!(
-            "🎮 Star Catcher scored {}! Earned +{} coins, +{} XP & burned -1g weight!",
+            "🎮 Arcade scored {}! Earned +{} coins, +{} XP & burned -1g weight!",
             score, coins_earned, xp_earned
         );
         self.log_action(msg.clone());
@@ -1642,7 +1801,6 @@ impl Pet {
         self.refresh_mood();
     }
 
-    /// Gentle standby heartbeat for inactive companions resting in the Sanctuary.
     pub fn tick_standby(&mut self) {
         self.age_seconds = self.age_seconds.saturating_add(1);
         self.last_updated = Utc::now();
@@ -1932,7 +2090,6 @@ impl Sanctuary {
         }
     }
 
-    /// Switch active companion by 1-based index (`"1"`, `"2"`) or case-insensitive name.
     pub fn switch_by_query(&mut self, query: &str) -> Option<usize> {
         let trimmed = query.trim();
         if let Ok(one_based) = trimmed.parse::<usize>() {
@@ -1999,8 +2156,6 @@ impl Sanctuary {
             if idx == active_idx {
                 active_report = report;
             } else {
-                // Inactive companions in the Sanctuary are tended by Sanctuary keepers
-                // so they don't accumulate unfair care mistakes while on standby.
                 pet.care_mistakes = mistakes_before;
                 pet.hunger = pet.hunger.max(30);
                 pet.cleanliness = pet.cleanliness.max(40);

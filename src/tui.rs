@@ -1,15 +1,14 @@
-//! Minimalist, Retro, Step-by-Step Handheld LCD Interface for **Mochigotchi v1.0.0**.
-//!
-//! Designed around a single centered **74×25 Retro Handheld V-Pet Frame**
-//! (`BorderType::Double` outer shell + `BorderType::Rounded` inner LCD):
-//! - **Step-by-step Onboarding**: Step 1 (Select Companion with 24×16 Half-Block
-//!   Pixel Art) -> press Enter -> switches screen to Step 2 (Select Shell Color)
-//!   -> press Enter -> switches screen to Step 3 (Name Companion).
-//! - **Minimalist LCD Habitat**: Displays only the 7-icon Tamagotchi Bezel, the
-//!   centered 24×16 TrueColor Pixel Art Sprite, and a 2-line retro status ticker.
-//! - **Step-by-step Subscreens**: Opening the 4-Page Status Meter (`[I]` /
-//!   `📏Meter`), Pantry (`[M]` / `🍙Food`), Sanctuary Roster (`[L]`), Arcade
-//!   (`[G]`), or Keys Guide (`[?]`) cleanly replaces the inner LCD screen.
+//! Minimalist, Retro, Step-by-Step Handheld LCD Interface for **Mochigotchi v1.1.0**:
+//! - **32×20 TrueColor Half-Block Pixel Art** inside a centered Retro Handheld frame.
+//! - **Live Evolution Morph Showcase** in Step 1 of the Adoption Wizard:
+//!   automatically animates `🥚 Egg ──► 🍼 Baby ──► 🌱 Teen ──► 🌸 Adult ──► 🌟 Elder`
+//!   so you can watch every form a companion will take before adopting!
+//! - **Inner Thought Bubble (`💭`) & Interactive Pet Dialogue Screen (`[Y]` / `💬Talk`)**:
+//!   see what your companion is thinking and answer their 2-choice questions!
+//! - **3-in-1 Retro Arcade Center (`[G]`)**: switch between *Snack Catcher*,
+//!   *Bandai Left/Right Mind-Reader*, and *Starlight Hurdle Dash* with `[1]`, `[2]`, `[3]`.
+//! - **8-Bit Chiptune Sound Engine (`[U]` toggle)**: plays synthesized square-wave
+//!   Tamagotchi melodies for every action and displays a live `🔊` sound cue badge.
 
 use std::io;
 use std::time::{Duration, Instant};
@@ -29,14 +28,15 @@ use ratatui::{
     Frame, Terminal,
 };
 
-use crate::minigame::MiniGame;
+use crate::minigame::{GameMode, MiniGame};
 use crate::pet::{
     format_duration_human, format_hearts, AttentionCall, EvolutionStage, FoodChoice, LcdIcon,
     OfflineReport, Pet, PetSpecies, Sanctuary, ShellTheme,
 };
+use crate::sound::{SoundEffect, SoundEngine};
 use crate::sprites::{
     mood_color, render_colored_preview, render_colored_sprite, sky_scene, speech_bubble,
-    species_palette, theme_color,
+    species_palette, stage_color, theme_color, thought_bubble,
 };
 use crate::storage::{save_sanctuary, StoragePaths};
 
@@ -46,11 +46,11 @@ const DECAY_EVERY_TICKS: usize = 24;
 
 /// Minimum terminal dimensions required for the centered retro handheld LCD.
 pub const MIN_TERM_WIDTH: u16 = 68;
-pub const MIN_TERM_HEIGHT: u16 = 22;
+pub const MIN_TERM_HEIGHT: u16 = 24;
 
 /// Preferred retro handheld frame dimensions (centered inside larger terminals).
-const HANDHELD_MAX_W: u16 = 74;
-const HANDHELD_MAX_H: u16 = 25;
+const HANDHELD_MAX_W: u16 = 76;
+const HANDHELD_MAX_H: u16 = 27;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LayoutTier {
@@ -90,15 +90,19 @@ pub struct App {
     pub pet: Pet,
     pub sanctuary: Sanctuary,
     pub paths: StoragePaths,
+    pub sound: SoundEngine,
     pub screen: AppScreen,
     pub onboarding_step: OnboardingStep,
     pub selected_species_idx: usize,
     pub selected_theme_idx: usize,
     pub preview_stage_idx: usize,
+    pub preview_auto_morph: bool,
     pub roster_selected_idx: usize,
     pub selected_icon_idx: usize,
     pub pantry_open: bool,
     pub pantry_selected_idx: usize,
+    pub talk_open: bool,
+    pub talk_selected_idx: u8,
     pub show_meter: bool,
     pub meter_page: usize,
     pub show_help: bool,
@@ -135,6 +139,7 @@ impl App {
             pet,
             sanctuary,
             paths,
+            sound: SoundEngine::default(),
             screen: if start_onboarding {
                 AppScreen::Onboarding
             } else {
@@ -143,11 +148,14 @@ impl App {
             onboarding_step: OnboardingStep::SelectSpecies,
             selected_species_idx,
             selected_theme_idx,
-            preview_stage_idx: 3,
+            preview_stage_idx: 0,
+            preview_auto_morph: true,
             roster_selected_idx: 0,
             selected_icon_idx: 0,
             pantry_open: false,
             pantry_selected_idx: 0,
+            talk_open: false,
+            talk_selected_idx: 1,
             show_meter: false,
             meter_page: 0,
             show_help: false,
@@ -177,10 +185,38 @@ impl App {
         }
     }
 
+    fn play_feedback_for_message(&mut self, msg: &str, evolved_or_hatched: bool) {
+        if evolved_or_hatched || msg.contains("CRACK!") || msg.contains("Evolution!") {
+            self.sound.play(SoundEffect::HatchFanfare);
+        } else if msg.contains("Toothache")
+            || msg.contains("⏳")
+            || msg.contains("unhatched")
+            || msg.contains("asleep")
+            || msg.contains("sleeping")
+            || msg.contains("completely full")
+            || msg.contains("maxed out")
+            || msg.contains("Not enough coins")
+            || msg.contains("Unfair scold")
+            || msg.contains("too tired")
+            || msg.contains("too hungry")
+        {
+            self.sound.play(SoundEffect::ErrorBuzz);
+        } else if msg.contains("Fed ") {
+            self.sound.play(SoundEffect::EatChime);
+        } else if msg.contains("warm ") {
+            self.sound.play(SoundEffect::WarmEgg);
+        } else if msg.contains("Played ") || msg.contains("training") {
+            self.sound.play(SoundEffect::PlayWin);
+        } else {
+            self.sound.play(SoundEffect::BeepConfirm);
+        }
+    }
+
     fn switch_to_roster_pet(&mut self) {
         self.sanctuary.sync_active(&self.pet);
         if self.sanctuary.switch_pet(self.roster_selected_idx) {
             self.pet = self.sanctuary.active_pet().clone();
+            self.sound.play(SoundEffect::BeepConfirm);
             self.save_now();
         }
     }
@@ -194,23 +230,27 @@ impl App {
         }
         self.pet = self.sanctuary.active_pet().clone();
         self.roster_selected_idx = self.sanctuary.active_index;
+        self.sound.play(SoundEffect::BeepMove);
         self.save_now();
     }
 
     fn start_adopting(&mut self) {
         self.adopting_new = true;
         self.pantry_open = false;
+        self.talk_open = false;
         self.show_meter = false;
         self.show_help = false;
         self.screen = AppScreen::Onboarding;
         self.onboarding_step = OnboardingStep::SelectSpecies;
         self.selected_species_idx = 0;
         self.selected_theme_idx = 0;
-        self.preview_stage_idx = 3;
+        self.preview_stage_idx = 0;
+        self.preview_auto_morph = true;
         self.onboarding_name_input = PetSpecies::all()[0].default_name().to_string();
+        self.sound.play(SoundEffect::BeepConfirm);
     }
 
-    fn launch_minigame(&mut self) {
+    fn launch_minigame(&mut self, mode: GameMode) {
         let refusal = if self.pet.stage == EvolutionStage::Egg {
             Some("🥚 The egg can't play yet — warm it first!".to_string())
         } else if self.pet.is_sleeping {
@@ -227,9 +267,13 @@ impl App {
         };
 
         match refusal {
-            Some(msg) => self.pet.log_action(msg),
+            Some(msg) => {
+                self.sound.play(SoundEffect::ErrorBuzz);
+                self.pet.log_action(msg);
+            }
             None => {
-                self.minigame = Some(MiniGame::new(38, 10, 120));
+                self.sound.play(SoundEffect::BeepConfirm);
+                self.minigame = Some(MiniGame::new_with_mode(mode, 38, 10, 120));
                 self.screen = AppScreen::MiniGame;
             }
         }
@@ -240,50 +284,74 @@ impl App {
         match icon {
             LcdIcon::Food => {
                 if self.pet.stage == EvolutionStage::Egg {
-                    let _ = self.pet.warm_egg();
+                    let stage_before = self.pet.stage;
+                    let msg = self.pet.warm_egg();
+                    let hatched = self.pet.stage != stage_before;
+                    self.play_feedback_for_message(&msg, hatched);
                     self.save_now();
                 } else {
+                    self.sound.play(SoundEffect::BeepConfirm);
                     self.pantry_open = true;
                 }
             }
             LcdIcon::Lights => {
-                let _ = self.pet.toggle_light();
+                let msg = self.pet.toggle_light();
+                self.play_feedback_for_message(&msg, false);
                 self.save_now();
             }
             LcdIcon::Play => {
-                let _ = self.pet.play();
-                self.save_now();
+                self.launch_minigame(GameMode::MindReader);
             }
             LcdIcon::Medicine => {
-                let _ = self.pet.heal();
+                let msg = self.pet.heal();
+                self.play_feedback_for_message(&msg, false);
                 self.save_now();
             }
             LcdIcon::Bath => {
-                let _ = self.pet.clean();
+                let msg = self.pet.clean();
+                self.play_feedback_for_message(&msg, false);
                 self.save_now();
             }
             LcdIcon::Meter => {
+                self.sound.play(SoundEffect::BeepConfirm);
                 self.show_meter = true;
                 self.meter_page = 0;
             }
             LcdIcon::Discipline => {
-                if self.pet.attention_call == AttentionCall::Crying {
-                    let _ = self.pet.pet_love();
+                let msg = if self.pet.attention_call == AttentionCall::Crying {
+                    self.pet.pet_love()
                 } else {
-                    let _ = self.pet.discipline_scold();
-                }
+                    self.pet.discipline_scold()
+                };
+                self.play_feedback_for_message(&msg, false);
                 self.save_now();
+            }
+            LcdIcon::Talk => {
+                self.sound.play(SoundEffect::ChatChirp);
+                self.talk_open = true;
+                self.talk_selected_idx = 1;
             }
             LcdIcon::Attention => {}
         }
     }
 
     pub fn handle_key(&mut self, code: KeyCode) {
+        // Global sound mute/unmute toggle `[U]` (except when typing a name)
+        if self.rename_buffer.is_none()
+            && !(self.screen == AppScreen::Onboarding
+                && self.onboarding_step == OnboardingStep::EnterName)
+            && matches!(code, KeyCode::Char('u') | KeyCode::Char('U'))
+        {
+            self.sound.toggle();
+            return;
+        }
+
         if self.offline_report.is_some() {
             if matches!(
                 code,
                 KeyCode::Enter | KeyCode::Esc | KeyCode::Char(' ') | KeyCode::Char('q')
             ) {
+                self.sound.play(SoundEffect::BeepConfirm);
                 self.offline_report = None;
             }
             return;
@@ -298,6 +366,7 @@ impl App {
                     | KeyCode::Char('q')
                     | KeyCode::Char(' ')
             ) {
+                self.sound.play(SoundEffect::BeepMove);
                 self.show_help = false;
             }
             return;
@@ -310,12 +379,15 @@ impl App {
                 | KeyCode::Char(' ')
                 | KeyCode::Enter
                 | KeyCode::Tab => {
+                    self.sound.play(SoundEffect::BeepMove);
                     self.meter_page = (self.meter_page + 1) % 4;
                 }
                 KeyCode::Left | KeyCode::Up => {
+                    self.sound.play(SoundEffect::BeepMove);
                     self.meter_page = (self.meter_page + 3) % 4;
                 }
                 KeyCode::Esc | KeyCode::Char('i') | KeyCode::Char('I') | KeyCode::Char('q') => {
+                    self.sound.play(SoundEffect::BeepMove);
                     self.show_meter = false;
                 }
                 _ => {}
@@ -325,6 +397,11 @@ impl App {
 
         if self.rename_buffer.is_some() {
             self.handle_rename_key(code);
+            return;
+        }
+
+        if self.talk_open {
+            self.handle_talk_key(code);
             return;
         }
 
@@ -341,31 +418,69 @@ impl App {
         }
     }
 
+    fn handle_talk_key(&mut self, code: KeyCode) {
+        match code {
+            KeyCode::Up | KeyCode::Down | KeyCode::Left | KeyCode::Right | KeyCode::Tab => {
+                self.sound.play(SoundEffect::BeepMove);
+                self.talk_selected_idx = if self.talk_selected_idx == 1 { 2 } else { 1 };
+            }
+            KeyCode::Char('1') => {
+                let _ = self.pet.answer_dialogue(1);
+                self.sound.play(SoundEffect::ChatChirp);
+                self.talk_open = false;
+                self.save_now();
+            }
+            KeyCode::Char('2') => {
+                let _ = self.pet.answer_dialogue(2);
+                self.sound.play(SoundEffect::ChatChirp);
+                self.talk_open = false;
+                self.save_now();
+            }
+            KeyCode::Enter | KeyCode::Char(' ') | KeyCode::Char('y') | KeyCode::Char('Y') => {
+                let choice = self.talk_selected_idx;
+                let _ = self.pet.answer_dialogue(choice);
+                self.sound.play(SoundEffect::ChatChirp);
+                self.talk_open = false;
+                self.save_now();
+            }
+            KeyCode::Esc | KeyCode::Char('q') => {
+                self.sound.play(SoundEffect::BeepMove);
+                self.talk_open = false;
+            }
+            _ => {}
+        }
+    }
+
     fn handle_pantry_key(&mut self, code: KeyCode) {
         let choices = FoodChoice::all();
         let count = choices.len();
         match code {
             KeyCode::Up | KeyCode::Char('k') => {
+                self.sound.play(SoundEffect::BeepMove);
                 self.pantry_selected_idx = (self.pantry_selected_idx + count - 1) % count;
             }
             KeyCode::Down | KeyCode::Char('j') | KeyCode::Tab => {
+                self.sound.play(SoundEffect::BeepMove);
                 self.pantry_selected_idx = (self.pantry_selected_idx + 1) % count;
             }
             KeyCode::Enter | KeyCode::Char(' ') | KeyCode::Char('f') | KeyCode::Char('F') => {
                 let choice = choices[self.pantry_selected_idx];
-                let _ = self.pet.feed_choice(choice);
+                let msg = self.pet.feed_choice(choice);
+                self.play_feedback_for_message(&msg, false);
                 self.pantry_open = false;
                 self.save_now();
             }
             KeyCode::Char(c @ '1'..='5') => {
                 let idx = (c as usize) - ('1' as usize);
                 if let Some(&choice) = choices.get(idx) {
-                    let _ = self.pet.feed_choice(choice);
+                    let msg = self.pet.feed_choice(choice);
+                    self.play_feedback_for_message(&msg, false);
                     self.pantry_open = false;
                     self.save_now();
                 }
             }
             KeyCode::Esc | KeyCode::Char('q') => {
+                self.sound.play(SoundEffect::BeepMove);
                 self.pantry_open = false;
             }
             _ => {}
@@ -377,6 +492,7 @@ impl App {
         match code {
             KeyCode::Enter => {
                 self.pet.rename(&buffer);
+                self.sound.play(SoundEffect::BeepConfirm);
                 self.save_now();
             }
             KeyCode::Esc => {}
@@ -400,6 +516,7 @@ impl App {
         match self.onboarding_step {
             OnboardingStep::SelectSpecies => match code {
                 KeyCode::Up | KeyCode::Left | KeyCode::Char('k') | KeyCode::Char('h') => {
+                    self.sound.play(SoundEffect::BeepMove);
                     self.selected_species_idx =
                         (self.selected_species_idx + species_count - 1) % species_count;
                 }
@@ -408,12 +525,20 @@ impl App {
                 | KeyCode::Char('j')
                 | KeyCode::Char('l')
                 | KeyCode::Tab => {
+                    self.sound.play(SoundEffect::BeepMove);
                     self.selected_species_idx = (self.selected_species_idx + 1) % species_count;
                 }
                 KeyCode::Char('v') | KeyCode::Char('V') | KeyCode::Char(' ') => {
+                    self.sound.play(SoundEffect::BeepMove);
+                    self.preview_auto_morph = false;
                     self.preview_stage_idx = (self.preview_stage_idx + 1) % stage_count;
                 }
+                KeyCode::Char('m') | KeyCode::Char('M') => {
+                    self.sound.play(SoundEffect::BeepConfirm);
+                    self.preview_auto_morph = !self.preview_auto_morph;
+                }
                 KeyCode::Enter => {
+                    self.sound.play(SoundEffect::BeepConfirm);
                     self.onboarding_step = OnboardingStep::SelectTheme;
                     self.onboarding_name_input =
                         PetSpecies::all()[self.selected_species_idx].default_name().to_string();
@@ -430,6 +555,7 @@ impl App {
             },
             OnboardingStep::SelectTheme => match code {
                 KeyCode::Up | KeyCode::Left | KeyCode::Char('k') | KeyCode::Char('h') => {
+                    self.sound.play(SoundEffect::BeepMove);
                     self.selected_theme_idx =
                         (self.selected_theme_idx + theme_count - 1) % theme_count;
                 }
@@ -438,15 +564,18 @@ impl App {
                 | KeyCode::Char('j')
                 | KeyCode::Char('l')
                 | KeyCode::Tab => {
+                    self.sound.play(SoundEffect::BeepMove);
                     self.selected_theme_idx = (self.selected_theme_idx + 1) % theme_count;
                 }
                 KeyCode::Char('v') | KeyCode::Char('V') => {
                     self.preview_stage_idx = (self.preview_stage_idx + 1) % stage_count;
                 }
                 KeyCode::BackTab | KeyCode::Esc => {
+                    self.sound.play(SoundEffect::BeepMove);
                     self.onboarding_step = OnboardingStep::SelectSpecies;
                 }
                 KeyCode::Enter => {
+                    self.sound.play(SoundEffect::BeepConfirm);
                     self.onboarding_step = OnboardingStep::EnterName;
                 }
                 _ => {}
@@ -457,6 +586,7 @@ impl App {
                     self.onboarding_name_input.pop();
                 }
                 KeyCode::Esc | KeyCode::BackTab => {
+                    self.sound.play(SoundEffect::BeepMove);
                     self.onboarding_step = OnboardingStep::SelectTheme;
                 }
                 KeyCode::Char(c) if self.onboarding_name_input.chars().count() < 18 => {
@@ -483,6 +613,7 @@ impl App {
         self.roster_selected_idx = self.sanctuary.active_index;
         self.adopting_new = false;
         self.screen = AppScreen::Habitat;
+        self.sound.play(SoundEffect::HatchFanfare);
         self.save_now();
     }
 
@@ -490,9 +621,11 @@ impl App {
         let count = self.sanctuary.pets.len().max(1);
         match code {
             KeyCode::Up | KeyCode::Left | KeyCode::Char('k') | KeyCode::Char('h') => {
+                self.sound.play(SoundEffect::BeepMove);
                 self.roster_selected_idx = (self.roster_selected_idx + count - 1) % count;
             }
             KeyCode::Down | KeyCode::Right | KeyCode::Char('j') | KeyCode::Tab => {
+                self.sound.play(SoundEffect::BeepMove);
                 self.roster_selected_idx = (self.roster_selected_idx + 1) % count;
             }
             KeyCode::Enter | KeyCode::Char(' ') => {
@@ -501,6 +634,7 @@ impl App {
             }
             KeyCode::Char('n') | KeyCode::Char('N') => self.start_adopting(),
             KeyCode::Esc | KeyCode::Char('l') | KeyCode::Char('L') | KeyCode::Char('q') => {
+                self.sound.play(SoundEffect::BeepMove);
                 self.screen = AppScreen::Habitat;
             }
             _ => {}
@@ -508,17 +642,55 @@ impl App {
     }
 
     fn handle_minigame_key(&mut self, code: KeyCode) {
+        let mut sound_to_play: Option<SoundEffect> = None;
         let finished = {
             let Some(game) = self.minigame.as_mut() else {
                 self.screen = AppScreen::Habitat;
                 return;
             };
             match code {
+                KeyCode::Char('1') => {
+                    game.switch_mode(GameMode::SnackCatcher);
+                    sound_to_play = Some(SoundEffect::BeepConfirm);
+                }
+                KeyCode::Char('2') => {
+                    game.switch_mode(GameMode::MindReader);
+                    sound_to_play = Some(SoundEffect::BeepConfirm);
+                }
+                KeyCode::Char('3') => {
+                    game.switch_mode(GameMode::DashRunner);
+                    sound_to_play = Some(SoundEffect::BeepConfirm);
+                }
+                KeyCode::Tab => {
+                    let next = game.mode.next();
+                    game.switch_mode(next);
+                    sound_to_play = Some(SoundEffect::BeepMove);
+                }
+                KeyCode::Up | KeyCode::Char(' ') | KeyCode::Char('w') | KeyCode::Char('W') => {
+                    game.jump();
+                    sound_to_play = Some(SoundEffect::BeepMove);
+                }
                 KeyCode::Left | KeyCode::Char('a') | KeyCode::Char('A') | KeyCode::Char('h') => {
+                    let wins_before = game.mr_wins;
                     game.move_left();
+                    if game.mode == GameMode::MindReader {
+                        sound_to_play = Some(if game.mr_wins > wins_before {
+                            SoundEffect::PlayWin
+                        } else {
+                            SoundEffect::PlayHit
+                        });
+                    }
                 }
                 KeyCode::Right | KeyCode::Char('d') | KeyCode::Char('D') | KeyCode::Char('l') => {
+                    let wins_before = game.mr_wins;
                     game.move_right();
+                    if game.mode == GameMode::MindReader {
+                        sound_to_play = Some(if game.mr_wins > wins_before {
+                            SoundEffect::PlayWin
+                        } else {
+                            SoundEffect::PlayHit
+                        });
+                    }
                 }
                 KeyCode::Esc | KeyCode::Char('q') => {
                     game.ticks_remaining = 0;
@@ -527,6 +699,9 @@ impl App {
             }
             game.is_finished()
         };
+        if let Some(sfx) = sound_to_play {
+            self.sound.play(sfx);
+        }
         if finished {
             self.finish_minigame();
         }
@@ -535,9 +710,15 @@ impl App {
     fn finish_minigame(&mut self) {
         if let Some(game) = self.minigame.take() {
             if game.score > 0 || game.coins_earned > 0 || game.xp_earned > 0 {
+                let stage_before = self.pet.stage;
                 let _ = self
                     .pet
                     .apply_minigame_reward(game.score, game.coins_earned, game.xp_earned);
+                if self.pet.stage != stage_before {
+                    self.sound.play(SoundEffect::LevelUpFanfare);
+                } else {
+                    self.sound.play(SoundEffect::PlayWin);
+                }
             }
         }
         self.screen = AppScreen::Habitat;
@@ -552,76 +733,104 @@ impl App {
                 self.should_quit = true;
             }
             KeyCode::Left | KeyCode::Char(',') => {
+                self.sound.play(SoundEffect::BeepMove);
                 self.selected_icon_idx = (self.selected_icon_idx + icon_count - 1) % icon_count;
             }
             KeyCode::Right | KeyCode::Char('.') | KeyCode::Char('a') | KeyCode::Char('A') => {
-                self.selected_icon_idx = (self.selected_icon_idx + 1) % icon_count;
+                self.sound.play(SoundEffect::BeepMove);
+                self.selected_icon_idx = (self.selected_icon_idx + icon_count + 1) % icon_count;
             }
             KeyCode::Enter | KeyCode::Char('b') | KeyCode::Char('B') => {
                 self.activate_selected_lcd_icon();
             }
             KeyCode::Char('?') => {
+                self.sound.play(SoundEffect::BeepConfirm);
                 self.show_help = true;
             }
             KeyCode::Char('i') | KeyCode::Char('I') => {
+                self.sound.play(SoundEffect::BeepConfirm);
                 self.show_meter = true;
                 self.meter_page = 0;
             }
+            KeyCode::Char('y') | KeyCode::Char('Y') => {
+                self.sound.play(SoundEffect::ChatChirp);
+                self.talk_open = true;
+                self.talk_selected_idx = 1;
+            }
             KeyCode::Char('k') | KeyCode::Char('K') => {
-                let _ = self.pet.toggle_light();
+                let msg = self.pet.toggle_light();
+                self.play_feedback_for_message(&msg, false);
                 self.save_now();
             }
             KeyCode::Char('d') | KeyCode::Char('D') => {
-                let _ = self.pet.discipline_scold();
+                let msg = self.pet.discipline_scold();
+                self.play_feedback_for_message(&msg, false);
                 self.save_now();
             }
             KeyCode::Char('w') | KeyCode::Char('W') | KeyCode::Char(' ') => {
-                if self.pet.stage == EvolutionStage::Egg {
-                    let _ = self.pet.warm_egg();
+                let stage_before = self.pet.stage;
+                let msg = if self.pet.stage == EvolutionStage::Egg {
+                    self.pet.warm_egg()
                 } else {
-                    let _ = self.pet.pet_love();
-                }
+                    self.pet.pet_love()
+                };
+                let hatched = self.pet.stage != stage_before;
+                self.play_feedback_for_message(&msg, hatched);
                 self.save_now();
             }
             KeyCode::Char('f') | KeyCode::Char('F') | KeyCode::Char('1') => {
-                let _ = self.pet.feed();
+                let stage_before = self.pet.stage;
+                let msg = self.pet.feed();
+                self.play_feedback_for_message(&msg, self.pet.stage != stage_before);
                 self.save_now();
             }
             KeyCode::Char('m') | KeyCode::Char('M') => {
                 if self.pet.stage == EvolutionStage::Egg {
-                    let _ = self.pet.feed();
+                    let msg = self.pet.feed();
+                    self.play_feedback_for_message(&msg, false);
                 } else {
+                    self.sound.play(SoundEffect::BeepConfirm);
                     self.pantry_open = true;
                 }
             }
             KeyCode::Char('p') | KeyCode::Char('P') | KeyCode::Char('2') => {
-                let _ = self.pet.play();
+                let stage_before = self.pet.stage;
+                let msg = self.pet.play();
+                self.play_feedback_for_message(&msg, self.pet.stage != stage_before);
                 self.save_now();
             }
             KeyCode::Char('t') | KeyCode::Char('T') | KeyCode::Char('3') => {
-                let _ = self.pet.pet_love();
+                let stage_before = self.pet.stage;
+                let msg = self.pet.pet_love();
+                self.play_feedback_for_message(&msg, self.pet.stage != stage_before);
                 self.save_now();
             }
             KeyCode::Char('e') | KeyCode::Char('E') | KeyCode::Char('4') => {
-                let _ = self.pet.train();
+                let stage_before = self.pet.stage;
+                let msg = self.pet.train();
+                self.play_feedback_for_message(&msg, self.pet.stage != stage_before);
                 self.save_now();
             }
             KeyCode::Char('s') | KeyCode::Char('S') | KeyCode::Char('5') => {
-                let _ = self.pet.toggle_sleep();
+                let msg = self.pet.toggle_sleep();
+                self.play_feedback_for_message(&msg, false);
                 self.save_now();
             }
             KeyCode::Char('c') | KeyCode::Char('C') | KeyCode::Char('6') => {
-                let _ = self.pet.clean();
+                let msg = self.pet.clean();
+                self.play_feedback_for_message(&msg, false);
                 self.save_now();
             }
             KeyCode::Char('h') | KeyCode::Char('H') | KeyCode::Char('7') => {
-                let _ = self.pet.heal();
+                let msg = self.pet.heal();
+                self.play_feedback_for_message(&msg, false);
                 self.save_now();
             }
             KeyCode::Char('g') | KeyCode::Char('G') => {
-                self.launch_minigame();
+                self.launch_minigame(GameMode::SnackCatcher);
             }
             KeyCode::Char('l') | KeyCode::Char('L') => {
+                self.sound.play(SoundEffect::BeepConfirm);
                 self.sanctuary.sync_active(&self.pet);
                 self.roster_selected_idx = self.sanctuary.active_index;
                 self.screen = AppScreen::SanctuaryRoster;
@@ -633,6 +842,7 @@ impl App {
                 self.rename_buffer = Some(self.pet.name.clone());
             }
             KeyCode::Tab => {
+                self.sound.play(SoundEffect::BeepMove);
                 self.pet.theme = self.pet.theme.next();
                 self.save_now();
             }
@@ -642,6 +852,15 @@ impl App {
 
     pub fn on_tick(&mut self) {
         self.tick_count = self.tick_count.wrapping_add(1);
+
+        // Auto-morph evolution showcase in Step 1 of Onboarding every 6 ticks (~1.5s)
+        if self.screen == AppScreen::Onboarding
+            && self.onboarding_step == OnboardingStep::SelectSpecies
+            && self.preview_auto_morph
+            && self.tick_count.is_multiple_of(6)
+        {
+            self.preview_stage_idx = (self.preview_stage_idx + 1) % EvolutionStage::all().len();
+        }
 
         if self.screen == AppScreen::MiniGame {
             let finished = {
@@ -661,9 +880,13 @@ impl App {
         if self.screen != AppScreen::Onboarding
             && self.tick_count.is_multiple_of(DECAY_EVERY_TICKS)
         {
+            let call_before = self.pet.attention_call;
             self.sanctuary.sync_active(&self.pet);
             self.sanctuary.tick_decay_all();
             self.pet = self.sanctuary.active_pet().clone();
+            if !call_before.is_active() && self.pet.attention_call.is_active() {
+                self.sound.play(SoundEffect::AttentionBeep);
+            }
             if self.tick_count.is_multiple_of(DECAY_EVERY_TICKS * 4) {
                 self.save_now();
             }
@@ -738,7 +961,7 @@ fn custom_meter_line(
 }
 
 fn render_unified_bezel(selected: LcdIcon, pet: &Pet) -> Line<'static> {
-    let mut spans = Vec::with_capacity(16);
+    let mut spans = Vec::with_capacity(18);
     for &icon in LcdIcon::selectable() {
         let is_sel = icon == selected;
         let label = if icon == LcdIcon::Lights {
@@ -808,14 +1031,14 @@ pub fn draw_ui(f: &mut Frame, app: &App) {
     let device = handheld_rect(area);
     f.render_widget(Clear, device);
 
-    // Step-by-step screen routing: only ONE clean screen renders inside the
-    // handheld device at any time!
     if let Some(report) = app.offline_report.as_ref() {
         draw_offline_report_screen(f, device, app, report);
     } else if app.show_help {
         draw_help_screen(f, device, app);
     } else if app.show_meter {
         draw_meter_screen(f, device, app);
+    } else if app.talk_open {
+        draw_talk_screen(f, device, app);
     } else if app.pantry_open {
         draw_pantry_screen(f, device, app);
     } else {
@@ -828,15 +1051,47 @@ pub fn draw_ui(f: &mut Frame, app: &App) {
     }
 }
 
-/// Step-by-step Onboarding: Step 1 -> Step 2 -> Step 3 each have their own
-/// dedicated minimalist retro screen!
+/// Render the animated Evolution Morph Timeline Bar (`🥚 Egg ▸ 🍼 Baby ▸ 🌱 Teen ▸ 🌸 Adult ▸ 🌟 Elder`)
+/// for Step 1 of the Adoption Wizard!
+fn render_evolution_morph_bar(active_stage: EvolutionStage, auto_morph: bool) -> Line<'static> {
+    let mut spans = Vec::with_capacity(12);
+    for (idx, &stage) in EvolutionStage::all().iter().enumerate() {
+        let is_cur = stage == active_stage;
+        let style = if is_cur {
+            Style::default()
+                .fg(Color::Black)
+                .bg(stage_color(stage))
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
+        spans.push(Span::styled(format!(" {} ", stage.badge()), style));
+        if idx + 1 < EvolutionStage::all().len() {
+            spans.push(Span::styled("▸", Style::default().fg(Color::DarkGray)));
+        }
+    }
+    spans.push(Span::styled(
+        if auto_morph { " 🔄Auto" } else { " ⏸Hold" },
+        Style::default().fg(Color::LightCyan),
+    ));
+    Line::from(spans)
+}
+
+/// Step-by-step Onboarding: Step 1 (with live animated Evolution Morph Showcase!)
+/// -> Step 2 -> Step 3.
 fn draw_onboarding_step_screen(f: &mut Frame, device: Rect, app: &App) {
     let species = PetSpecies::all()[app.selected_species_idx];
     let theme = ShellTheme::all()[app.selected_theme_idx];
     let preview_stage = EvolutionStage::all()[app.preview_stage_idx % EvolutionStage::all().len()];
     let (sp_primary, _, sp_accent) = species_palette(species);
 
-    let shell = outer_shell_block("🍡 MOCHIGOTCHI V-PET  •  NEW COMPANION", theme);
+    let shell = outer_shell_block(
+        &format!(
+            "🍡 MOCHIGOTCHI V-PET  •  NEW COMPANION  •  {}",
+            app.sound.status_badge()
+        ),
+        theme,
+    );
     let inner = shell.inner(device);
     f.render_widget(shell, device);
 
@@ -865,36 +1120,29 @@ fn draw_onboarding_step_screen(f: &mut Frame, device: Rect, app: &App) {
                     ),
                     Span::styled("  ▶", Style::default().fg(Color::LightYellow)),
                 ]),
-                Line::from(Span::styled(
-                    format!(
-                        "{}  •  {}  •  Form: {}",
-                        species.family(),
-                        species.element_badge(),
-                        preview_stage.badge()
-                    ),
-                    Style::default().fg(Color::Gray),
-                )),
-                Line::from(""),
+                render_evolution_morph_bar(preview_stage, app.preview_auto_morph),
             ];
             lines.extend(render_colored_preview(
                 species,
                 preview_stage,
                 app.tick_count,
             ));
-            lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
                 species.description().to_string(),
                 Style::default().fg(Color::White),
             )));
             lines.push(Line::from(vec![
-                Span::styled("Favorite Snack: ", Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    format!("{} • {} • Snack: ", species.family(), species.element_badge()),
+                    Style::default().fg(Color::Gray),
+                ),
                 Span::styled(
                     species.favorite_snack().to_string(),
                     Style::default().fg(Color::LightGreen),
                 ),
             ]));
             lines.push(Line::from(Span::styled(
-                "[←/→] Browse   [V] Stage Preview   [Enter] Next Step",
+                "[←/→] Species  [V] Step Form  [M] Auto-Morph  [Enter] Next Step",
                 Style::default()
                     .fg(sp_accent)
                     .add_modifier(Modifier::BOLD),
@@ -966,23 +1214,19 @@ fn draw_onboarding_step_screen(f: &mut Frame, device: Rect, app: &App) {
             let lcd_inner = lcd.inner(inner);
             f.render_widget(lcd, inner);
 
-            let mut lines = vec![
-                Line::from(Span::styled(
-                    format!(
-                        "{}  •  Shell: {}",
-                        species.display_name(),
-                        theme.display_name()
-                    ),
-                    Style::default().fg(sp_primary).add_modifier(Modifier::BOLD),
-                )),
-                Line::from(""),
-            ];
+            let mut lines = vec![Line::from(Span::styled(
+                format!(
+                    "{}  •  Shell: {}",
+                    species.display_name(),
+                    theme.display_name()
+                ),
+                Style::default().fg(sp_primary).add_modifier(Modifier::BOLD),
+            ))];
             lines.extend(render_colored_preview(
                 species,
                 EvolutionStage::Egg,
                 app.tick_count,
             ));
-            lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
                 "Enter a name for your new companion:",
                 Style::default().fg(Color::White),
@@ -994,7 +1238,6 @@ fn draw_onboarding_step_screen(f: &mut Frame, device: Rect, app: &App) {
                     .bg(Color::LightYellow)
                     .add_modifier(Modifier::BOLD),
             )));
-            lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
                 "[Enter] Adopt & Start   [Backspace] Edit   [Esc] Back",
                 Style::default()
@@ -1010,7 +1253,8 @@ fn draw_onboarding_step_screen(f: &mut Frame, device: Rect, app: &App) {
     }
 }
 
-/// Minimalist Retro Handheld LCD Habitat Screen.
+/// Minimalist Retro Handheld LCD Habitat Screen with Inner Thought Bubble (`💭`)
+/// + Speech Bubble (`💬`) + 32×20 TrueColor Pixel Art Sprite.
 fn draw_habitat_screen(f: &mut Frame, device: Rect, app: &App) {
     let pet = &app.pet;
     let now = Utc::now();
@@ -1018,9 +1262,10 @@ fn draw_habitat_screen(f: &mut Frame, device: Rect, app: &App) {
     let selected_icon = LcdIcon::selectable()[app.selected_icon_idx % LcdIcon::selectable().len()];
 
     let shell_title = format!(
-        "🍡 MOCHIGOTCHI  •  {} ({})",
+        "🍡 MOCHIGOTCHI • {} ({}) • {}",
         pet.name.to_uppercase(),
-        pet.species.display_name()
+        pet.species.display_name(),
+        app.sound.status_badge()
     );
     let shell = outer_shell_block(&shell_title, pet.theme);
     let inner = shell.inner(device);
@@ -1030,7 +1275,7 @@ fn draw_habitat_screen(f: &mut Frame, device: Rect, app: &App) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(1),
-            Constraint::Min(14),
+            Constraint::Min(15),
             Constraint::Length(2),
         ])
         .split(inner);
@@ -1041,7 +1286,7 @@ fn draw_habitat_screen(f: &mut Frame, device: Rect, app: &App) {
         rows[0],
     );
 
-    // 2. Center Retro LCD Screen (Pixel Art Sprite + minimal status strip)
+    // 2. Center Retro LCD Screen (Thought + Speech + 32x20 Pixel Art + Status)
     let (sky, _) = sky_scene(app.tick_count);
     let lcd_title = if pet.stage == EvolutionStage::Egg {
         format!(
@@ -1063,7 +1308,14 @@ fn draw_habitat_screen(f: &mut Frame, device: Rect, app: &App) {
     let lcd_inner = lcd.inner(rows[1]);
     f.render_widget(lcd, rows[1]);
 
-    let mut lcd_lines = Vec::with_capacity(15);
+    let mut lcd_lines = Vec::with_capacity(16);
+
+    // Inner Thought Bubble (`💭`) + Speech Bubble (`💬`)
+    lcd_lines.push(Line::from(Span::styled(
+        thought_bubble(pet, app.tick_count),
+        Style::default().fg(Color::LightCyan),
+    )));
+
     if !pet.light_on {
         lcd_lines.push(Line::from(Span::styled(
             "🌙 [ ROOM LIGHT OFF — NIGHT MODE ]",
@@ -1083,9 +1335,9 @@ fn draw_habitat_screen(f: &mut Frame, device: Rect, app: &App) {
         )));
     }
 
-    // Take the 10 core lines of render_colored_sprite (particles + 8 pixel rows + pedestal)
+    // 32×20 Pixel Art Sprite (12 lines: particles + 10 pixel rows + pedestal)
     let sprite = render_colored_sprite(pet, app.tick_count);
-    lcd_lines.extend(sprite.into_iter().take(10));
+    lcd_lines.extend(sprite.into_iter().take(12));
 
     if pet.stage == EvolutionStage::Egg {
         let warm_sessions = (pet.incubation / 20).min(5) as usize;
@@ -1122,16 +1374,6 @@ fn draw_habitat_screen(f: &mut Frame, device: Rect, app: &App) {
         ]));
     }
 
-    let latest_log = pet
-        .action_log
-        .last()
-        .cloned()
-        .unwrap_or_else(|| pet.advisor_tip(now));
-    lcd_lines.push(Line::from(Span::styled(
-        latest_log,
-        Style::default().fg(Color::Gray),
-    )));
-
     f.render_widget(
         Paragraph::new(Text::from(lcd_lines)).alignment(Alignment::Center),
         lcd_inner,
@@ -1155,7 +1397,7 @@ fn draw_habitat_screen(f: &mut Frame, device: Rect, app: &App) {
                 Style::default().fg(Color::LightGreen),
             )),
             Line::from(Span::styled(
-                "[W/Space] Warm  •  [I] Meter  •  [L] Pets  •  [N] Adopt  •  [?] Keys",
+                "[W] Warm  [Y] Talk  [I] Meter  [L] Pets  [N] Adopt  [U] Sound  [?] Keys",
                 Style::default().fg(Color::DarkGray),
             )),
         ]
@@ -1166,7 +1408,7 @@ fn draw_habitat_screen(f: &mut Frame, device: Rect, app: &App) {
                 Style::default().fg(Color::LightGreen),
             )),
             Line::from(Span::styled(
-                "[←/→+Enter] Bezel  [F] Meal  [M] Pantry  [P] Play  [I] Meter  [L] Pets  [?] Keys",
+                "[←/→+Enter] Bezel  [F] Meal  [Y] Talk  [G] Arcade  [I] Meter  [U] Sound  [?] Keys",
                 Style::default().fg(Color::DarkGray),
             )),
         ]
@@ -1177,9 +1419,77 @@ fn draw_habitat_screen(f: &mut Frame, device: Rect, app: &App) {
     );
 }
 
+/// Interactive Heart-to-Heart Pet Dialogue Screen (`[Y]` or Bezel `💬Talk`).
+fn draw_talk_screen(f: &mut Frame, device: Rect, app: &App) {
+    let pet = &app.pet;
+    let (sp_primary, _, _) = species_palette(pet.species);
+    let prompt = pet.dialogue_prompt(app.tick_count);
+
+    let shell = outer_shell_block(
+        &format!("💬 HEART-TO-HEART CHAT WITH {}", pet.name.to_uppercase()),
+        pet.theme,
+    );
+    let inner = shell.inner(device);
+    f.render_widget(shell, device);
+
+    let lcd = lcd_screen_block(
+        &format!("{}  •  BOND {}%", pet.species.display_name(), pet.bond),
+        sp_primary,
+    );
+    let lcd_inner = lcd.inner(inner);
+    f.render_widget(lcd, inner);
+
+    let mut lines = vec![
+        Line::from(Span::styled(
+            prompt.inner_thought,
+            Style::default().fg(Color::LightCyan),
+        )),
+        Line::from(Span::styled(
+            prompt.pet_line,
+            Style::default()
+                .fg(Color::LightYellow)
+                .add_modifier(Modifier::BOLD),
+        )),
+    ];
+    lines.extend(render_colored_sprite(pet, app.tick_count).into_iter().take(12));
+
+    let opt1_style = if app.talk_selected_idx == 1 {
+        Style::default()
+            .fg(Color::Black)
+            .bg(Color::LightGreen)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(Color::White)
+    };
+    let opt2_style = if app.talk_selected_idx == 2 {
+        Style::default()
+            .fg(Color::Black)
+            .bg(Color::LightGreen)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(Color::White)
+    };
+
+    lines.push(Line::from(Span::styled(
+        format!(" {} ", prompt.option_1),
+        opt1_style,
+    )));
+    lines.push(Line::from(Span::styled(
+        format!(" {} ", prompt.option_2),
+        opt2_style,
+    )));
+    lines.push(Line::from(Span::styled(
+        "[↑/↓ or 1/2] Choose Response   •   [Enter] Reply   •   [Esc] Back",
+        Style::default().fg(Color::Cyan),
+    )));
+
+    f.render_widget(
+        Paragraph::new(Text::from(lines)).alignment(Alignment::Center),
+        lcd_inner,
+    );
+}
+
 /// Step-by-step Retro Status Meter Screen (`[I]` or Bezel `📏Meter`).
-/// When hatched, flipping `meter_page` (`0..=3`) cycles through 4 genuine
-/// retro status pages so nothing overflows vertically!
 fn draw_meter_screen(f: &mut Frame, device: Rect, app: &App) {
     let pet = &app.pet;
     let now = Utc::now();
@@ -1563,22 +1873,22 @@ fn draw_help_screen(f: &mut Frame, device: Rect, app: &App) {
         Line::from(" • Button B (Enter): Open highlighted icon"),
         Line::from(" • Button C (Esc): Return to main LCD Habitat"),
         Line::from(Span::styled(
-            "🍙 Meals vs. Sweet Snacks & Weight (g)",
+            "🍙 Meals, Sweet Snacks, Chat & 3-in-1 Arcade",
             Style::default()
                 .fg(Color::LightGreen)
                 .add_modifier(Modifier::BOLD),
         )),
         Line::from(" • [F] Meal (+1 Hungry ♥, +1g) • [M] Pantry Menu"),
-        Line::from(" • 3 Sweet Snacks in a row = Toothache 🦷 ([H] Meds)"),
-        Line::from(" • [P] Play / [E] Train burns -2g weight!"),
+        Line::from(" • [Y] Heart-to-Heart Chat (see thoughts & reply!)"),
+        Line::from(" • [G] 3-in-1 Arcade (1:Catcher 2:MindReader 3:Dash)"),
         Line::from(Span::styled(
-            "💡 Room Light, Discipline & Sanctuary",
+            "💡 Room Light, Discipline, Sound & Sanctuary",
             Style::default()
                 .fg(Color::LightCyan)
                 .add_modifier(Modifier::BOLD),
         )),
         Line::from(" • [S] Sleep + [K] Light OFF • [C] Bath • [D] Scold"),
-        Line::from(" • [T] Praise • [I] 4-Page Meter • [G] Arcade"),
+        Line::from(" • [T] Praise • [I] 4-Page Meter • [U] Sound ON/OFF"),
         Line::from(" • [L] Sanctuary Pets • [N] Adopt • [R] Rename"),
         Line::from(""),
         Line::from(Span::styled(
@@ -1622,22 +1932,22 @@ fn draw_roster_screen(f: &mut Frame, device: Rect, app: &App) {
     let lcd_inner = lcd.inner(inner);
     f.render_widget(lcd, inner);
 
-    let mut lines = vec![
-        Line::from(Span::styled(
-            format!(
-                "{}  •  {}  •  {} Lv.{} ({}g)",
-                highlighted.name,
-                highlighted.species.display_name(),
-                highlighted.stage.badge(),
-                highlighted.level,
-                highlighted.weight_grams
-            ),
-            Style::default().fg(h_primary).add_modifier(Modifier::BOLD),
-        )),
-        Line::from(""),
-    ];
-    lines.extend(render_colored_sprite(highlighted, app.tick_count).into_iter().take(10));
-    lines.push(Line::from(""));
+    let mut lines = vec![Line::from(Span::styled(
+        format!(
+            "{}  •  {}  •  {} Lv.{} ({}g)",
+            highlighted.name,
+            highlighted.species.display_name(),
+            highlighted.stage.badge(),
+            highlighted.level,
+            highlighted.weight_grams
+        ),
+        Style::default().fg(h_primary).add_modifier(Modifier::BOLD),
+    ))];
+    lines.extend(
+        render_colored_sprite(highlighted, app.tick_count)
+            .into_iter()
+            .take(12),
+    );
     lines.push(Line::from(Span::styled(
         format!(
             "Hungry: {}   Happy: {}   Incubation: {}%",
@@ -1660,13 +1970,13 @@ fn draw_roster_screen(f: &mut Frame, device: Rect, app: &App) {
     );
 }
 
-/// Step-by-step Snack Catcher Arcade Screen (`[G]`).
+/// Step-by-step 3-in-1 Retro Arcade Center Screen (`[G]` or Bezel `🎮Game`).
 fn draw_minigame_screen(f: &mut Frame, device: Rect, app: &App) {
-    let shell = outer_shell_block("🎮 SNACK CATCHER ARCADE", app.pet.theme);
+    let shell = outer_shell_block("🎮 3-IN-1 RETRO ARCADE CENTER", app.pet.theme);
     let inner = shell.inner(device);
     f.render_widget(shell, device);
 
-    let (arena, status) = match app.minigame.as_ref() {
+    let (mode_title, arena, status) = match app.minigame.as_ref() {
         Some(game) => {
             let lines: Vec<Line> = game
                 .render_lines()
@@ -1674,14 +1984,19 @@ fn draw_minigame_screen(f: &mut Frame, device: Rect, app: &App) {
                 .map(|line| Line::from(Span::styled(line, Style::default().fg(Color::LightGreen))))
                 .collect();
             (
+                game.mode.title(),
                 Text::from(lines),
                 format!(
-                    "SCORE {}  •  COINS +{}  •  XP +{}  •  TIME {}",
-                    game.score, game.coins_earned, game.xp_earned, game.ticks_remaining
+                    "{}  •  SCORE {}  •  STREAK x{}  •  +{} 💰  •  +{} XP",
+                    game.mode.title(),
+                    game.score,
+                    game.combo.max(1),
+                    game.coins_earned,
+                    game.xp_earned
                 ),
             )
         }
-        None => (Text::from(""), "no game running".to_string()),
+        None => ("Arcade", Text::from(""), "no game running".to_string()),
     };
 
     let lcd = lcd_screen_block(&status, Color::LightGreen);
@@ -1690,20 +2005,40 @@ fn draw_minigame_screen(f: &mut Frame, device: Rect, app: &App) {
 
     let rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(10), Constraint::Length(2)])
+        .constraints([
+            Constraint::Length(2),
+            Constraint::Min(10),
+            Constraint::Length(2),
+        ])
         .split(lcd_inner);
 
     f.render_widget(
-        Paragraph::new(arena).alignment(Alignment::Center),
+        Paragraph::new(Line::from(vec![
+            Span::styled(
+                "Switch Game: [1] Catcher  [2] Mind-Reader  [3] Hurdle Dash  (Current: ",
+                Style::default().fg(Color::Gray),
+            ),
+            Span::styled(
+                format!("{mode_title})"),
+                Style::default()
+                    .fg(Color::LightYellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]))
+        .alignment(Alignment::Center),
         rows[0],
     );
     f.render_widget(
+        Paragraph::new(arena).alignment(Alignment::Center),
+        rows[1],
+    );
+    f.render_widget(
         Paragraph::new(Line::from(Span::styled(
-            "[←/→ or A/D] Move Basket   •   [Esc / Q] Finish & Claim Rewards",
-            Style::default().fg(Color::LightYellow),
+            "[←/→] Move / Guess   [Space/↑] Jump   [1/2/3/Tab] Game Mode   [Esc/Q] Claim & Exit",
+            Style::default().fg(Color::LightCyan),
         )))
         .alignment(Alignment::Center),
-        rows[1],
+        rows[2],
     );
 }
 
@@ -1777,17 +2112,27 @@ mod tests {
     }
 
     #[test]
-    fn onboarding_adopts_dragon_then_a_second_pet() {
+    fn onboarding_auto_morphs_evolution_and_adopts_companions() {
         let paths = tmp_paths("adopt");
         let _ = std::fs::remove_dir_all(paths.json_path.parent().unwrap());
 
         let mut app = App::new_onboarding(paths.clone());
         assert_eq!(app.screen, AppScreen::Onboarding);
+        assert!(app.preview_auto_morph);
+        let initial_stage = app.preview_stage_idx;
+        for _ in 0..6 {
+            app.on_tick();
+        }
+        assert_ne!(
+            app.preview_stage_idx, initial_stage,
+            "Step 1 must auto-animate evolution stages"
+        );
 
         for _ in 0..4 {
             app.handle_key(KeyCode::Down);
         }
         app.handle_key(KeyCode::Char('v'));
+        assert!(!app.preview_auto_morph);
         app.handle_key(KeyCode::Enter);
         assert_eq!(app.onboarding_step, OnboardingStep::SelectTheme);
         app.handle_key(KeyCode::Enter);
@@ -1801,36 +2146,20 @@ mod tests {
         assert_eq!(app.screen, AppScreen::Habitat);
         assert_eq!(app.pet.species, PetSpecies::IgnisDragon);
         assert_eq!(app.pet.name, "X");
-        assert_eq!(app.sanctuary.pets.len(), 1);
 
-        app.handle_key(KeyCode::Char('n'));
-        for _ in 0..5 {
-            app.handle_key(KeyCode::Down);
-        }
-        app.handle_key(KeyCode::Enter);
-        app.handle_key(KeyCode::Enter);
-        app.handle_key(KeyCode::Enter);
-
-        assert_eq!(app.sanctuary.pets.len(), 2);
-        assert_eq!(app.pet.species, PetSpecies::AzureWyrm);
-        assert_eq!(app.sanctuary.active_index, 1);
-
-        app.handle_key(KeyCode::Char('['));
-        assert_eq!(app.pet.species, PetSpecies::IgnisDragon);
-
-        app.handle_key(KeyCode::Char('l'));
-        assert_eq!(app.screen, AppScreen::SanctuaryRoster);
-        app.handle_key(KeyCode::Down);
-        app.handle_key(KeyCode::Enter);
-        assert_eq!(app.screen, AppScreen::Habitat);
-        assert_eq!(app.pet.species, PetSpecies::AzureWyrm);
+        // Test interactive Heart-to-Heart Talk screen (`[Y]`)
+        app.handle_key(KeyCode::Char('y'));
+        assert!(app.talk_open);
+        app.handle_key(KeyCode::Char('1'));
+        assert!(!app.talk_open);
+        assert!(app.pet.bond > 10);
 
         let _ = std::fs::remove_dir_all(paths.json_path.parent().unwrap());
     }
 
     #[test]
     fn renders_resize_guard_on_small_terminal_and_full_ui_on_standard_and_wide() {
-        for (w, h) in [(54u16, 18u16), (68, 22), (96, 28), (140, 44)] {
+        for (w, h) in [(54u16, 18u16), (68, 24), (96, 28), (140, 44)] {
             let backend = TestBackend::new(w, h);
             let mut terminal = Terminal::new(backend).unwrap();
             let paths = tmp_paths(&format!("render{w}"));
@@ -1839,6 +2168,9 @@ mod tests {
             app.pantry_open = true;
             terminal.draw(|f| draw_ui(f, &app)).unwrap();
             app.pantry_open = false;
+            app.talk_open = true;
+            terminal.draw(|f| draw_ui(f, &app)).unwrap();
+            app.talk_open = false;
             app.show_meter = true;
             for page in 0..4 {
                 app.meter_page = page;
@@ -1851,21 +2183,21 @@ mod tests {
     }
 
     #[test]
-    fn every_screen_and_wizard_step_renders() {
+    fn every_screen_and_arcade_mode_renders() {
         let paths = tmp_paths("screens");
         let mut app = App::new(Pet::new("Mochi"), paths.clone());
+        app.pet.stage = EvolutionStage::Adult;
         let backend = TestBackend::new(100, 30);
         let mut terminal = Terminal::new(backend).unwrap();
 
-        for screen in [
-            AppScreen::Habitat,
-            AppScreen::SanctuaryRoster,
-            AppScreen::MiniGame,
-            AppScreen::Onboarding,
-        ] {
-            app.screen = screen;
+        app.handle_key(KeyCode::Char('g'));
+        assert_eq!(app.screen, AppScreen::MiniGame);
+        for key in [KeyCode::Char('1'), KeyCode::Char('2'), KeyCode::Char('3')] {
+            app.handle_key(key);
             terminal.draw(|f| draw_ui(f, &app)).unwrap();
         }
+        app.handle_key(KeyCode::Esc);
+        assert_eq!(app.screen, AppScreen::Habitat);
 
         let mut wizard = App::new_onboarding(paths);
         for step in [
