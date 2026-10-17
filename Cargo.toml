@@ -1,6 +1,6 @@
 [package]
 name = "mochigotchi"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2021"
 description = "Mochigotchi — Your Cozy Pocket Pet in the Terminal (Universal Tamagotchi Simulator with Ratatui & SQLite/JSON Persistence)"
 authors = ["Mochigotchi Contributors"]

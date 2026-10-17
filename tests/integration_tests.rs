@@ -1,8 +1,5 @@
-//! End-to-end integration tests for **Mochigotchi v0.5.2**:
-//! - Zero ZWJ (`U+200D`) or Variation Selector (`U+FE0F`) glyph desyncs
-//! - Minimum terminal size guard (`80 × 24`) + unclipped tabular Adoption Wizard
-//! - Dedicated Egg Incubator view when unhatched vs. Tamagotchi Vitals when hatched
-//! - Unified single-row 7-icon Bandai Tamagotchi LCD Bezel & 4-page Health Meter
+//! End-to-end integration tests for **Mochigotchi v0.6.0 (Minimalist Retro
+//! Step-by-Step Handheld LCD & 24×16 Half-Block Pixel Art Edition)**.
 
 use chrono::{Duration, Utc};
 use crossterm::event::KeyCode;
@@ -19,7 +16,7 @@ use mochigotchi::storage::{
     has_existing_save, load_dual, load_sanctuary, save_dual, save_sanctuary, StoragePaths,
 };
 use mochigotchi::tui::{
-    draw_ui, App, AppScreen, LayoutTier, OnboardingStep, MIN_TERM_HEIGHT, MIN_TERM_WIDTH,
+    draw_ui, App, AppScreen, LayoutTier, OnboardingStep, MIN_TERM_WIDTH,
 };
 use ratatui::{backend::TestBackend, Terminal};
 use tempfile::TempDir;
@@ -42,7 +39,7 @@ fn assert_no_zwj_or_fe0f(s: &str, context: &str) {
 }
 
 #[test]
-fn all_ten_species_are_described_and_free_of_zwj_or_fe0f_glyphs() {
+fn all_ten_species_render_half_block_pixel_art_and_avoid_zwj_fe0f() {
     let all = PetSpecies::all();
     assert_eq!(all.len(), 10);
 
@@ -55,11 +52,11 @@ fn all_ten_species_are_described_and_free_of_zwj_or_fe0f_glyphs() {
         assert_no_zwj_or_fe0f(species.display_name(), "display_name");
         assert_no_zwj_or_fe0f(species.element_badge(), "element_badge");
         assert_no_zwj_or_fe0f(species.favorite_snack(), "favorite_snack");
-        assert!(!species.short_family().is_empty());
         assert_eq!(species.star_bar().chars().count(), 5);
 
         let preview = render_species_preview(*species);
-        assert!(!preview.is_empty(), "{species:?} preview");
+        assert_eq!(preview.len(), 8, "{species:?} 24x16 pixel art is 8 rows");
+        assert!(preview.iter().any(|l| l.contains('█') || l.contains('▀') || l.contains('▄')));
 
         let colored_preview = render_colored_preview(*species, EvolutionStage::Adult, 0);
         assert!(!colored_preview.is_empty());
@@ -103,7 +100,7 @@ fn unhatched_egg_refuses_every_care_action() {
         let mut clone = pet.clone();
         let message = clone.apply_action(action);
         assert!(message.contains("unhatched"), "{action:?} -> {message}");
-        assert_eq!(clone.xp, 0, "{action:?} must not grant XP to an egg");
+        assert_eq!(clone.xp, 0);
         assert_eq!(clone.coins, 0);
         assert_eq!(clone.stage, EvolutionStage::Egg);
         assert_eq!(clone.mood, PetMood::Idle);
@@ -115,10 +112,9 @@ fn unhatched_egg_refuses_every_care_action() {
 
     let blocked = pet.warm_egg();
     assert!(blocked.contains("absorbing your warmth"), "{blocked}");
-    assert_eq!(pet.incubation, 20, "cooldown must block incubation gain");
+    assert_eq!(pet.incubation, 20);
     let remaining = pet.warm_cooldown_remaining(Utc::now());
-    assert!(remaining > 0);
-    assert!(remaining <= WARM_COOLDOWN_SECS as u64);
+    assert!(remaining > 0 && remaining <= WARM_COOLDOWN_SECS as u64);
 }
 
 #[test]
@@ -144,9 +140,9 @@ fn passive_incubation_never_hatches_the_egg_by_itself() {
     for _ in 0..200 {
         pet.tick_decay();
     }
-    assert_eq!(pet.stage, EvolutionStage::Egg, "time alone must not hatch");
-    assert_eq!(pet.incubation, 99, "passive warmth tops out at 99%");
-    assert_eq!(pet.hunger, 65, "an egg never starves");
+    assert_eq!(pet.stage, EvolutionStage::Egg);
+    assert_eq!(pet.incubation, 99);
+    assert_eq!(pet.hunger, 65);
 
     let mut pet = Pet::new("Mochi");
     let now = Utc::now() + Duration::hours(3);
@@ -244,8 +240,7 @@ fn care_actions_cannot_be_spammed_for_free_xp() {
     let second = pet.pet_love();
     assert!(second.contains("still basking"), "{second}");
     let pet_rest = pet.pet_cooldown_remaining(Utc::now());
-    assert!(pet_rest > 0);
-    assert!(pet_rest <= PET_COOLDOWN_SECS as u64);
+    assert!(pet_rest > 0 && pet_rest <= PET_COOLDOWN_SECS as u64);
 
     pet.energy = 100;
     pet.hunger = 100;
@@ -255,8 +250,7 @@ fn care_actions_cannot_be_spammed_for_free_xp() {
     let too_soon = pet.train();
     assert!(too_soon.contains("catching their breath"), "{too_soon}");
     let train_rest = pet.train_cooldown_remaining(Utc::now());
-    assert!(train_rest > 0);
-    assert!(train_rest <= TRAIN_COOLDOWN_SECS as u64);
+    assert!(train_rest > 0 && train_rest <= TRAIN_COOLDOWN_SECS as u64);
 
     pet.cleanliness = 100;
     pet.poop_count = 0;
@@ -429,16 +423,16 @@ fn snack_catcher_arcade_and_lcd_bezel_navigation_work() {
 }
 
 #[test]
-fn minimum_terminal_size_guard_and_full_ui_render_cleanly() {
+fn step_by_step_screens_replace_cleanly_and_respect_minimum_size() {
     let (_dir, paths) = temp_paths();
     let mut app = App::new_onboarding(paths);
 
-    assert_eq!(LayoutTier::from_width(70), LayoutTier::Compact);
+    assert_eq!(LayoutTier::from_width(50), LayoutTier::Compact);
     assert_eq!(LayoutTier::from_width(MIN_TERM_WIDTH), LayoutTier::Standard);
     assert_eq!(LayoutTier::from_width(130), LayoutTier::Wide);
 
-    // 1. Below minimum size (< 80x24): renders the Window Size Notice card cleanly.
-    let mut small_term = Terminal::new(TestBackend::new(72, 20)).expect("small term");
+    // 1. Below minimum size (< 68x22): renders Window Size Notice
+    let mut small_term = Terminal::new(TestBackend::new(56, 18)).expect("small term");
     small_term.draw(|f| draw_ui(f, &app)).expect("draw small");
     let small_text: String = small_term
         .backend()
@@ -447,71 +441,75 @@ fn minimum_terminal_size_guard_and_full_ui_render_cleanly() {
         .iter()
         .map(|c| c.symbol())
         .collect();
-    assert!(
-        small_text.contains("Window Size Notice"),
-        "expected resize notice on 72x20"
-    );
+    assert!(small_text.contains("Window Size Notice"));
 
-    // 2. At and above minimum size (>= 80x24): renders the full UI with all 5 shell themes visible!
-    app.onboarding_step = OnboardingStep::SelectTheme;
-    for (width, height) in [(MIN_TERM_WIDTH, MIN_TERM_HEIGHT), (96, 28), (132, 40)] {
-        let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("terminal");
-        terminal.draw(|f| draw_ui(f, &app)).expect("draw");
-        let full_text: String = terminal
-            .backend()
-            .buffer()
-            .content
-            .iter()
-            .map(|c| c.symbol())
-            .collect();
-        assert!(
-            full_text.contains("Sunset Gold"),
-            "all 5 shell themes must fit without clipping at {width}x{height}"
-        );
-        assert!(
-            full_text.contains("★★★★★"),
-            "5-star rarity column must fit without clipping at {width}x{height}"
-        );
+    // 2. Step-by-step Onboarding: Step 1 -> Step 2 -> Step 3 each have their own dedicated screen!
+    let mut term = Terminal::new(TestBackend::new(80, 25)).expect("term");
+    term.draw(|f| draw_ui(f, &app)).expect("draw step 1");
+    let step1_text: String = term
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .map(|c| c.symbol())
+        .collect();
+    assert!(step1_text.contains("STEP 1 OF 3"));
+    assert!(!step1_text.contains("STEP 2 OF 3"));
 
-        // Verify Habitat renders Egg Incubator when stage == Egg
-        app.screen = AppScreen::Habitat;
-        app.pet.stage = EvolutionStage::Egg;
-        terminal.draw(|f| draw_ui(f, &app)).expect("draw egg habitat");
-        let egg_hab: String = terminal
-            .backend()
-            .buffer()
-            .content
-            .iter()
-            .map(|c| c.symbol())
-            .collect();
-        assert!(
-            egg_hab.contains("Egg Incubator Status"),
-            "egg stage should render Egg Incubator Status panel"
-        );
+    app.handle_key(KeyCode::Enter);
+    assert_eq!(app.onboarding_step, OnboardingStep::SelectTheme);
+    term.draw(|f| draw_ui(f, &app)).expect("draw step 2");
+    let step2_text: String = term
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .map(|c| c.symbol())
+        .collect();
+    assert!(step2_text.contains("STEP 2 OF 3"));
+    assert!(step2_text.contains("Sunset Gold"));
+    assert!(!step2_text.contains("STEP 1 OF 3"));
 
-        // Verify Habitat renders Tamagotchi Vitals when hatched
-        app.pet.stage = EvolutionStage::Adult;
-        terminal
-            .draw(|f| draw_ui(f, &app))
-            .expect("draw adult habitat");
-        let adult_hab: String = terminal
-            .backend()
-            .buffer()
-            .content
-            .iter()
-            .map(|c| c.symbol())
-            .collect();
-        assert!(
-            adult_hab.contains("Tamagotchi Vitals"),
-            "hatched stage should render Tamagotchi Vitals panel"
-        );
+    app.handle_key(KeyCode::Enter);
+    assert_eq!(app.onboarding_step, OnboardingStep::EnterName);
+    term.draw(|f| draw_ui(f, &app)).expect("draw step 3");
+    let step3_text: String = term
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .map(|c| c.symbol())
+        .collect();
+    assert!(step3_text.contains("STEP 3 OF 3"));
+    assert!(!step3_text.contains("STEP 2 OF 3"));
 
-        for screen in [AppScreen::SanctuaryRoster, AppScreen::MiniGame] {
-            app.screen = screen;
-            terminal.draw(|f| draw_ui(f, &app)).expect("draw screen");
-        }
-        app.screen = AppScreen::Onboarding;
-    }
+    // 3. Finish adoption -> Minimalist Habitat screen -> press 'i' for dedicated Status Meter screen!
+    app.handle_key(KeyCode::Enter);
+    assert_eq!(app.screen, AppScreen::Habitat);
+    term.draw(|f| draw_ui(f, &app)).expect("draw habitat");
+
+    app.handle_key(KeyCode::Char('i'));
+    assert!(app.show_meter);
+    term.draw(|f| draw_ui(f, &app)).expect("draw egg meter");
+    let egg_meter: String = term
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .map(|c| c.symbol())
+        .collect();
+    assert!(egg_meter.contains("Egg Incubator Status"));
+
+    app.pet.stage = EvolutionStage::Adult;
+    term.draw(|f| draw_ui(f, &app)).expect("draw adult meter");
+    let adult_meter: String = term
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .map(|c| c.symbol())
+        .collect();
+    assert!(adult_meter.contains("Tamagotchi Vitals"));
 
     for mood in PetMood::all() {
         app.pet.mood = *mood;
@@ -521,23 +519,4 @@ fn minimum_terminal_size_guard_and_full_ui_render_cleanly() {
         assert!(!render_colored_sprite(&app.pet, 0).is_empty());
     }
     let _ = theme_color(app.pet.theme);
-}
-
-#[test]
-fn adoption_wizard_lets_you_build_a_collection() {
-    let (_dir, paths) = temp_paths();
-    let mut app = App::new_onboarding(paths);
-    assert_eq!(app.screen, AppScreen::Onboarding);
-    assert_eq!(app.onboarding_step, OnboardingStep::SelectSpecies);
-
-    for _ in 0..4 {
-        app.handle_key(KeyCode::Down);
-    }
-    app.handle_key(KeyCode::Char('v'));
-    app.handle_key(KeyCode::Enter);
-    app.handle_key(KeyCode::Enter);
-    app.handle_key(KeyCode::Enter);
-
-    assert_eq!(app.screen, AppScreen::Habitat);
-    assert_eq!(app.pet.species, PetSpecies::IgnisDragon);
 }

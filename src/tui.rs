@@ -1,12 +1,16 @@
-//! The Ratatui interface for **Mochigotchi v0.5.2**:
-//! - Minimum terminal size guard (`MIN_TERM_WIDTH = 80`, `MIN_TERM_HEIGHT = 24`)
-//! - Unified single-row 7-icon Bandai Tamagotchi LCD Bezel (`🍙Food`, `💡Light`,
-//!   `🎮Game`, `💉Meds`, `🚽Bath`, `📏Meter`, `📢Scold`) inside the Care Console
-//! - High-contrast custom `[████████░░]` vital meters (with a dedicated
-//!   `🥚 Egg Incubator` panel while unhatched so eggs don't show adult hunger/poop
-//!   bars, and full `📊 Tamagotchi Vitals` once hatched)
-//! - Vertically & horizontally centered TrueColor ASCII sprites with zero
-//!   text truncation or wrapping bugs.
+//! Minimalist, Retro, Step-by-Step Handheld LCD Interface for **Mochigotchi**.
+//!
+//! Designed around a single centered **66×22 Retro Handheld V-Pet Frame**
+//! (`BorderType::Double` outer shell + `BorderType::Rounded` inner LCD):
+//! - **Step-by-step Onboarding**: Step 1 (Select Companion with 24×16 Half-Block
+//!   Pixel Art) -> press Enter -> switches screen to Step 2 (Select Shell Color)
+//!   -> press Enter -> switches screen to Step 3 (Name Companion).
+//! - **Minimalist LCD Habitat**: Displays only the 7-icon Tamagotchi Bezel, the
+//!   centered 24×16 TrueColor Pixel Art Sprite, and a 2-line retro status ticker.
+//! - **Step-by-step Subscreens**: Opening the Status Meter (`[I]` / `📏Meter`),
+//!   Pantry (`[M]` / `🍙Food`), Sanctuary Roster (`[L]`), Arcade (`[G]`), or
+//!   Keys Guide (`[?]`) cleanly replaces the inner LCD screen instead of
+//!   cluttering the main view with side-by-side panels.
 
 use std::io;
 use std::time::{Duration, Instant};
@@ -33,7 +37,7 @@ use crate::pet::{
 };
 use crate::sprites::{
     mood_color, render_colored_preview, render_colored_sprite, sky_scene, speech_bubble,
-    species_palette, stage_color, theme_color,
+    species_palette, theme_color,
 };
 use crate::storage::{save_sanctuary, StoragePaths};
 
@@ -41,11 +45,14 @@ const TICK_MS: u64 = 250;
 /// In-game stat decay tick interval: 24 ticks * 250ms = 6 seconds.
 const DECAY_EVERY_TICKS: usize = 24;
 
-/// Minimum terminal dimensions required for a clean, unclipped layout.
-pub const MIN_TERM_WIDTH: u16 = 80;
-pub const MIN_TERM_HEIGHT: u16 = 24;
+/// Minimum terminal dimensions required for the centered retro handheld LCD.
+pub const MIN_TERM_WIDTH: u16 = 68;
+pub const MIN_TERM_HEIGHT: u16 = 22;
 
-/// Responsive layout tiers: Compact (<80, triggers resize notice) < Standard < Wide.
+/// Preferred retro handheld frame dimensions (centered inside larger terminals).
+const HANDHELD_MAX_W: u16 = 74;
+const HANDHELD_MAX_H: u16 = 25;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LayoutTier {
     Compact,
@@ -57,7 +64,7 @@ impl LayoutTier {
     pub fn from_width(width: u16) -> Self {
         if width < MIN_TERM_WIDTH {
             Self::Compact
-        } else if width < 112 {
+        } else if width < 100 {
             Self::Standard
         } else {
             Self::Wide
@@ -223,7 +230,7 @@ impl App {
         match refusal {
             Some(msg) => self.pet.log_action(msg),
             None => {
-                self.minigame = Some(MiniGame::new(38, 12, 120));
+                self.minigame = Some(MiniGame::new(38, 10, 120));
                 self.screen = AppScreen::MiniGame;
             }
         }
@@ -483,10 +490,10 @@ impl App {
     fn handle_roster_key(&mut self, code: KeyCode) {
         let count = self.sanctuary.pets.len().max(1);
         match code {
-            KeyCode::Up | KeyCode::Char('k') => {
+            KeyCode::Up | KeyCode::Left | KeyCode::Char('k') | KeyCode::Char('h') => {
                 self.roster_selected_idx = (self.roster_selected_idx + count - 1) % count;
             }
-            KeyCode::Down | KeyCode::Char('j') => {
+            KeyCode::Down | KeyCode::Right | KeyCode::Char('j') | KeyCode::Char('l') => {
                 self.roster_selected_idx = (self.roster_selected_idx + 1) % count;
             }
             KeyCode::Enter | KeyCode::Char(' ') => {
@@ -494,7 +501,7 @@ impl App {
                 self.screen = AppScreen::Habitat;
             }
             KeyCode::Char('n') | KeyCode::Char('N') => self.start_adopting(),
-            KeyCode::Esc | KeyCode::Char('l') | KeyCode::Char('L') | KeyCode::Char('q') => {
+            KeyCode::Esc | KeyCode::Char('L') | KeyCode::Char('q') => {
                 self.screen = AppScreen::Habitat;
             }
             _ => {}
@@ -665,40 +672,45 @@ impl App {
     }
 }
 
-// ── Rendering ──────────────────────────────────────────────────────────────
+// ── Minimalist Retro Handheld Layout Helpers ───────────────────────────────
 
-fn shell_block(title: &str, theme: ShellTheme) -> Block<'static> {
+/// Compute a centered retro handheld LCD rectangle inside `area`.
+fn handheld_rect(area: Rect) -> Rect {
+    let w = area.width.min(HANDHELD_MAX_W);
+    let h = area.height.min(HANDHELD_MAX_H);
+    let x = area.x + area.width.saturating_sub(w) / 2;
+    let y = area.y + area.height.saturating_sub(h) / 2;
+    Rect::new(x, y, w, h)
+}
+
+fn outer_shell_block(title: &str, theme: ShellTheme) -> Block<'static> {
     Block::default()
         .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
+        .border_type(BorderType::Double)
         .border_style(Style::default().fg(theme_color(theme)))
-        .padding(Padding::new(1, 1, 0, 0))
+        .padding(Padding::new(2, 2, 0, 0))
         .title(Span::styled(
-            title.to_string(),
+            format!(" {title} "),
             Style::default()
                 .fg(theme_color(theme))
                 .add_modifier(Modifier::BOLD),
         ))
+        .title_alignment(Alignment::Center)
 }
 
-fn padded_block(title: &str, border_color: Color, active: bool) -> Block<'static> {
-    let title_style = if active {
-        Style::default()
-            .fg(border_color)
-            .add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().fg(Color::Gray)
-    };
+fn lcd_screen_block(title: &str, accent: Color) -> Block<'static> {
     Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(border_color))
-        .padding(Padding::new(1, 1, 0, 0))
-        .title(Span::styled(title.to_string(), title_style))
+        .border_style(Style::default().fg(accent))
+        .padding(Padding::new(2, 2, 0, 0))
+        .title(Span::styled(
+            format!(" {title} "),
+            Style::default().fg(accent).add_modifier(Modifier::BOLD),
+        ))
+        .title_alignment(Alignment::Center)
 }
 
-/// Crisp, high-contrast 1-line custom progress meter (`[████████░░]  80%  suffix`).
-/// Eliminates the washed-out text-over-bar contrast issue of Ratatui's `Gauge`.
 fn custom_meter_line(
     label: &str,
     pct: u8,
@@ -727,40 +739,15 @@ fn custom_meter_line(
     ])
 }
 
-fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
-    let popup_layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Percentage((100 - percent_y) / 2),
-            Constraint::Percentage(percent_y),
-            Constraint::Percentage((100 - percent_y) / 2),
-        ])
-        .split(r);
-
-    Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage((100 - percent_x) / 2),
-            Constraint::Percentage(percent_x),
-            Constraint::Percentage((100 - percent_x) / 2),
-        ])
-        .split(popup_layout[1])[1]
-}
-
-/// Unified single-row 7-icon Tamagotchi LCD Bezel so `←` / `→` moves across one
-/// horizontal bar inside the Care Console.
 fn render_unified_bezel(selected: LcdIcon, pet: &Pet) -> Line<'static> {
-    let mut spans = vec![Span::styled(
-        "📟 ",
-        Style::default().fg(Color::LightYellow),
-    )];
+    let mut spans = Vec::with_capacity(16);
     for &icon in LcdIcon::selectable() {
         let is_sel = icon == selected;
         let label = if icon == LcdIcon::Lights {
             if pet.light_on {
-                "💡Light:ON"
+                "💡Light"
             } else {
-                "🌙Light:OFF"
+                "🌙Dark"
             }
         } else {
             icon.label()
@@ -780,12 +767,9 @@ fn render_unified_bezel(selected: LcdIcon, pet: &Pet) -> Line<'static> {
 }
 
 fn draw_too_small_notice(f: &mut Frame, area: Rect, theme: ShellTheme) {
-    let block = shell_block(" 📐 Mochigotchi — Please Enlarge Terminal Window ", theme);
+    let block = outer_shell_block("MOCHIGOTCHI V-PET", theme);
     let inner = block.inner(area);
     f.render_widget(block, area);
-
-    let w_ok = area.width >= MIN_TERM_WIDTH;
-    let h_ok = area.height >= MIN_TERM_HEIGHT;
 
     let lines = vec![
         Line::from(""),
@@ -796,40 +780,14 @@ fn draw_too_small_notice(f: &mut Frame, area: Rect, theme: ShellTheme) {
                 .add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
-        Line::from(vec![
-            Span::styled("Current terminal size:  ", Style::default().fg(Color::Gray)),
-            Span::styled(
-                format!("{} cols × {} rows", area.width, area.height),
-                Style::default()
-                    .fg(if w_ok && h_ok {
-                        Color::LightGreen
-                    } else {
-                        Color::LightRed
-                    })
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]),
-        Line::from(vec![
-            Span::styled("Minimum required size:  ", Style::default().fg(Color::Gray)),
-            Span::styled(
-                format!("{MIN_TERM_WIDTH} cols × {MIN_TERM_HEIGHT} rows"),
-                Style::default()
-                    .fg(Color::LightCyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]),
+        Line::from(format!(
+            "Current size: {} × {}  (Minimum: {} × {})",
+            area.width, area.height, MIN_TERM_WIDTH, MIN_TERM_HEIGHT
+        )),
+        Line::from("Please enlarge this terminal window slightly."),
         Line::from(""),
         Line::from(Span::styled(
-            "Please widen or maximize this terminal window so the LCD Bezel,",
-            Style::default().fg(Color::White),
-        )),
-        Line::from(Span::styled(
-            "TrueColor ASCII sprites, and status meters can render cleanly.",
-            Style::default().fg(Color::White),
-        )),
-        Line::from(""),
-        Line::from(Span::styled(
-            "Press [Q] or [Esc] to save & exit",
+            "[Q / Esc] Quit",
             Style::default().fg(Color::DarkGray),
         )),
     ];
@@ -849,445 +807,395 @@ pub fn draw_ui(f: &mut Frame, app: &App) {
         return;
     }
 
-    match app.screen {
-        AppScreen::Onboarding => draw_onboarding(f, app),
-        AppScreen::SanctuaryRoster => draw_roster(f, app),
-        AppScreen::MiniGame => draw_minigame(f, app),
-        AppScreen::Habitat => draw_habitat(f, app),
-    }
+    let device = handheld_rect(area);
+    f.render_widget(Clear, device);
 
-    if app.pantry_open {
-        draw_pantry_modal(f, app);
-    }
-    if app.show_meter {
-        draw_meter_modal(f, app);
-    }
+    // Step-by-step screen routing: only ONE clean screen renders inside the
+    // handheld device at any time!
     if let Some(report) = app.offline_report.as_ref() {
-        draw_offline_report_modal(f, app, report);
-    }
-    if app.show_help {
-        draw_help_modal(f, app);
+        draw_offline_report_screen(f, device, app, report);
+    } else if app.show_help {
+        draw_help_screen(f, device, app);
+    } else if app.show_meter {
+        draw_meter_screen(f, device, app);
+    } else if app.pantry_open {
+        draw_pantry_screen(f, device, app);
+    } else {
+        match app.screen {
+            AppScreen::Onboarding => draw_onboarding_step_screen(f, device, app),
+            AppScreen::SanctuaryRoster => draw_roster_screen(f, device, app),
+            AppScreen::MiniGame => draw_minigame_screen(f, device, app),
+            AppScreen::Habitat => draw_habitat_screen(f, device, app),
+        }
     }
 }
 
-fn draw_onboarding(f: &mut Frame, app: &App) {
-    let area = f.area();
+/// Step-by-step Onboarding: Step 1 -> Step 2 -> Step 3 each have their own
+/// dedicated minimalist retro screen!
+fn draw_onboarding_step_screen(f: &mut Frame, device: Rect, app: &App) {
     let species = PetSpecies::all()[app.selected_species_idx];
     let theme = ShellTheme::all()[app.selected_theme_idx];
     let preview_stage = EvolutionStage::all()[app.preview_stage_idx % EvolutionStage::all().len()];
     let (sp_primary, _, sp_accent) = species_palette(species);
 
-    let block = shell_block(" 🍡 Mochigotchi — Companion Adoption Wizard ", theme);
-    let inner = block.inner(area);
-    f.render_widget(block, area);
+    let shell = outer_shell_block("🍡 MOCHIGOTCHI V-PET  •  NEW COMPANION", theme);
+    let inner = shell.inner(device);
+    f.render_widget(shell, device);
 
-    let current = match app.onboarding_step {
-        OnboardingStep::SelectSpecies => 1,
-        OnboardingStep::SelectTheme => 2,
-        OnboardingStep::EnterName => 3,
-    };
+    match app.onboarding_step {
+        OnboardingStep::SelectSpecies => {
+            let lcd = lcd_screen_block("STEP 1 OF 3  •  CHOOSE COMPANION", sp_primary);
+            let lcd_inner = lcd.inner(inner);
+            f.render_widget(lcd, inner);
 
-    let steps = [
-        "1. Choose Species",
-        "2. Choose Shell",
-        "3. Name & Adopt",
-    ];
-    let mut step_spans: Vec<Span> = Vec::new();
-    for (i, label) in steps.iter().enumerate() {
-        let is_cur = i + 1 == current;
-        let is_done = i + 1 < current;
-        let style = if is_cur {
-            Style::default()
-                .fg(Color::Black)
-                .bg(Color::LightYellow)
-                .add_modifier(Modifier::BOLD)
-        } else if is_done {
-            Style::default()
-                .fg(Color::LightGreen)
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(Color::DarkGray)
-        };
-        step_spans.push(Span::styled(format!(" {label} "), style));
-        if i + 1 < steps.len() {
-            step_spans.push(Span::styled(" ──▸ ", Style::default().fg(Color::DarkGray)));
-        }
-    }
-
-    let rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(2),
-            Constraint::Min(14),
-            Constraint::Length(2),
-        ])
-        .split(inner);
-    f.render_widget(
-        Paragraph::new(Line::from(step_spans)).alignment(Alignment::Center),
-        rows[0],
-    );
-
-    let columns = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(46), Constraint::Percentage(54)])
-        .split(rows[1]);
-
-    let left_rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(12), Constraint::Min(6)])
-        .split(columns[0]);
-
-    let step1_active = app.onboarding_step == OnboardingStep::SelectSpecies;
-    let items: Vec<ListItem> = PetSpecies::all()
-        .iter()
-        .enumerate()
-        .map(|(idx, sp)| {
-            let selected = idx == app.selected_species_idx;
-            let (p_col, _, _) = species_palette(*sp);
-            let cursor = if selected {
-                if step1_active {
-                    "▸"
-                } else {
-                    "•"
-                }
-            } else {
-                " "
-            };
-            let name_style = if selected {
-                Style::default().fg(p_col).add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(Color::Gray)
-            };
-            let star_style = if selected {
-                Style::default()
-                    .fg(Color::LightYellow)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(Color::DarkGray)
-            };
-            ListItem::new(Line::from(vec![
-                Span::styled(format!("{cursor} {:<16} ", sp.display_name()), name_style),
-                Span::styled(sp.star_bar().to_string(), star_style),
-            ]))
-        })
-        .collect();
-
-    let list_border = if step1_active {
-        Color::LightYellow
-    } else {
-        Color::DarkGray
-    };
-    f.render_widget(
-        List::new(items).block(padded_block(
-            " 1. Companions (↑/↓) ",
-            list_border,
-            step1_active,
-        )),
-        left_rows[0],
-    );
-
-    let lore_lines = vec![
-        Line::from(vec![
-            Span::styled("Family:   ", Style::default().fg(Color::DarkGray)),
-            Span::styled(
-                format!("{} ({})", species.family(), species.rarity()),
-                Style::default().fg(Color::White),
-            ),
-        ]),
-        Line::from(vec![
-            Span::styled("Element:  ", Style::default().fg(Color::DarkGray)),
-            Span::styled(
-                species.element_badge().to_string(),
-                Style::default().fg(sp_accent),
-            ),
-        ]),
-        Line::from(vec![
-            Span::styled("Favorite: ", Style::default().fg(Color::DarkGray)),
-            Span::styled(
-                species.favorite_snack().to_string(),
-                Style::default()
-                    .fg(Color::LightGreen)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]),
-        Line::from(Span::styled(
-            species.description().to_string(),
-            Style::default().fg(Color::Gray),
-        )),
-    ];
-    f.render_widget(
-        Paragraph::new(Text::from(lore_lines))
-            .block(padded_block(" Companion Dossier ", sp_primary, true))
-            .wrap(Wrap { trim: false }),
-        left_rows[1],
-    );
-
-    let right_rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(10), Constraint::Length(8)])
-        .split(columns[1]);
-
-    let mut preview_lines = vec![Line::from(vec![
-        Span::styled(
-            format!("Form: {} ", preview_stage.badge()),
-            Style::default()
-                .fg(stage_color(preview_stage))
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("([V/Space] cycle)", Style::default().fg(Color::DarkGray)),
-    ])];
-    preview_lines.extend(render_colored_preview(
-        species,
-        preview_stage,
-        app.tick_count,
-    ));
-
-    f.render_widget(
-        Paragraph::new(Text::from(preview_lines))
-            .alignment(Alignment::Center)
-            .block(padded_block(" TrueColor Sprite Preview ", sp_accent, true)),
-        right_rows[0],
-    );
-
-    let (step_title, step_border, step_active, detail_lines) = match app.onboarding_step {
-        OnboardingStep::SelectSpecies => (
-            " Next Step ",
-            Color::DarkGray,
-            false,
-            vec![
-                Line::from(Span::styled(
-                    "Browse all 10 companions with ↑/↓.",
-                    Style::default().fg(Color::White),
-                )),
-                Line::from(Span::styled(
-                    "Press [V] or [Space] to preview all 5 growth stages.",
-                    Style::default().fg(Color::LightCyan),
-                )),
-                Line::from(""),
-                Line::from(Span::styled(
-                    "▸ Press [Enter] to choose Shell Color!",
-                    Style::default()
-                        .fg(Color::LightYellow)
-                        .add_modifier(Modifier::BOLD),
-                )),
-            ],
-        ),
-        OnboardingStep::SelectTheme => {
-            let mut lines = vec![Line::from(Span::styled(
-                "Choose Shell Color (↑/↓, Enter):",
-                Style::default().fg(Color::White),
-            ))];
-            for (idx, t) in ShellTheme::all().iter().enumerate() {
-                let selected = idx == app.selected_theme_idx;
-                lines.push(Line::from(Span::styled(
-                    format!(" {} {}", if selected { "▸" } else { " " }, t.display_name()),
-                    if selected {
-                        Style::default()
-                            .fg(theme_color(*t))
-                            .add_modifier(Modifier::BOLD)
-                    } else {
-                        Style::default().fg(Color::Gray)
-                    },
-                )));
-            }
-            (" 2. Shell Color (Active) ", Color::LightYellow, true, lines)
-        }
-        OnboardingStep::EnterName => (
-            " 3. Name & Adopt (Active) ",
-            Color::LightYellow,
-            true,
-            vec![
-                Line::from(Span::styled(
-                    "Type a name for your companion:",
-                    Style::default().fg(Color::White),
-                )),
-                Line::from(""),
+            let mut lines = vec![
                 Line::from(vec![
-                    Span::styled(" Name: ", Style::default().fg(Color::Gray)),
+                    Span::styled("◀  ", Style::default().fg(Color::LightYellow)),
                     Span::styled(
-                        format!("▏{}▕", app.onboarding_name_input),
+                        format!(
+                            "{:02}/10  {}  ",
+                            app.selected_species_idx + 1,
+                            species.display_name()
+                        ),
+                        Style::default().fg(sp_primary).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        species.star_bar().to_string(),
                         Style::default()
-                            .fg(Color::Black)
-                            .bg(Color::LightYellow)
+                            .fg(Color::LightYellow)
                             .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled("  ▶", Style::default().fg(Color::LightYellow)),
+                ]),
+                Line::from(Span::styled(
+                    format!(
+                        "{}  •  {}  •  Form: {}",
+                        species.family(),
+                        species.element_badge(),
+                        preview_stage.badge()
+                    ),
+                    Style::default().fg(Color::Gray),
+                )),
+                Line::from(""),
+            ];
+            lines.extend(render_colored_preview(
+                species,
+                preview_stage,
+                app.tick_count,
+            ));
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                species.description().to_string(),
+                Style::default().fg(Color::White),
+            )));
+            lines.push(Line::from(vec![
+                Span::styled("Favorite Snack: ", Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    species.favorite_snack().to_string(),
+                    Style::default().fg(Color::LightGreen),
+                ),
+            ]));
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                "[←/→ or ↑/↓] Browse   [V] Stage Preview   [Enter] Next Step",
+                Style::default()
+                    .fg(sp_accent)
+                    .add_modifier(Modifier::BOLD),
+            )));
+
+            f.render_widget(
+                Paragraph::new(Text::from(lines)).alignment(Alignment::Center),
+                lcd_inner,
+            );
+        }
+
+        OnboardingStep::SelectTheme => {
+            let lcd = lcd_screen_block("STEP 2 OF 3  •  CHOOSE SHELL COLOR", theme_color(theme));
+            let lcd_inner = lcd.inner(inner);
+            f.render_widget(lcd, inner);
+
+            let mut lines = vec![
+                Line::from(vec![
+                    Span::styled("Companion: ", Style::default().fg(Color::Gray)),
+                    Span::styled(
+                        format!("{} ({})", species.display_name(), species.star_bar()),
+                        Style::default().fg(sp_primary).add_modifier(Modifier::BOLD),
                     ),
                 ]),
                 Line::from(""),
                 Line::from(Span::styled(
-                    "▸ Press [Enter] to Adopt!",
-                    Style::default()
-                        .fg(Color::LightGreen)
-                        .add_modifier(Modifier::BOLD),
+                    "Select your retro handheld casing color:",
+                    Style::default().fg(Color::White),
                 )),
-            ],
-        ),
-    };
+                Line::from(""),
+            ];
 
-    f.render_widget(
-        Paragraph::new(Text::from(detail_lines))
-            .block(padded_block(step_title, step_border, step_active))
-            .wrap(Wrap { trim: false }),
-        right_rows[1],
-    );
+            for (idx, t) in ShellTheme::all().iter().enumerate() {
+                let selected = idx == app.selected_theme_idx;
+                let row_text = if selected {
+                    format!("▸  {:<22}  ◂", t.display_name())
+                } else {
+                    format!("   {:<22}   ", t.display_name())
+                };
+                lines.push(Line::from(Span::styled(
+                    row_text,
+                    if selected {
+                        Style::default()
+                            .fg(Color::Black)
+                            .bg(theme_color(*t))
+                            .add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(theme_color(*t))
+                    },
+                )));
+                lines.push(Line::from(""));
+            }
 
-    f.render_widget(
-        Paragraph::new(Line::from(Span::styled(
-            "↑/↓ Select • [V/Space] Cycle Stage • [Enter] Next / Adopt • [Esc] Back",
-            Style::default().fg(Color::Gray),
-        )))
-        .alignment(Alignment::Center),
-        rows[2],
-    );
+            lines.push(Line::from(Span::styled(
+                "[↑/↓] Select Shell   [Enter] Next Step   [Esc] Back to Step 1",
+                Style::default()
+                    .fg(Color::LightYellow)
+                    .add_modifier(Modifier::BOLD),
+            )));
+
+            f.render_widget(
+                Paragraph::new(Text::from(lines)).alignment(Alignment::Center),
+                lcd_inner,
+            );
+        }
+
+        OnboardingStep::EnterName => {
+            let lcd = lcd_screen_block("STEP 3 OF 3  •  NAME YOUR COMPANION", Color::LightYellow);
+            let lcd_inner = lcd.inner(inner);
+            f.render_widget(lcd, inner);
+
+            let mut lines = vec![
+                Line::from(Span::styled(
+                    format!(
+                        "{}  •  Shell: {}",
+                        species.display_name(),
+                        theme.display_name()
+                    ),
+                    Style::default().fg(sp_primary).add_modifier(Modifier::BOLD),
+                )),
+                Line::from(""),
+            ];
+            lines.extend(render_colored_preview(
+                species,
+                EvolutionStage::Egg,
+                app.tick_count,
+            ));
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                "Enter a name for your new companion:",
+                Style::default().fg(Color::White),
+            )));
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                format!("   [  {}▏  ]   ", app.onboarding_name_input),
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::LightYellow)
+                    .add_modifier(Modifier::BOLD),
+            )));
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                "[Enter] Adopt & Start   [Backspace] Edit   [Esc] Back to Step 2",
+                Style::default()
+                    .fg(Color::LightGreen)
+                    .add_modifier(Modifier::BOLD),
+            )));
+
+            f.render_widget(
+                Paragraph::new(Text::from(lines)).alignment(Alignment::Center),
+                lcd_inner,
+            );
+        }
+    }
 }
 
-fn draw_habitat(f: &mut Frame, app: &App) {
-    let area = f.area();
+/// Minimalist Retro Handheld LCD Habitat Screen.
+fn draw_habitat_screen(f: &mut Frame, device: Rect, app: &App) {
     let pet = &app.pet;
     let now = Utc::now();
     let (sp_primary, _, _) = species_palette(pet.species);
     let selected_icon = LcdIcon::selectable()[app.selected_icon_idx % LcdIcon::selectable().len()];
 
-    let title = format!(
-        " 🍡 {} · {} · {} · Lv.{} · {}g ",
-        pet.name,
-        pet.species.display_name(),
-        pet.stage.badge(),
-        pet.level,
-        pet.weight_grams
+    let shell_title = format!(
+        "🍡 MOCHIGOTCHI  •  {} ({})",
+        pet.name.to_uppercase(),
+        pet.species.display_name()
     );
-    let block = shell_block(&title, pet.theme);
-    let inner = block.inner(area);
-    f.render_widget(block, area);
+    let shell = outer_shell_block(&shell_title, pet.theme);
+    let inner = shell.inner(device);
+    f.render_widget(shell, device);
 
-    let vertical = Layout::default()
+    let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),
-            Constraint::Min(10),
-            Constraint::Length(6),
-            Constraint::Length(4),
+            Constraint::Length(1),
+            Constraint::Min(14),
+            Constraint::Length(2),
         ])
         .split(inner);
 
-    let header_area = vertical[0];
-    let body_area = vertical[1];
-    let dock_area = vertical[2];
-    let log_area = vertical[3];
-
-    let columns = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(48), Constraint::Percentage(52)])
-        .split(body_area);
-
-    let (sky, mood_name) = sky_scene(app.tick_count);
-    let call_style = if pet.attention_call.is_active() {
-        Style::default()
-            .fg(Color::LightRed)
-            .add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().fg(Color::Gray)
-    };
-
-    let header_lines = vec![
-        Line::from(vec![
-            Span::styled(
-                format!("{sky} ({mood_name})   "),
-                Style::default().fg(Color::Cyan),
-            ),
-            Span::styled(
-                format!(
-                    "🏰 Sanctuary: {} pets (Lv.{})   ",
-                    app.sanctuary.pets.len(),
-                    app.sanctuary.sanctuary_level
-                ),
-                Style::default()
-                    .fg(Color::LightBlue)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                format!("💰 {} coins   ", pet.coins),
-                Style::default().fg(Color::LightYellow),
-            ),
-            Span::styled(pet.attention_call.badge().to_string(), call_style),
-        ]),
-        Line::from(vec![
-            Span::styled(
-                "💡 Advisor: ",
-                Style::default()
-                    .fg(Color::LightGreen)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(pet.advisor_tip(now), Style::default().fg(Color::White)),
-        ]),
-    ];
+    // 1. Top Bezel Icon Bar
     f.render_widget(
-        Paragraph::new(Text::from(header_lines)).wrap(Wrap { trim: false }),
-        header_area,
+        Paragraph::new(render_unified_bezel(selected_icon, pet)).alignment(Alignment::Center),
+        rows[0],
     );
 
-    // Left column: Habitat box with vertically + horizontally centered sprite
-    let mut raw_sprite_lines = vec![
-        Line::from(Span::styled(
-            speech_bubble(pet, app.tick_count),
-            Style::default()
-                .fg(mood_color(pet.mood))
-                .add_modifier(Modifier::ITALIC),
-        )),
-        Line::from(""),
-    ];
+    // 2. Center Retro LCD Screen (Pixel Art Sprite + minimal status strip)
+    let (sky, _) = sky_scene(app.tick_count);
+    let lcd_title = if pet.stage == EvolutionStage::Egg {
+        format!(
+            "{}  •  🥚 EGG ({}% WARM)  •  🔔 QUIET",
+            sky, pet.incubation
+        )
+    } else {
+        format!(
+            "{}  •  {} LV.{}  •  {}G  •  💰{}  •  {}",
+            sky,
+            pet.stage.badge(),
+            pet.level,
+            pet.weight_grams,
+            pet.coins,
+            pet.attention_call.badge()
+        )
+    };
+    let lcd = lcd_screen_block(&lcd_title, sp_primary);
+    let lcd_inner = lcd.inner(rows[1]);
+    f.render_widget(lcd, rows[1]);
+
+    let mut lcd_lines = Vec::with_capacity(16);
     if !pet.light_on {
-        raw_sprite_lines.push(Line::from(Span::styled(
-            "🌙 [Room Light OFF — Cozy Night Mode]",
+        lcd_lines.push(Line::from(Span::styled(
+            "🌙 [ ROOM LIGHT OFF — NIGHT MODE ]",
             Style::default().fg(Color::LightBlue),
         )));
-    }
-    if pet.has_toothache {
-        raw_sprite_lines.push(Line::from(Span::styled(
-            "🦷 [TOOTHACHE! Press [H] for Medicine!]",
+    } else if pet.has_toothache {
+        lcd_lines.push(Line::from(Span::styled(
+            "🦷 [ TOOTHACHE! PRESS [H] FOR MEDICINE ]",
             Style::default()
                 .fg(Color::LightRed)
                 .add_modifier(Modifier::BOLD),
         )));
+    } else {
+        lcd_lines.push(Line::from(Span::styled(
+            speech_bubble(pet, app.tick_count),
+            Style::default().fg(mood_color(pet.mood)),
+        )));
     }
-    raw_sprite_lines.extend(render_colored_sprite(pet, app.tick_count));
-    raw_sprite_lines.push(Line::from(""));
-    raw_sprite_lines.push(Line::from(vec![
-        Span::styled(
-            format!("{} {} ", pet.mood.emoji(), pet.mood.label()),
+
+    lcd_lines.extend(render_colored_sprite(pet, app.tick_count));
+
+    if pet.stage == EvolutionStage::Egg {
+        let warm_sessions = (pet.incubation / 20).min(5) as usize;
+        let boxes = format!(
+            "{}{}",
+            "■ ".repeat(warm_sessions),
+            "□ ".repeat(5usize.saturating_sub(warm_sessions))
+        );
+        lcd_lines.push(Line::from(Span::styled(
+            format!("Incubation: [{}] {}%", boxes.trim(), pet.incubation),
             Style::default()
-                .fg(mood_color(pet.mood))
+                .fg(Color::LightYellow)
                 .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(
-            format!("• Age {}", format_duration_human(pet.age_seconds)),
-            Style::default().fg(Color::Gray),
-        ),
-    ]));
-
-    let hab_block = padded_block(
-        &format!(" {} Habitat ", pet.species.element_badge()),
-        sp_primary,
-        true,
-    );
-    let hab_inner = hab_block.inner(columns[0]);
-    f.render_widget(hab_block, columns[0]);
-
-    let content_h = raw_sprite_lines.len() as u16;
-    let top_pad = hab_inner.height.saturating_sub(content_h) / 2;
-    let mut centered_sprite = Vec::with_capacity((top_pad + content_h) as usize);
-    for _ in 0..top_pad {
-        centered_sprite.push(Line::from(""));
+        )));
+    } else {
+        lcd_lines.push(Line::from(vec![
+            Span::styled(
+                format!("🍙 {}   ", format_hearts(pet.hungry_hearts())),
+                Style::default().fg(Color::LightGreen),
+            ),
+            Span::styled(
+                format!("💖 {}   ", format_hearts(pet.happy_hearts())),
+                Style::default().fg(Color::LightMagenta),
+            ),
+            Span::styled(
+                format!("⚡ {}%", pet.energy),
+                Style::default().fg(Color::Yellow),
+            ),
+        ]));
     }
-    centered_sprite.extend(raw_sprite_lines);
+
+    let latest_log = pet
+        .action_log
+        .last()
+        .cloned()
+        .unwrap_or_else(|| pet.advisor_tip(now));
+    lcd_lines.push(Line::from(Span::styled(
+        latest_log,
+        Style::default().fg(Color::Gray),
+    )));
 
     f.render_widget(
-        Paragraph::new(Text::from(centered_sprite)).alignment(Alignment::Center),
-        hab_inner,
+        Paragraph::new(Text::from(lcd_lines)).alignment(Alignment::Center),
+        lcd_inner,
     );
 
-    // Right column: Dedicated Egg Incubator when Egg, or Tamagotchi Vitals when hatched
-    let egg = pet.stage == EvolutionStage::Egg;
-    if egg {
+    // 3. Minimalist 2-line Footer (Advisor + Key hints)
+    let footer_lines = if let Some(buf) = app.rename_buffer.as_ref() {
+        vec![
+            Line::from(Span::styled(
+                format!("🔖 Rename: [ {buf}▏ ]  (Enter = Save, Esc = Cancel)"),
+                Style::default()
+                    .fg(Color::LightYellow)
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::from(""),
+        ]
+    } else if pet.stage == EvolutionStage::Egg {
+        vec![
+            Line::from(Span::styled(
+                pet.advisor_tip(now),
+                Style::default().fg(Color::LightGreen),
+            )),
+            Line::from(Span::styled(
+                "[W/Space] Warm Egg  •  [I] Status Meter  •  [L] Sanctuary  •  [N] Adopt  •  [?] Keys",
+                Style::default().fg(Color::DarkGray),
+            )),
+        ]
+    } else {
+        vec![
+            Line::from(Span::styled(
+                pet.advisor_tip(now),
+                Style::default().fg(Color::LightGreen),
+            )),
+            Line::from(Span::styled(
+                "[←/→+Enter] Bezel  [F] Meal  [M] Pantry  [P] Play  [K] Light  [I] Meter  [L] Pets  [?] Keys",
+                Style::default().fg(Color::DarkGray),
+            )),
+        ]
+    };
+    f.render_widget(
+        Paragraph::new(Text::from(footer_lines)).alignment(Alignment::Center),
+        rows[2],
+    );
+}
+
+/// Step-by-step Retro Status Meter Screen (`[I]` or Bezel `📏Meter`).
+fn draw_meter_screen(f: &mut Frame, device: Rect, app: &App) {
+    let pet = &app.pet;
+    let now = Utc::now();
+    let shell = outer_shell_block("📏 TAMAGOTCHI STATUS METER", pet.theme);
+    let inner = shell.inner(device);
+    f.render_widget(shell, device);
+
+    let title = if pet.stage == EvolutionStage::Egg {
+        "🥚 EGG INCUBATOR STATUS".to_string()
+    } else {
+        format!(
+            "📊 Tamagotchi Vitals  •  Page {}/4 (Space / ←/→)",
+            (app.meter_page % 4) + 1
+        )
+    };
+    let lcd = lcd_screen_block(&title, Color::LightCyan);
+    let lcd_inner = lcd.inner(inner);
+    f.render_widget(lcd, inner);
+
+    let mut lines = Vec::new();
+    if pet.stage == EvolutionStage::Egg {
         let warm_cd = pet.warm_cooldown_remaining(now);
         let warm_sessions = (pet.incubation / 20).min(5) as usize;
         let step_boxes = format!(
@@ -1295,71 +1203,47 @@ fn draw_habitat(f: &mut Frame, app: &App) {
             "■ ".repeat(warm_sessions),
             "□ ".repeat(5usize.saturating_sub(warm_sessions))
         );
-        let cd_text = if warm_cd == 0 {
-            "Ready now! Press [W] or [Space] (+20%)".to_string()
-        } else {
-            format!("Next manual warm in {}", format_duration_human(warm_cd))
-        };
-
-        let inc_lines = vec![
-            Line::from(""),
-            custom_meter_line(
-                "🥚 Incubation",
-                pet.incubation,
-                Color::LightYellow,
-                if pet.incubation >= 80 {
-                    "Almost Ready!"
-                } else {
-                    "Warming..."
-                },
-                Color::LightYellow,
-            ),
-            Line::from(""),
-            Line::from(vec![
-                Span::styled("🔥 Warmings   ", Style::default().fg(Color::White)),
-                Span::styled(
-                    format!("[{}] ", step_boxes.trim()),
-                    Style::default()
-                        .fg(Color::LightYellow)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(
-                    format!("{warm_sessions}/5 sessions"),
-                    Style::default().fg(Color::Gray),
-                ),
-            ]),
-            Line::from(""),
-            Line::from(vec![
-                Span::styled("⏳ Warm Timer ", Style::default().fg(Color::White)),
-                Span::styled(cd_text, Style::default().fg(Color::LightCyan)),
-            ]),
-            Line::from(""),
-            custom_meter_line(
-                "🤝 Keeper Bond",
-                pet.bond,
-                Color::LightBlue,
-                "Growing",
-                Color::LightBlue,
-            ),
-            Line::from(""),
-            Line::from(Span::styled(
-                "💡 Hungry, Happy, Discipline, Light & Bath",
-                Style::default().fg(Color::DarkGray),
-            )),
-            Line::from(Span::styled(
-                "   meters unlock as soon as the egg hatches!",
-                Style::default().fg(Color::DarkGray),
-            )),
-        ];
-
-        f.render_widget(
-            Paragraph::new(Text::from(inc_lines)).block(padded_block(
-                " 🥚 Egg Incubator Status ",
-                Color::LightYellow,
-                true,
-            )),
-            columns[1],
-        );
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "Egg Incubator Status",
+            Style::default()
+                .fg(Color::LightYellow)
+                .add_modifier(Modifier::BOLD),
+        )));
+        lines.push(Line::from(""));
+        lines.push(custom_meter_line(
+            "🥚 Incubation",
+            pet.incubation,
+            Color::LightYellow,
+            "Hatch at 100%",
+            Color::LightYellow,
+        ));
+        lines.push(Line::from(""));
+        lines.push(Line::from(format!(
+            "🔥 Warmings:   [{}] ({warm_sessions}/5 sessions)",
+            step_boxes.trim()
+        )));
+        lines.push(Line::from(format!(
+            "⏳ Warm Timer: {}",
+            if warm_cd == 0 {
+                "Ready now! Press [W]".to_string()
+            } else {
+                format!("Wait {}", format_duration_human(warm_cd))
+            }
+        )));
+        lines.push(Line::from(""));
+        lines.push(custom_meter_line(
+            "🤝 Bond",
+            pet.bond,
+            Color::LightBlue,
+            "Keeper Bond",
+            Color::LightBlue,
+        ));
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "Hungry, Happy, Discipline & Hygiene unlock after hatching!",
+            Style::default().fg(Color::DarkGray),
+        )));
     } else {
         let xp_pct = (pet.xp_progress_ratio() * 100.0).round() as u8;
         let target_xp = pet.stage.next_stage().map_or(pet.xp, |n| n.min_xp());
@@ -1370,331 +1254,112 @@ fn draw_habitat(f: &mut Frame, app: &App) {
             "·".repeat(4usize.saturating_sub(disc_blocks))
         );
 
-        let vital_lines = vec![
-            custom_meter_line(
-                "⭐ Stage XP",
-                xp_pct,
-                Color::LightMagenta,
-                &format!("{}/{} XP", pet.xp, target_xp),
-                Color::LightMagenta,
+        lines.push(Line::from(Span::styled(
+            format!(
+                "{} ({})  •  {} Lv.{}  •  Age {}  •  Weight {}g (Base {}g)",
+                pet.name,
+                pet.species.display_name(),
+                pet.stage.badge(),
+                pet.level,
+                format_duration_human(pet.age_seconds),
+                pet.weight_grams,
+                pet.stage.base_weight_grams()
             ),
-            Line::from(""),
-            custom_meter_line(
-                "🍙 Hungry",
-                pet.hunger,
-                Color::LightGreen,
-                &format_hearts(pet.hungry_hearts()),
-                Color::LightGreen,
-            ),
-            custom_meter_line(
-                "💖 Happy",
-                pet.happiness,
-                Color::LightMagenta,
-                &format_hearts(pet.happy_hearts()),
-                Color::LightMagenta,
-            ),
-            custom_meter_line(
-                "📢 Discipline",
-                pet.discipline,
-                Color::LightYellow,
-                &format!("{disc_bar} {}/4", disc_blocks),
-                Color::LightYellow,
-            ),
-            Line::from(""),
-            custom_meter_line(
-                "⚡ Energy",
-                pet.energy,
-                Color::Yellow,
-                if pet.is_sleeping { "Sleeping" } else { "Awake" },
-                Color::Yellow,
-            ),
-            custom_meter_line(
-                "🚽 Hygiene",
-                pet.cleanliness,
-                Color::LightCyan,
-                &format!("Poop: {}", pet.poop_count),
-                if pet.poop_count > 0 {
-                    Color::LightRed
-                } else {
-                    Color::LightCyan
-                },
-            ),
-            custom_meter_line(
-                "💚 Health",
-                pet.health,
-                Color::LightRed,
-                if pet.has_toothache {
-                    "Toothache!"
-                } else if pet.is_sick {
-                    "Sick!"
-                } else {
-                    "Healthy"
-                },
-                if pet.is_sick || pet.has_toothache {
-                    Color::LightRed
-                } else {
-                    Color::LightGreen
-                },
-            ),
-            custom_meter_line(
-                "🤝 Bond",
-                pet.bond,
-                Color::LightBlue,
-                &format!("Mistakes: {}", pet.care_mistakes),
-                Color::Gray,
-            ),
-        ];
-
-        f.render_widget(
-            Paragraph::new(Text::from(vital_lines)).block(padded_block(
-                " 📊 Tamagotchi Vitals & Hearts ",
-                Color::LightCyan,
-                true,
-            )),
-            columns[1],
-        );
-    }
-
-    // Bottom Care Console with unified 1-row LCD Bezel
-    let mut dock_lines = vec![
-        render_unified_bezel(selected_icon, pet),
-        Line::from(Span::styled(
-            pet.next_evolution_requirements(),
-            Style::default().fg(Color::LightYellow),
-        )),
-    ];
-    let keys = if let Some(buffer) = app.rename_buffer.as_ref() {
-        vec![Line::from(Span::styled(
-            format!("🔖 Rename to: {buffer}▏  ([Enter] save, [Esc] cancel)"),
             Style::default()
                 .fg(Color::LightYellow)
                 .add_modifier(Modifier::BOLD),
-        ))]
-    } else if egg {
-        vec![
-            Line::from(vec![
-                Span::styled(
-                    "[W/Space] Warm (+20%)  ",
-                    Style::default()
-                        .fg(Color::LightYellow)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled("[N] Adopt Pet  ", Style::default().fg(Color::LightCyan)),
-                Span::styled("[L] Sanctuary  ", Style::default().fg(Color::LightBlue)),
-                Span::styled("[[/]] Switch Pet", Style::default().fg(Color::Gray)),
-            ]),
-            Line::from(vec![
-                Span::styled(
-                    "←/→ Bezel • [Enter] Confirm • [I] Meter • [?] Help • [Q] Quit  ",
-                    Style::default().fg(Color::DarkGray),
-                ),
-                Span::styled(
-                    app.last_storage_status.clone(),
-                    Style::default().fg(Color::Green),
-                ),
-            ]),
-        ]
-    } else {
-        vec![
-            Line::from(vec![
-                Span::styled(
-                    "[F] Meal ",
-                    Style::default()
-                        .fg(Color::LightGreen)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled("[M] Pantry ", Style::default().fg(Color::LightYellow)),
-                Span::styled("[K] Light ", Style::default().fg(Color::Cyan)),
-                Span::styled("[P] Play ", Style::default().fg(Color::LightMagenta)),
-                Span::styled("[D] Scold ", Style::default().fg(Color::LightRed)),
-                Span::styled("[T] Praise ", Style::default().fg(Color::LightCyan)),
-                Span::styled("[E] Train ", Style::default().fg(Color::Yellow)),
-                Span::styled("[S] Sleep ", Style::default().fg(Color::LightBlue)),
-                Span::styled("[C] Bath ", Style::default().fg(Color::Cyan)),
-                Span::styled("[H] Meds ", Style::default().fg(Color::Red)),
-                Span::styled("[I] Meter ", Style::default().fg(Color::White)),
-                Span::styled("[G] Arcade", Style::default().fg(Color::Green)),
-            ]),
-            Line::from(vec![
-                Span::styled(
-                    "←/→ Bezel + [Enter] • [N] Adopt • [L] Sanctuary • [[/]] Switch • [?] Help • [Q] Quit ",
-                    Style::default().fg(Color::DarkGray),
-                ),
-                Span::styled(
-                    app.last_storage_status.clone(),
-                    Style::default().fg(Color::Green),
-                ),
-            ]),
-        ]
-    };
-    dock_lines.extend(keys);
+        )));
+        lines.push(Line::from(""));
+        lines.push(custom_meter_line(
+            "⭐ Stage XP",
+            xp_pct,
+            Color::LightMagenta,
+            &format!("{}/{} XP", pet.xp, target_xp),
+            Color::LightMagenta,
+        ));
+        lines.push(custom_meter_line(
+            "🍙 Hungry",
+            pet.hunger,
+            Color::LightGreen,
+            &format_hearts(pet.hungry_hearts()),
+            Color::LightGreen,
+        ));
+        lines.push(custom_meter_line(
+            "💖 Happy",
+            pet.happiness,
+            Color::LightMagenta,
+            &format_hearts(pet.happy_hearts()),
+            Color::LightMagenta,
+        ));
+        lines.push(custom_meter_line(
+            "📢 Discipline",
+            pet.discipline,
+            Color::LightYellow,
+            &format!("{disc_bar} {disc_blocks}/4"),
+            Color::LightYellow,
+        ));
+        lines.push(custom_meter_line(
+            "⚡ Energy",
+            pet.energy,
+            Color::Yellow,
+            if pet.is_sleeping { "Sleeping" } else { "Awake" },
+            Color::Yellow,
+        ));
+        lines.push(custom_meter_line(
+            "🚽 Hygiene",
+            pet.cleanliness,
+            Color::LightCyan,
+            &format!("Poop: {}", pet.poop_count),
+            Color::LightCyan,
+        ));
+        lines.push(custom_meter_line(
+            "💚 Health",
+            pet.health,
+            Color::LightRed,
+            if pet.has_toothache {
+                "Toothache!"
+            } else if pet.is_sick {
+                "Sick!"
+            } else {
+                "Healthy"
+            },
+            Color::LightGreen,
+        ));
+        lines.push(custom_meter_line(
+            "🤝 Bond",
+            pet.bond,
+            Color::LightBlue,
+            &format!("Mistakes: {}", pet.care_mistakes),
+            Color::Gray,
+        ));
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            pet.next_evolution_requirements(),
+            Style::default().fg(Color::LightYellow),
+        )));
+    }
 
-    f.render_widget(
-        Paragraph::new(Text::from(dock_lines)).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(theme_color(pet.theme)))
-                .padding(Padding::new(1, 1, 0, 0))
-                .title(" 📟 LCD Bezel & Controls (←/→ Select • Enter Confirm) "),
-        ),
-        dock_area,
-    );
-
-    let log_lines: Vec<Line> = pet
-        .action_log
-        .iter()
-        .rev()
-        .take(2)
-        .map(|msg| Line::from(Span::styled(msg.clone(), Style::default().fg(Color::Gray))))
-        .collect();
-    f.render_widget(
-        Paragraph::new(Text::from(log_lines)).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(Color::DarkGray))
-                .padding(Padding::new(1, 1, 0, 0))
-                .title(" 📜 Care Diary "),
-        ),
-        log_area,
-    );
-}
-
-fn draw_meter_modal(f: &mut Frame, app: &App) {
-    let area = centered_rect(66, 56, f.area());
-    f.render_widget(Clear, area);
-    let pet = &app.pet;
-
-    let block = padded_block(
-        &format!(" 📏 Health Meter — Page {}/4 (←/→ or Space) ", app.meter_page + 1),
-        Color::LightCyan,
-        true,
-    );
-    let inner = block.inner(area);
-    f.render_widget(block, area);
-
-    let page_lines = match app.meter_page % 4 {
-        0 => vec![
-            Line::from(Span::styled(
-                "📄 PAGE 1: AGE, WEIGHT & STAGE",
-                Style::default()
-                    .fg(Color::LightYellow)
-                    .add_modifier(Modifier::BOLD),
-            )),
-            Line::from(""),
-            Line::from(format!(" • Companion: {} ({})", pet.name, pet.species.display_name())),
-            Line::from(format!(" • Stage:     {} (Lv.{} • {} XP)", pet.stage.badge(), pet.level, pet.xp)),
-            Line::from(format!(" • Real Age:  {}", format_duration_human(pet.age_seconds))),
-            Line::from(format!(
-                " • Weight:    {}g (Base Weight: {}g{})",
-                pet.weight_grams,
-                pet.stage.base_weight_grams(),
-                if pet.is_overweight() {
-                    " — Overweight! Exercise with [P]/[E]"
-                } else {
-                    " — Healthy!"
-                }
-            )),
-        ],
-        1 => {
-            let blocks = pet.discipline_blocks() as usize;
-            let bar = format!(
-                "{}{}",
-                "■ ".repeat(blocks),
-                "□ ".repeat(4usize.saturating_sub(blocks))
-            );
-            vec![
-                Line::from(Span::styled(
-                    "📄 PAGE 2: DISCIPLINE & CARE MISTAKES",
-                    Style::default()
-                        .fg(Color::LightYellow)
-                        .add_modifier(Modifier::BOLD),
-                )),
-                Line::from(""),
-                Line::from(format!(" • Discipline:    [{}] ({}%)", bar.trim(), pet.discipline)),
-                Line::from(format!(" • Care Mistakes: {} recorded", pet.care_mistakes)),
-                Line::from(format!(" • Attention Call: {}", pet.attention_call.badge())),
-                Line::from(""),
-                Line::from(" 💡 Scold [D] when acting spoiled; Praise [T] when crying!"),
-            ]
-        }
-        2 => vec![
-            Line::from(Span::styled(
-                "📄 PAGE 3: HUNGRY HEARTS & DIGESTION",
-                Style::default()
-                    .fg(Color::LightGreen)
-                    .add_modifier(Modifier::BOLD),
-            )),
-            Line::from(""),
-            Line::from(format!(
-                " • Hungry Hearts: {}  ({}%)",
-                format_hearts(pet.hungry_hearts()),
-                pet.hunger
-            )),
-            Line::from(format!(
-                " • Sweet Streak:  {}/3 snacks in a row {}",
-                pet.snacks_in_a_row,
-                if pet.has_toothache {
-                    "(🦷 TOOTHACHE!)"
-                } else {
-                    "(Safe)"
-                }
-            )),
-            Line::from(format!(
-                " • Floor Hygiene: {}% Clean (Poop: {}/4)",
-                pet.cleanliness, pet.poop_count
-            )),
-        ],
-        _ => vec![
-            Line::from(Span::styled(
-                "📄 PAGE 4: HAPPY HEARTS, BOND & SLEEP",
-                Style::default()
-                    .fg(Color::LightMagenta)
-                    .add_modifier(Modifier::BOLD),
-            )),
-            Line::from(""),
-            Line::from(format!(
-                " • Happy Hearts:   {}  ({}%)",
-                format_hearts(pet.happy_hearts()),
-                pet.happiness
-            )),
-            Line::from(format!(" • Companion Bond: {}%", pet.bond)),
-            Line::from(format!(
-                " • Room Light:     {}",
-                if pet.light_on { "💡 ON" } else { "🌙 OFF" }
-            )),
-            Line::from(format!(" • Coins Purse:    {} 💰", pet.coins)),
-        ],
-    };
-
-    let mut lines = page_lines;
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "Press [Space/→] for next page • [Esc] or [I] to close",
-        Style::default().fg(Color::Cyan),
+        "[Esc / I] Return to Habitat",
+        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
     )));
 
-    f.render_widget(
-        Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false }),
-        inner,
-    );
+    f.render_widget(Paragraph::new(Text::from(lines)), lcd_inner);
 }
 
-fn draw_pantry_modal(f: &mut Frame, app: &App) {
-    let area = centered_rect(68, 58, f.area());
-    f.render_widget(Clear, area);
+/// Step-by-step Retro Pantry Screen (`[M]` or Bezel `🍙Food`).
+fn draw_pantry_screen(f: &mut Frame, device: Rect, app: &App) {
+    let shell = outer_shell_block("🍱 TAMAGOTCHI PANTRY  •  MEALS & SNACKS", app.pet.theme);
+    let inner = shell.inner(device);
+    f.render_widget(shell, device);
 
-    let block = padded_block(
-        &format!(
-            " 🍱 Tamagotchi Pantry (Meals vs. Snacks) — Coins: {} 💰 ",
-            app.pet.coins
-        ),
+    let lcd = lcd_screen_block(
+        &format!("COINS: {} 💰  •  SWEET STREAK: {}/3", app.pet.coins, app.pet.snacks_in_a_row),
         Color::LightYellow,
-        true,
     );
-    let inner = block.inner(area);
-    f.render_widget(block, area);
+    let lcd_inner = lcd.inner(inner);
+    f.render_widget(lcd, inner);
 
     let mut items: Vec<ListItem> = Vec::new();
     for (idx, choice) in FoodChoice::all().iter().enumerate() {
@@ -1713,7 +1378,7 @@ fn draw_pantry_modal(f: &mut Frame, app: &App) {
                 style,
             )),
             Line::from(Span::styled(
-                format!("      {}", choice.summary()),
+                format!("    {}", choice.summary()),
                 Style::default().fg(Color::Gray),
             )),
         ]));
@@ -1721,41 +1386,41 @@ fn draw_pantry_modal(f: &mut Frame, app: &App) {
 
     let rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(6), Constraint::Length(2)])
-        .split(inner);
+        .constraints([Constraint::Min(10), Constraint::Length(2)])
+        .split(lcd_inner);
 
     f.render_widget(List::new(items), rows[0]);
     f.render_widget(
         Paragraph::new(Line::from(Span::styled(
-            "↑/↓ or [1-5] Select • [Enter] Feed • [Esc] Close",
-            Style::default().fg(Color::Cyan),
+            "[↑/↓ or 1-5] Select   [Enter] Feed   [Esc] Return to Habitat",
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
         )))
         .alignment(Alignment::Center),
         rows[1],
     );
 }
 
-fn draw_offline_report_modal(f: &mut Frame, app: &App, report: &OfflineReport) {
-    let area = centered_rect(72, 58, f.area());
-    f.render_widget(Clear, area);
+/// Step-by-step Welcome Back Offline Report Screen.
+fn draw_offline_report_screen(
+    f: &mut Frame,
+    device: Rect,
+    app: &App,
+    report: &OfflineReport,
+) {
+    let shell = outer_shell_block("🌙 WELCOME BACK TO YOUR SANCTUARY", app.pet.theme);
+    let inner = shell.inner(device);
+    f.render_widget(shell, device);
 
-    let block = padded_block(
-        &format!(
-            " 🌙 Welcome Back! Away for {} ",
-            report.formatted_duration()
-        ),
+    let lcd = lcd_screen_block(
+        &format!("AWAY FOR {}", report.formatted_duration().to_uppercase()),
         Color::LightCyan,
-        true,
     );
-    let inner = block.inner(area);
-    f.render_widget(block, area);
+    let lcd_inner = lcd.inner(inner);
+    f.render_widget(lcd, inner);
 
     let mut lines = vec![
         Line::from(Span::styled(
-            format!(
-                "While the terminal was closed, {} lived on in the Sanctuary:",
-                report.pet_name
-            ),
+            format!("While you were away, {} lived on:", report.pet_name),
             Style::default()
                 .fg(Color::White)
                 .add_modifier(Modifier::BOLD),
@@ -1770,185 +1435,149 @@ fn draw_offline_report_modal(f: &mut Frame, app: &App, report: &OfflineReport) {
     }
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        format!("💡 Next step: {}", app.pet.advisor_tip(Utc::now())),
+        format!("💡 {}", app.pet.advisor_tip(Utc::now())),
         Style::default().fg(Color::LightGreen),
     )));
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "Press [Enter] or [Space] to continue",
-        Style::default().fg(Color::Cyan),
+        "[Enter / Space] Continue to Habitat",
+        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
     )));
 
     f.render_widget(
         Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false }),
-        inner,
+        lcd_inner,
     );
 }
 
-fn draw_help_modal(f: &mut Frame, _app: &App) {
-    let area = centered_rect(78, 76, f.area());
-    f.render_widget(Clear, area);
+/// Step-by-step Help & Controls Screen (`[?]`).
+fn draw_help_screen(f: &mut Frame, device: Rect, app: &App) {
+    let shell = outer_shell_block("📖 TAMAGOTCHI HARDWARE & KEYS GUIDE", app.pet.theme);
+    let inner = shell.inner(device);
+    f.render_widget(shell, device);
 
-    let block = padded_block(
-        " 📖 Tamagotchi Hardware & Care Guide ",
-        Color::LightMagenta,
-        true,
-    );
-    let inner = block.inner(area);
-    f.render_widget(block, area);
+    let lcd = lcd_screen_block("CONTROLS & RULES", Color::LightMagenta);
+    let lcd_inner = lcd.inner(inner);
+    f.render_widget(lcd, inner);
 
     let lines = vec![
         Line::from(Span::styled(
-            "📟 1. 7-Icon LCD Bezel & 3-Button Controls",
+            "📟 Bezel Navigation (3-Button Hardware Style)",
             Style::default()
                 .fg(Color::LightYellow)
                 .add_modifier(Modifier::BOLD),
         )),
-        Line::from("   • Button A (←/→ or A): Cycle across the 7 LCD Bezel Icons."),
-        Line::from("   • Button B (Enter or B): Activate the highlighted Bezel Icon."),
-        Line::from("   • Button C (Esc): Cancel out of any menu or modal."),
+        Line::from(" • Button A (←/→): Select icon on top bezel"),
+        Line::from(" • Button B (Enter): Open highlighted icon"),
+        Line::from(" • Button C (Esc): Return to main LCD Habitat"),
         Line::from(""),
         Line::from(Span::styled(
-            "🍙 2. Meals vs. Sweet Snacks, Weight (g) & Toothache (🦷)",
+            "🍙 Meals vs. Sweet Snacks & Weight (g)",
             Style::default()
                 .fg(Color::LightGreen)
                 .add_modifier(Modifier::BOLD),
         )),
-        Line::from("   • Meals ([F] or Pantry #1/#2/#4) fill Hungry Hearts (+1..2g) and refuse when 4/4 full."),
-        Line::from("   • Sweet Snacks (Pantry #3/#5) fill Happy Hearts (+2..3g), but 3 in a row cause a Toothache 🦷!"),
-        Line::from("   • Play [P] or Train [E] to burn weight (-2g) and keep your companion fit!"),
+        Line::from(" • [F] Meal (+1 Hungry ♥, +1g) • [M] Pantry Menu"),
+        Line::from(" • 3 Sweet Snacks in a row = Toothache 🦷 (cure with [H] Meds)"),
+        Line::from(" • [P] Play / [E] Train burns -2g weight!"),
         Line::from(""),
         Line::from(Span::styled(
-            "💡 3. Room Light ([K]), Discipline ([D]/[T]) & Care Mistakes",
+            "💡 Room Light, Discipline & Sanctuary",
             Style::default()
                 .fg(Color::LightCyan)
                 .add_modifier(Modifier::BOLD),
         )),
-        Line::from("   • When sleeping [S], press [K] to turn the Light OFF! Leaving it on causes a Care Mistake."),
-        Line::from("   • If 🔔 CALL says 'Scold [D]', press [D] (+25% Discipline). If 'Praise [T]', press [T]!"),
-        Line::from("   • Press [I] anytime to flip through the 4-Screen Bandai Health Meter!"),
+        Line::from(" • [S] Sleep + [K] Turn Light OFF • [C] Bath • [D] Scold • [T] Praise"),
+        Line::from(" • [I] Status Meter • [G] Arcade • [L] Sanctuary Pets • [N] Adopt New"),
         Line::from(""),
         Line::from(Span::styled(
-            "Press [Esc], [Enter], or [?] to close",
-            Style::default().fg(Color::Gray),
+            "[Esc / Enter / ?] Return to Habitat",
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
         )),
     ];
 
     f.render_widget(
         Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false }),
-        inner,
+        lcd_inner,
     );
 }
 
-fn draw_roster(f: &mut Frame, app: &App) {
-    let area = f.area();
-    let block = shell_block(
+/// Step-by-step Sanctuary Roster Screen (`[L]`): browse pets one card at a time!
+fn draw_roster_screen(f: &mut Frame, device: Rect, app: &App) {
+    let shell = outer_shell_block(
         &format!(
-            " 🏰 Sanctuary — {} companions · Lv.{} ",
+            "🏰 SANCTUARY ROSTER  •  {} COMPANIONS (LV.{})",
             app.sanctuary.pets.len(),
             app.sanctuary.sanctuary_level
         ),
         app.pet.theme,
     );
-    let inner = block.inner(area);
-    f.render_widget(block, area);
+    let inner = shell.inner(device);
+    f.render_widget(shell, device);
 
-    let columns = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(52), Constraint::Percentage(48)])
-        .split(inner);
-
-    let items: Vec<ListItem> = app
-        .sanctuary
-        .pets
-        .iter()
-        .enumerate()
-        .map(|(idx, pet)| {
-            let selected = idx == app.roster_selected_idx;
-            let (p_col, _, _) = species_palette(pet.species);
-            let marker = if idx == app.sanctuary.active_index {
-                "★"
-            } else if selected {
-                "▸"
-            } else {
-                " "
-            };
-            let style = if selected {
-                Style::default().fg(p_col).add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(Color::Gray)
-            };
-            ListItem::new(Line::from(Span::styled(
-                format!(
-                    "{marker} {}. {:<10} {:<15} {} Lv.{} · {}g",
-                    idx + 1,
-                    pet.name,
-                    pet.species.display_name(),
-                    pet.stage.badge(),
-                    pet.level,
-                    pet.weight_grams,
-                ),
-                style,
-            )))
-        })
-        .collect();
-    f.render_widget(
-        List::new(items).block(padded_block(
-            " Roster (↑/↓ select • [Enter] switch • [N] adopt) ",
-            Color::LightYellow,
-            true,
-        )),
-        columns[0],
-    );
-
-    let highlighted = app
-        .sanctuary
-        .pets
-        .get(app.roster_selected_idx)
-        .unwrap_or(&app.pet);
+    let idx = app
+        .roster_selected_idx
+        .min(app.sanctuary.pets.len().saturating_sub(1));
+    let highlighted = &app.sanctuary.pets[idx];
     let (h_primary, _, _) = species_palette(highlighted.species);
+    let is_active = idx == app.sanctuary.active_index;
+
+    let lcd = lcd_screen_block(
+        &format!(
+            "◀  COMPANION {:02}/{:02} {}  ▶",
+            idx + 1,
+            app.sanctuary.pets.len(),
+            if is_active { "(★ ACTIVE)" } else { "" }
+        ),
+        h_primary,
+    );
+    let lcd_inner = lcd.inner(inner);
+    f.render_widget(lcd, inner);
+
     let mut lines = vec![
         Line::from(Span::styled(
             format!(
-                "{} · {} · {}",
+                "{}  •  {}  •  {} Lv.{} ({}g)",
                 highlighted.name,
                 highlighted.species.display_name(),
-                highlighted.species.rarity()
-            ),
-            Style::default().fg(h_primary).add_modifier(Modifier::BOLD),
-        )),
-        Line::from(Span::styled(
-            format!(
-                "{} Lv.{} ({}g) • Hungry {} • Happy {}",
                 highlighted.stage.badge(),
                 highlighted.level,
-                highlighted.weight_grams,
-                format_hearts(highlighted.hungry_hearts()),
-                format_hearts(highlighted.happy_hearts())
+                highlighted.weight_grams
             ),
-            Style::default().fg(Color::Gray),
+            Style::default().fg(h_primary).add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
     ];
     lines.extend(render_colored_sprite(highlighted, app.tick_count));
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        format!(
+            "Hungry: {}   Happy: {}   Incubation: {}%",
+            format_hearts(highlighted.hungry_hearts()),
+            format_hearts(highlighted.happy_hearts()),
+            highlighted.incubation
+        ),
+        Style::default().fg(Color::White),
+    )));
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "[←/→ or ↑/↓] Browse Pets   [Enter] Switch Active   [N] Adopt New   [Esc] Back",
+        Style::default()
+            .fg(Color::LightYellow)
+            .add_modifier(Modifier::BOLD),
+    )));
+
     f.render_widget(
-        Paragraph::new(Text::from(lines))
-            .alignment(Alignment::Center)
-            .block(padded_block(" Companion Card ", h_primary, true)),
-        columns[1],
+        Paragraph::new(Text::from(lines)).alignment(Alignment::Center),
+        lcd_inner,
     );
 }
 
-fn draw_minigame(f: &mut Frame, app: &App) {
-    let area = f.area();
-    let block = shell_block(" 🎮 Snack Catcher Arcade ", app.pet.theme);
-    let inner = block.inner(area);
-    f.render_widget(block, area);
-
-    let rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(6), Constraint::Length(3)])
-        .split(inner);
+/// Step-by-step Snack Catcher Arcade Screen (`[G]`).
+fn draw_minigame_screen(f: &mut Frame, device: Rect, app: &App) {
+    let shell = outer_shell_block("🎮 SNACK CATCHER ARCADE", app.pet.theme);
+    let inner = shell.inner(device);
+    f.render_widget(shell, device);
 
     let (arena, status) = match app.minigame.as_ref() {
         Some(game) => {
@@ -1960,7 +1589,7 @@ fn draw_minigame(f: &mut Frame, app: &App) {
             (
                 Text::from(lines),
                 format!(
-                    "Score {} · Coins +{} · XP +{} · Time left {}",
+                    "SCORE {}  •  COINS +{}  •  XP +{}  •  TIME {}",
                     game.score, game.coins_earned, game.xp_earned, game.ticks_remaining
                 ),
             )
@@ -1968,24 +1597,24 @@ fn draw_minigame(f: &mut Frame, app: &App) {
         None => (Text::from(""), "no game running".to_string()),
     };
 
+    let lcd = lcd_screen_block(&status, Color::LightGreen);
+    let lcd_inner = lcd.inner(inner);
+    f.render_widget(lcd, inner);
+
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(10), Constraint::Length(2)])
+        .split(lcd_inner);
+
     f.render_widget(
-        Paragraph::new(arena)
-            .alignment(Alignment::Center)
-            .block(padded_block(
-                " Catch snacks & stars! Avoid [X]! ",
-                Color::LightGreen,
-                true,
-            )),
+        Paragraph::new(arena).alignment(Alignment::Center),
         rows[0],
     );
     f.render_widget(
-        Paragraph::new(Text::from(vec![
-            Line::from(Span::styled(status, Style::default().fg(Color::LightYellow))),
-            Line::from(Span::styled(
-                "←/→ or A/D to move basket · Esc/Q to finish & claim rewards",
-                Style::default().fg(Color::Gray),
-            )),
-        ]))
+        Paragraph::new(Line::from(Span::styled(
+            "[←/→ or A/D] Move Basket   •   [Esc / Q] Finish & Claim Rewards",
+            Style::default().fg(Color::LightYellow),
+        )))
         .alignment(Alignment::Center),
         rows[1],
     );
@@ -2114,7 +1743,7 @@ mod tests {
 
     #[test]
     fn renders_resize_guard_on_small_terminal_and_full_ui_on_standard_and_wide() {
-        for (w, h) in [(60u16, 20u16), (80, 24), (104, 30), (140, 44)] {
+        for (w, h) in [(54u16, 18u16), (68, 22), (96, 28), (140, 44)] {
             let backend = TestBackend::new(w, h);
             let mut terminal = Terminal::new(backend).unwrap();
             let paths = tmp_paths(&format!("render{w}"));
@@ -2137,7 +1766,7 @@ mod tests {
     fn every_screen_and_wizard_step_renders() {
         let paths = tmp_paths("screens");
         let mut app = App::new(Pet::new("Mochi"), paths.clone());
-        let backend = TestBackend::new(120, 40);
+        let backend = TestBackend::new(100, 30);
         let mut terminal = Terminal::new(backend).unwrap();
 
         for screen in [
