@@ -57,9 +57,9 @@ fn onboarding_wizard_auto_morphs_evolution_and_adopts_into_sanctuary() {
     assert_eq!(app.onboarding_step, OnboardingStep::SelectSpecies);
     assert!(app.preview_auto_morph);
 
-    // Step 1 auto-animates through Egg -> Baby -> Teen -> Adult -> Elder every 6 ticks
+    // Step 1 auto-animates through Egg -> Baby -> Teen -> Adult -> Elder every 18 ticks (~4.5s)
     let mut seen_stages = vec![app.preview_stage_idx];
-    for _ in 0..24 {
+    for _ in 0..72 {
         app.on_tick();
         if !seen_stages.contains(&app.preview_stage_idx) {
             seen_stages.push(app.preview_stage_idx);

@@ -1,14 +1,14 @@
-//! Minimalist, Retro, Step-by-Step Handheld LCD Interface for **Mochigotchi v1.1.0**:
-//! - **32×20 TrueColor Half-Block Pixel Art** inside a centered Retro Handheld frame.
-//! - **Live Evolution Morph Showcase** in Step 1 of the Adoption Wizard:
-//!   automatically animates `🥚 Egg ──► 🍼 Baby ──► 🌱 Teen ──► 🌸 Adult ──► 🌟 Elder`
-//!   so you can watch every form a companion will take before adopting!
-//! - **Inner Thought Bubble (`💭`) & Interactive Pet Dialogue Screen (`[Y]` / `💬Talk`)**:
-//!   see what your companion is thinking and answer their 2-choice questions!
-//! - **3-in-1 Retro Arcade Center (`[G]`)**: switch between *Snack Catcher*,
-//!   *Bandai Left/Right Mind-Reader*, and *Starlight Hurdle Dash* with `[1]`, `[2]`, `[3]`.
-//! - **8-Bit Chiptune Sound Engine (`[U]` toggle)**: plays synthesized square-wave
-//!   Tamagotchi melodies for every action and displays a live `🔊` sound cue badge.
+//! Minimalist, Retro, Step-by-Step Handheld LCD Interface for **Mochigotchi v1.0.0**:
+//! - **40×24 TrueColor Half-Block Pixel Art** inside a centered Retro Handheld frame,
+//!   evolving from **Cute Chibi (`Baby`) -> Agile (`Teen`) -> Fierce (`Adult`) ->
+//!   Badass Apex Sovereign (`CyberElder`)**!
+//! - **Readable Evolution Morph Showcase** in Step 1 of the Adoption Wizard:
+//!   cycles smoothly every 4.5 seconds (`18` ticks) with an Apex Form title banner,
+//!   or step manually at your own pace with `[V]` / `[Space]`.
+//! - **Slow, Readable Inner Thought (`💭`) & Speech (`💬`) Bubbles** (12s per line)
+//!   plus Interactive Heart-to-Heart Dialogue (`[Y]` / `💬Talk`).
+//! - **Full-Color 3-in-1 Retro Arcade Cabinet (`[G]`)**: *Snack Catcher* (with Fever
+//!   Gauge & pixel cart), *Bandai Mind-Reader* (with neon pads), and *Starlight Hurdle Dash*!
 
 use std::io;
 use std::time::{Duration, Instant};
@@ -43,14 +43,16 @@ use crate::storage::{save_sanctuary, StoragePaths};
 const TICK_MS: u64 = 250;
 /// In-game stat decay tick interval: 24 ticks * 250ms = 6 seconds.
 const DECAY_EVERY_TICKS: usize = 24;
+/// Auto-morph interval in Step 1: 18 ticks * 250ms = 4.5 seconds per stage!
+const AUTO_MORPH_TICKS: usize = 18;
 
 /// Minimum terminal dimensions required for the centered retro handheld LCD.
 pub const MIN_TERM_WIDTH: u16 = 68;
 pub const MIN_TERM_HEIGHT: u16 = 24;
 
 /// Preferred retro handheld frame dimensions (centered inside larger terminals).
-const HANDHELD_MAX_W: u16 = 76;
-const HANDHELD_MAX_H: u16 = 27;
+const HANDHELD_MAX_W: u16 = 78;
+const HANDHELD_MAX_H: u16 = 29;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LayoutTier {
@@ -148,7 +150,7 @@ impl App {
             onboarding_step: OnboardingStep::SelectSpecies,
             selected_species_idx,
             selected_theme_idx,
-            preview_stage_idx: 0,
+            preview_stage_idx: 4, // Start preview on Apex Elder or cycle smoothly!
             preview_auto_morph: true,
             roster_selected_idx: 0,
             selected_icon_idx: 0,
@@ -173,6 +175,7 @@ impl App {
     pub fn new_onboarding(paths: StoragePaths) -> Self {
         let mut app =
             Self::new_with_sanctuary(Sanctuary::new_with_pet(Pet::new("Mochi")), paths, true);
+        app.preview_stage_idx = 0;
         app.onboarding_name_input = "Mochi".to_string();
         app
     }
@@ -273,7 +276,7 @@ impl App {
             }
             None => {
                 self.sound.play(SoundEffect::BeepConfirm);
-                self.minigame = Some(MiniGame::new_with_mode(mode, 38, 10, 120));
+                self.minigame = Some(MiniGame::new_with_mode(mode, 44, 8, 120));
                 self.screen = AppScreen::MiniGame;
             }
         }
@@ -336,7 +339,6 @@ impl App {
     }
 
     pub fn handle_key(&mut self, code: KeyCode) {
-        // Global sound mute/unmute toggle `[U]` (except when typing a name)
         if self.rename_buffer.is_none()
             && !(self.screen == AppScreen::Onboarding
                 && self.onboarding_step == OnboardingStep::EnterName)
@@ -853,11 +855,11 @@ impl App {
     pub fn on_tick(&mut self) {
         self.tick_count = self.tick_count.wrapping_add(1);
 
-        // Auto-morph evolution showcase in Step 1 of Onboarding every 6 ticks (~1.5s)
+        // Smooth, readable auto-morph evolution showcase in Step 1 every 18 ticks (~4.5s)
         if self.screen == AppScreen::Onboarding
             && self.onboarding_step == OnboardingStep::SelectSpecies
             && self.preview_auto_morph
-            && self.tick_count.is_multiple_of(6)
+            && self.tick_count.is_multiple_of(AUTO_MORPH_TICKS)
         {
             self.preview_stage_idx = (self.preview_stage_idx + 1) % EvolutionStage::all().len();
         }
@@ -1051,8 +1053,27 @@ pub fn draw_ui(f: &mut Frame, app: &App) {
     }
 }
 
-/// Render the animated Evolution Morph Timeline Bar (`🥚 Egg ▸ 🍼 Baby ▸ 🌱 Teen ▸ 🌸 Adult ▸ 🌟 Elder`)
-/// for Step 1 of the Adoption Wizard!
+fn stage_power_title(species: PetSpecies, stage: EvolutionStage) -> &'static str {
+    match stage {
+        EvolutionStage::Egg => "🥚 ELEMENTAL EGG — DORMANT SPIRIT",
+        EvolutionStage::Baby => "🍼 BABY FORM — CUTE TINY HATCHLING",
+        EvolutionStage::Teen => "🌱 TEEN FORM — AGILE STRIKER",
+        EvolutionStage::Adult => "🌸 ADULT FORM — FIERCE GUARDIAN",
+        EvolutionStage::CyberElder => match species {
+            PetSpecies::IgnisDragon => "⚡ APEX ELDER — INFERNO BAHAMUT SOVEREIGN",
+            PetSpecies::AzureWyrm => "⚡ APEX ELDER — TIDAL LEVIATHAN SOVEREIGN",
+            PetSpecies::EmberFox => "⚡ APEX ELDER — NINE-TAILED KYUUBI SPIRIT",
+            PetSpecies::PhoenixChick => "⚡ APEX ELDER — SOLAR GARUDA DEITY",
+            PetSpecies::CrystalUni => "⚡ APEX ELDER — CELESTIAL KIRIN PEGASUS",
+            PetSpecies::SlimeKing => "⚡ APEX ELDER — TITAN SLIME EMPEROR",
+            PetSpecies::MochiCat => "⚡ APEX ELDER — BYAKKO SABER TIGER SHOGUN",
+            PetSpecies::BobaPup => "⚡ APEX ELDER — FENRIR DIRE WOLF GUARDIAN",
+            PetSpecies::CloudBun => "⚡ APEX ELDER — RAIJIN STORM VALKYRIE",
+            PetSpecies::StarPengu => "⚡ APEX ELDER — EMPOLEON FROST KAISER",
+        },
+    }
+}
+
 fn render_evolution_morph_bar(active_stage: EvolutionStage, auto_morph: bool) -> Line<'static> {
     let mut spans = Vec::with_capacity(12);
     for (idx, &stage) in EvolutionStage::all().iter().enumerate() {
@@ -1077,8 +1098,6 @@ fn render_evolution_morph_bar(active_stage: EvolutionStage, auto_morph: bool) ->
     Line::from(spans)
 }
 
-/// Step-by-step Onboarding: Step 1 (with live animated Evolution Morph Showcase!)
-/// -> Step 2 -> Step 3.
 fn draw_onboarding_step_screen(f: &mut Frame, device: Rect, app: &App) {
     let species = PetSpecies::all()[app.selected_species_idx];
     let theme = ShellTheme::all()[app.selected_theme_idx];
@@ -1121,6 +1140,12 @@ fn draw_onboarding_step_screen(f: &mut Frame, device: Rect, app: &App) {
                     Span::styled("  ▶", Style::default().fg(Color::LightYellow)),
                 ]),
                 render_evolution_morph_bar(preview_stage, app.preview_auto_morph),
+                Line::from(Span::styled(
+                    stage_power_title(species, preview_stage),
+                    Style::default()
+                        .fg(stage_color(preview_stage))
+                        .add_modifier(Modifier::BOLD),
+                )),
             ];
             lines.extend(render_colored_preview(
                 species,
@@ -1142,7 +1167,7 @@ fn draw_onboarding_step_screen(f: &mut Frame, device: Rect, app: &App) {
                 ),
             ]));
             lines.push(Line::from(Span::styled(
-                "[←/→] Species  [V] Step Form  [M] Auto-Morph  [Enter] Next Step",
+                "[←/→] Species  [V/Space] Step Form  [M] Auto-Morph  [Enter] Next Step",
                 Style::default()
                     .fg(sp_accent)
                     .add_modifier(Modifier::BOLD),
@@ -1253,8 +1278,6 @@ fn draw_onboarding_step_screen(f: &mut Frame, device: Rect, app: &App) {
     }
 }
 
-/// Minimalist Retro Handheld LCD Habitat Screen with Inner Thought Bubble (`💭`)
-/// + Speech Bubble (`💬`) + 32×20 TrueColor Pixel Art Sprite.
 fn draw_habitat_screen(f: &mut Frame, device: Rect, app: &App) {
     let pet = &app.pet;
     let now = Utc::now();
@@ -1275,18 +1298,16 @@ fn draw_habitat_screen(f: &mut Frame, device: Rect, app: &App) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(1),
-            Constraint::Min(15),
+            Constraint::Min(17),
             Constraint::Length(2),
         ])
         .split(inner);
 
-    // 1. Top Bezel Icon Bar
     f.render_widget(
         Paragraph::new(render_unified_bezel(selected_icon, pet)).alignment(Alignment::Center),
         rows[0],
     );
 
-    // 2. Center Retro LCD Screen (Thought + Speech + 32x20 Pixel Art + Status)
     let (sky, _) = sky_scene(app.tick_count);
     let lcd_title = if pet.stage == EvolutionStage::Egg {
         format!(
@@ -1308,9 +1329,8 @@ fn draw_habitat_screen(f: &mut Frame, device: Rect, app: &App) {
     let lcd_inner = lcd.inner(rows[1]);
     f.render_widget(lcd, rows[1]);
 
-    let mut lcd_lines = Vec::with_capacity(16);
+    let mut lcd_lines = Vec::with_capacity(18);
 
-    // Inner Thought Bubble (`💭`) + Speech Bubble (`💬`)
     lcd_lines.push(Line::from(Span::styled(
         thought_bubble(pet, app.tick_count),
         Style::default().fg(Color::LightCyan),
@@ -1335,9 +1355,8 @@ fn draw_habitat_screen(f: &mut Frame, device: Rect, app: &App) {
         )));
     }
 
-    // 32×20 Pixel Art Sprite (12 lines: particles + 10 pixel rows + pedestal)
     let sprite = render_colored_sprite(pet, app.tick_count);
-    lcd_lines.extend(sprite.into_iter().take(12));
+    lcd_lines.extend(sprite.into_iter().take(14));
 
     if pet.stage == EvolutionStage::Egg {
         let warm_sessions = (pet.incubation / 20).min(5) as usize;
@@ -1379,7 +1398,6 @@ fn draw_habitat_screen(f: &mut Frame, device: Rect, app: &App) {
         lcd_inner,
     );
 
-    // 3. Minimalist 2-line Footer (Advisor + Key hints)
     let footer_lines = if let Some(buf) = app.rename_buffer.as_ref() {
         vec![
             Line::from(Span::styled(
@@ -1419,11 +1437,10 @@ fn draw_habitat_screen(f: &mut Frame, device: Rect, app: &App) {
     );
 }
 
-/// Interactive Heart-to-Heart Pet Dialogue Screen (`[Y]` or Bezel `💬Talk`).
 fn draw_talk_screen(f: &mut Frame, device: Rect, app: &App) {
     let pet = &app.pet;
     let (sp_primary, _, _) = species_palette(pet.species);
-    let prompt = pet.dialogue_prompt(app.tick_count);
+    let prompt = pet.dialogue_prompt(app.tick_count / 20);
 
     let shell = outer_shell_block(
         &format!("💬 HEART-TO-HEART CHAT WITH {}", pet.name.to_uppercase()),
@@ -1451,7 +1468,7 @@ fn draw_talk_screen(f: &mut Frame, device: Rect, app: &App) {
                 .add_modifier(Modifier::BOLD),
         )),
     ];
-    lines.extend(render_colored_sprite(pet, app.tick_count).into_iter().take(12));
+    lines.extend(render_colored_sprite(pet, app.tick_count).into_iter().take(14));
 
     let opt1_style = if app.talk_selected_idx == 1 {
         Style::default()
@@ -1489,7 +1506,6 @@ fn draw_talk_screen(f: &mut Frame, device: Rect, app: &App) {
     );
 }
 
-/// Step-by-step Retro Status Meter Screen (`[I]` or Bezel `📏Meter`).
 fn draw_meter_screen(f: &mut Frame, device: Rect, app: &App) {
     let pet = &app.pet;
     let now = Utc::now();
@@ -1747,7 +1763,6 @@ fn draw_meter_screen(f: &mut Frame, device: Rect, app: &App) {
     f.render_widget(Paragraph::new(Text::from(lines)), lcd_inner);
 }
 
-/// Step-by-step Retro Pantry Screen (`[M]` or Bezel `🍙Food`).
 fn draw_pantry_screen(f: &mut Frame, device: Rect, app: &App) {
     let shell = outer_shell_block("🍱 TAMAGOTCHI PANTRY  •  MEALS & SNACKS", app.pet.theme);
     let inner = shell.inner(device);
@@ -1802,7 +1817,6 @@ fn draw_pantry_screen(f: &mut Frame, device: Rect, app: &App) {
     );
 }
 
-/// Step-by-step Welcome Back Offline Report Screen.
 fn draw_offline_report_screen(
     f: &mut Frame,
     device: Rect,
@@ -1852,7 +1866,6 @@ fn draw_offline_report_screen(
     );
 }
 
-/// Step-by-step Help & Controls Screen (`[?]`).
 fn draw_help_screen(f: &mut Frame, device: Rect, app: &App) {
     let shell = outer_shell_block("📖 TAMAGOTCHI HARDWARE & KEYS GUIDE", app.pet.theme);
     let inner = shell.inner(device);
@@ -1900,7 +1913,6 @@ fn draw_help_screen(f: &mut Frame, device: Rect, app: &App) {
     f.render_widget(Paragraph::new(Text::from(lines)), lcd_inner);
 }
 
-/// Step-by-step Sanctuary Roster Screen (`[L]`): browse pets one card at a time!
 fn draw_roster_screen(f: &mut Frame, device: Rect, app: &App) {
     let shell = outer_shell_block(
         &format!(
@@ -1946,7 +1958,7 @@ fn draw_roster_screen(f: &mut Frame, device: Rect, app: &App) {
     lines.extend(
         render_colored_sprite(highlighted, app.tick_count)
             .into_iter()
-            .take(12),
+            .take(14),
     );
     lines.push(Line::from(Span::styled(
         format!(
@@ -1970,36 +1982,59 @@ fn draw_roster_screen(f: &mut Frame, device: Rect, app: &App) {
     );
 }
 
-/// Step-by-step 3-in-1 Retro Arcade Center Screen (`[G]` or Bezel `🎮Game`).
+fn render_arcade_mode_tabs(active_mode: GameMode) -> Line<'static> {
+    let mut spans = Vec::with_capacity(8);
+    for (idx, &mode) in GameMode::all().iter().enumerate() {
+        let is_cur = mode == active_mode;
+        let style = if is_cur {
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::LightYellow)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::Cyan)
+        };
+        spans.push(Span::styled(format!(" {} ", mode.title()), style));
+        if idx + 1 < GameMode::all().len() {
+            spans.push(Span::raw("   "));
+        }
+    }
+    Line::from(spans)
+}
+
 fn draw_minigame_screen(f: &mut Frame, device: Rect, app: &App) {
-    let shell = outer_shell_block("🎮 3-IN-1 RETRO ARCADE CENTER", app.pet.theme);
+    let (sp_primary, _, _) = species_palette(app.pet.species);
+    let shell = outer_shell_block(
+        &format!(
+            "🎮 RETRO PIXEL ARCADE CABINET  •  {}",
+            app.sound.status_badge()
+        ),
+        app.pet.theme,
+    );
     let inner = shell.inner(device);
     f.render_widget(shell, device);
 
-    let (mode_title, arena, status) = match app.minigame.as_ref() {
-        Some(game) => {
-            let lines: Vec<Line> = game
-                .render_lines()
-                .into_iter()
-                .map(|line| Line::from(Span::styled(line, Style::default().fg(Color::LightGreen))))
-                .collect();
-            (
-                game.mode.title(),
-                Text::from(lines),
-                format!(
-                    "{}  •  SCORE {}  •  STREAK x{}  •  +{} 💰  •  +{} XP",
-                    game.mode.title(),
-                    game.score,
-                    game.combo.max(1),
-                    game.coins_earned,
-                    game.xp_earned
-                ),
-            )
-        }
-        None => ("Arcade", Text::from(""), "no game running".to_string()),
+    let (active_mode, arena, status) = match app.minigame.as_ref() {
+        Some(game) => (
+            game.mode,
+            Text::from(game.render_colored_lines(sp_primary)),
+            format!(
+                "SCORE {}  •  STREAK x{}  •  +{} 💰  •  +{} XP  •  ⏱ {}T",
+                game.score,
+                game.combo.max(1),
+                game.coins_earned,
+                game.xp_earned,
+                game.ticks_remaining
+            ),
+        ),
+        None => (
+            GameMode::SnackCatcher,
+            Text::from(""),
+            "no game running".to_string(),
+        ),
     };
 
-    let lcd = lcd_screen_block(&status, Color::LightGreen);
+    let lcd = lcd_screen_block(&status, sp_primary);
     let lcd_inner = lcd.inner(inner);
     f.render_widget(lcd, inner);
 
@@ -2007,25 +2042,13 @@ fn draw_minigame_screen(f: &mut Frame, device: Rect, app: &App) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(2),
-            Constraint::Min(10),
+            Constraint::Min(12),
             Constraint::Length(2),
         ])
         .split(lcd_inner);
 
     f.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled(
-                "Switch Game: [1] Catcher  [2] Mind-Reader  [3] Hurdle Dash  (Current: ",
-                Style::default().fg(Color::Gray),
-            ),
-            Span::styled(
-                format!("{mode_title})"),
-                Style::default()
-                    .fg(Color::LightYellow)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]))
-        .alignment(Alignment::Center),
+        Paragraph::new(render_arcade_mode_tabs(active_mode)).alignment(Alignment::Center),
         rows[0],
     );
     f.render_widget(
@@ -2034,8 +2057,10 @@ fn draw_minigame_screen(f: &mut Frame, device: Rect, app: &App) {
     );
     f.render_widget(
         Paragraph::new(Line::from(Span::styled(
-            "[←/→] Move / Guess   [Space/↑] Jump   [1/2/3/Tab] Game Mode   [Esc/Q] Claim & Exit",
-            Style::default().fg(Color::LightCyan),
+            "[←/→] Move/Guess   [Space/↑] Jump   [1/2/3/Tab] Switch Game   [Esc/Q] Claim & Exit",
+            Style::default()
+                .fg(Color::LightCyan)
+                .add_modifier(Modifier::BOLD),
         )))
         .alignment(Alignment::Center),
         rows[2],
@@ -2120,12 +2145,12 @@ mod tests {
         assert_eq!(app.screen, AppScreen::Onboarding);
         assert!(app.preview_auto_morph);
         let initial_stage = app.preview_stage_idx;
-        for _ in 0..6 {
+        for _ in 0..AUTO_MORPH_TICKS {
             app.on_tick();
         }
         assert_ne!(
             app.preview_stage_idx, initial_stage,
-            "Step 1 must auto-animate evolution stages"
+            "Step 1 must auto-animate evolution stages every AUTO_MORPH_TICKS"
         );
 
         for _ in 0..4 {
@@ -2147,7 +2172,6 @@ mod tests {
         assert_eq!(app.pet.species, PetSpecies::IgnisDragon);
         assert_eq!(app.pet.name, "X");
 
-        // Test interactive Heart-to-Heart Talk screen (`[Y]`)
         app.handle_key(KeyCode::Char('y'));
         assert!(app.talk_open);
         app.handle_key(KeyCode::Char('1'));
@@ -2159,12 +2183,12 @@ mod tests {
 
     #[test]
     fn renders_resize_guard_on_small_terminal_and_full_ui_on_standard_and_wide() {
-        for (w, h) in [(54u16, 18u16), (68, 24), (96, 28), (140, 44)] {
+        for (w, h) in [(54u16, 18u16), (68, 24), (96, 30), (140, 44)] {
             let backend = TestBackend::new(w, h);
             let mut terminal = Terminal::new(backend).unwrap();
             let paths = tmp_paths(&format!("render{w}"));
             let mut app = App::new(Pet::new("Mochi"), paths);
-            app.pet.stage = EvolutionStage::Adult;
+            app.pet.stage = EvolutionStage::CyberElder;
             app.pantry_open = true;
             terminal.draw(|f| draw_ui(f, &app)).unwrap();
             app.pantry_open = false;
@@ -2186,8 +2210,8 @@ mod tests {
     fn every_screen_and_arcade_mode_renders() {
         let paths = tmp_paths("screens");
         let mut app = App::new(Pet::new("Mochi"), paths.clone());
-        app.pet.stage = EvolutionStage::Adult;
-        let backend = TestBackend::new(100, 30);
+        app.pet.stage = EvolutionStage::CyberElder;
+        let backend = TestBackend::new(100, 32);
         let mut terminal = Terminal::new(backend).unwrap();
 
         app.handle_key(KeyCode::Char('g'));

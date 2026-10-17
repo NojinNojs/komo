@@ -1,15 +1,19 @@
-//! 3-in-1 Retro Arcade Center (`src/minigame.rs`) for **Mochigotchi v1.1.0**:
+//! 3-in-1 Retro Pixel Arcade Center (`src/minigame.rs`) for **Mochigotchi v1.0.0**:
 //! 1. **🍡 Snack & Star Catcher** (`GameMode::SnackCatcher`): Move the pixel
-//!    basket `←`/`→`, build up a **Combo Multiplier (`x2`, `x3`, `FEVER!`)**,
-//!    catch `🍙 Snack`, `⭐ Star`, `💎 Fever Gem`, and dodge `💣 Bomb`!
+//!    catcher cart `←`/`→`, build up a **Fever Combo (`x2`, `x3`, `FEVER!`)**,
+//!    catch colored `🍙` Snacks, `★` Stars, `♦` Fever Gems, and dodge `💣` Bombs!
 //! 2. **🔮 Bandai Left/Right Mind-Reader** (`GameMode::MindReader`): Authentic
-//!    1996 Tamagotchi Gen 1 5-round guessing game! Guess whether your companion
-//!    will look Left (`←`) or Right (`→`).
-//! 3. **⚡ Starlight Hurdle Dash** (`GameMode::DashRunner`): Retro side-scrolling
-//!    endless runner! Press `[Space]` or `[↑]` to jump over obstacles (`🔥`)
-//!    and collect floating star coins (`🪙`).
+//!    1996 Tamagotchi Gen 1 5-round guessing game with neon directional pads
+//!    and a 5-round star scoreboard!
+//! 3. **⚡ Starlight Hurdle Dash** (`GameMode::DashRunner`): Full-color
+//!    side-scrolling retro runner with parallax stars, pixel runner, golden air
+//!    coins (`★`), fire hurdles (`▲`), and checkered pixel track (`▀▄▀▄`)!
 
 use rand::Rng;
+use ratatui::{
+    style::{Color, Modifier, Style},
+    text::{Line, Span},
+};
 
 /// The 3 playable retro minigames in the Arcade Center (`[G]`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,9 +30,9 @@ impl GameMode {
 
     pub fn title(&self) -> &'static str {
         match self {
-            Self::SnackCatcher => "1. 🍡 Snack & Star Catcher",
-            Self::MindReader => "2. 🔮 Left/Right Mind-Reader",
-            Self::DashRunner => "3. ⚡ Starlight Hurdle Dash",
+            Self::SnackCatcher => "1. 🍡 Snack Catcher",
+            Self::MindReader => "2. 🔮 Mind-Reader",
+            Self::DashRunner => "3. ⚡ Hurdle Dash",
         }
     }
 
@@ -59,12 +63,12 @@ impl ItemKind {
         }
     }
 
-    pub fn label(&self) -> &'static str {
+    pub fn color(&self) -> Color {
         match self {
-            ItemKind::Snack => "🍙 Snack",
-            ItemKind::Star => "⭐ Star",
-            ItemKind::FeverGem => "💎 Gem",
-            ItemKind::Hazard => "💣 Bomb",
+            ItemKind::Snack => Color::LightGreen,
+            ItemKind::Star => Color::LightYellow,
+            ItemKind::FeverGem => Color::LightMagenta,
+            ItemKind::Hazard => Color::LightRed,
         }
     }
 
@@ -101,12 +105,14 @@ pub struct MiniGame {
     pub mr_round: u8,
     pub mr_total_rounds: u8,
     pub mr_wins: u8,
-    pub mr_last_pet_dir: Option<bool>, // false = Left, true = Right
+    pub mr_history: Vec<bool>,
+    pub mr_last_pet_dir: Option<bool>,
     pub mr_last_result: String,
     // Mode 3: Starlight Hurdle Dash state
     pub dash_jump_ticks: u8,
     pub dash_obstacles: Vec<u16>,
     pub dash_coins: Vec<u16>,
+    pub dash_scroll: usize,
 }
 
 impl MiniGame {
@@ -136,12 +142,14 @@ impl MiniGame {
             mr_round: 1,
             mr_total_rounds: 5,
             mr_wins: 0,
+            mr_history: Vec::new(),
             mr_last_pet_dir: None,
-            mr_last_result: "Guess which way your pet will look: press [←] Left or [→] Right!"
+            mr_last_result: "Press [← / A] to guess LEFT  or  [→ / D] to guess RIGHT!"
                 .to_string(),
             dash_jump_ticks: 0,
             dash_obstacles: vec![w.saturating_sub(4)],
             dash_coins: vec![w / 2],
+            dash_scroll: 0,
         }
     }
 
@@ -172,7 +180,6 @@ impl MiniGame {
         self.player_x = (self.player_x + 2).min(max_x);
     }
 
-    /// Jump in `DashRunner` mode (or trigger a guess in `MindReader`).
     pub fn jump(&mut self) {
         if self.is_finished() {
             return;
@@ -182,7 +189,6 @@ impl MiniGame {
         }
     }
 
-    /// Play one round of the classic Bandai Left/Right Mind-Reader game!
     pub fn guess_direction(&mut self, guessed_right: bool) -> bool {
         if self.is_finished() || self.mode != GameMode::MindReader {
             return false;
@@ -197,6 +203,7 @@ impl MiniGame {
             "◀ LEFT"
         };
         let won_round = guessed_right == pet_looked_right;
+        self.mr_history.push(won_round);
 
         if won_round {
             self.mr_wins = self.mr_wins.saturating_add(1);
@@ -206,15 +213,13 @@ impl MiniGame {
             self.coins_earned = self.coins_earned.saturating_add(4);
             self.xp_earned = self.xp_earned.saturating_add(10);
             self.mr_last_result = format!(
-                "🎉 Round {}/{}: Pet looked {dir_label} — MATCH! (+4 coins, +10 XP)",
-                self.mr_round, self.mr_total_rounds
+                "🎉 MATCH! Companion turned {dir_label}! (+4 coins, +10 XP)"
             );
         } else {
             self.combo = 0;
             self.xp_earned = self.xp_earned.saturating_add(3);
             self.mr_last_result = format!(
-                "💫 Round {}/{}: Pet looked {dir_label} — Missed! (+3 XP for trying)",
-                self.mr_round, self.mr_total_rounds
+                "💫 Companion turned {dir_label} — Missed! (+3 XP for trying)"
             );
         }
 
@@ -250,7 +255,6 @@ impl MiniGame {
 
         match self.mode {
             GameMode::MindReader => {
-                // MindReader advances when the player presses Left/Right, with a gentle timeout
                 self.ticks_remaining = self.ticks_remaining.saturating_sub(1);
             }
             GameMode::DashRunner => self.step_dash_runner(),
@@ -259,13 +263,13 @@ impl MiniGame {
     }
 
     fn step_dash_runner(&mut self) {
-        let player_col = 5u16;
+        self.dash_scroll = self.dash_scroll.wrapping_add(1);
+        let player_col = 6u16;
         let in_air = self.dash_jump_ticks > 0;
         if self.dash_jump_ticks > 0 {
             self.dash_jump_ticks -= 1;
         }
 
-        // Advance obstacles left
         let mut next_obs = Vec::new();
         for obs_x in self.dash_obstacles.drain(..) {
             if obs_x == player_col {
@@ -286,7 +290,6 @@ impl MiniGame {
         }
         self.dash_obstacles = next_obs;
 
-        // Advance floating star coins left
         let mut next_coins = Vec::new();
         for coin_x in self.dash_coins.drain(..) {
             if coin_x.abs_diff(player_col) <= 1 && in_air {
@@ -386,113 +389,353 @@ impl MiniGame {
         self.ticks_remaining = self.ticks_remaining.saturating_sub(1);
     }
 
+    /// Plain string representation (used by unit tests).
     pub fn render_lines(&self) -> Vec<String> {
         match self.mode {
-            GameMode::MindReader => self.render_mind_reader(),
-            GameMode::DashRunner => self.render_dash_runner(),
-            GameMode::SnackCatcher => self.render_snack_catcher(),
-        }
-    }
-
-    fn render_mind_reader(&self) -> Vec<String> {
-        let dir_art = match self.mr_last_pet_dir {
-            Some(false) => "   ◀◀  ( ^ ω ^ )      ",
-            Some(true) => "       ( ^ ω ^ )  ▶▶  ",
-            None => "   ◀ ? ( o . o ) ? ▶  ",
-        };
-        vec![
-            format!(
-                "ROUND {}/{}   •   WINS: {}   •   STREAK: x{}",
-                self.mr_round,
-                self.mr_total_rounds,
-                self.mr_wins,
-                self.combo.max(1)
-            ),
-            String::new(),
-            "      .-------------------.".to_string(),
-            format!("      |{dir_art}|"),
-            "      '-------------------'".to_string(),
-            String::new(),
-            self.mr_last_result.clone(),
-            String::new(),
-            "Press [← / A] to guess LEFT   or   [→ / D] to guess RIGHT!".to_string(),
-        ]
-    }
-
-    fn render_dash_runner(&self) -> Vec<String> {
-        let w = self.width as usize;
-        let player_col = 5usize.min(w.saturating_sub(2));
-        let in_air = self.dash_jump_ticks > 0;
-
-        let mut sky_row = vec![' '; w];
-        for &cx in &self.dash_coins {
-            if (cx as usize) < w {
-                sky_row[cx as usize] = '★';
+            GameMode::MindReader => vec![
+                format!("ROUND {}/{}", self.mr_round, self.mr_total_rounds),
+                self.mr_last_result.clone(),
+            ],
+            GameMode::DashRunner => vec![
+                format!("STREAK x{}", self.combo.max(1)),
+                "▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀".to_string(),
+            ],
+            GameMode::SnackCatcher => {
+                let w = self.width as usize;
+                let h = self.height as usize;
+                let bottom = h.saturating_sub(1);
+                let mut lines = Vec::with_capacity(h);
+                for y in 0..h {
+                    if y == bottom {
+                        let mut row = vec![' '; w];
+                        let basket = ['\\', '=', '=', '=', '=', '/'];
+                        let center = self.player_x as isize;
+                        for (i, ch) in basket.iter().enumerate() {
+                            let pos = center - 3 + i as isize;
+                            if pos >= 0 && (pos as usize) < w {
+                                row[pos as usize] = *ch;
+                            }
+                        }
+                        lines.push(row.into_iter().collect());
+                    } else {
+                        let mut row = vec![' '; w];
+                        for item in &self.items {
+                            if item.y as usize == y {
+                                let sym = item.kind.symbol();
+                                let start = (item.x as isize) - 1;
+                                for (i, ch) in sym.chars().enumerate() {
+                                    let pos = start + i as isize;
+                                    if pos >= 0 && (pos as usize) < w {
+                                        row[pos as usize] = ch;
+                                    }
+                                }
+                            }
+                        }
+                        lines.push(row.into_iter().collect());
+                    }
+                }
+                lines
             }
         }
-        if in_air {
-            sky_row[player_col] = '♦';
-        }
-
-        let mut ground_row = vec![' '; w];
-        for &ox in &self.dash_obstacles {
-            if (ox as usize) < w {
-                ground_row[ox as usize] = '▲';
-            }
-        }
-        if !in_air {
-            ground_row[player_col] = '♦';
-        }
-
-        vec![
-            format!(
-                "STREAK x{}  •  JUMP WITH [SPACE / ↑]  •  COLLECT ★  •  DODGE ▲",
-                self.combo.max(1)
-            ),
-            String::new(),
-            sky_row.into_iter().collect(),
-            ground_row.into_iter().collect(),
-            "▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀".to_string(),
-        ]
     }
 
-    fn render_snack_catcher(&self) -> Vec<String> {
+    /// Full-Color Retro Arcade Cabinet [`Line`]s for the TUI!
+    pub fn render_colored_lines(&self, accent: Color) -> Vec<Line<'static>> {
+        match self.mode {
+            GameMode::SnackCatcher => self.render_colored_catcher(accent),
+            GameMode::MindReader => self.render_colored_mind_reader(accent),
+            GameMode::DashRunner => self.render_colored_dash(accent),
+        }
+    }
+
+    fn render_colored_catcher(&self, accent: Color) -> Vec<Line<'static>> {
         let w = self.width as usize;
         let h = self.height as usize;
         let bottom = h.saturating_sub(1);
-        let mut lines = Vec::with_capacity(h);
+        let mut out = Vec::with_capacity(h + 3);
+
+        // Fever bar & legend
+        let fever_blocks = (self.combo.min(8)) as usize;
+        let fever_bar = format!(
+            "{}{}",
+            "█".repeat(fever_blocks),
+            "░".repeat(8usize.saturating_sub(fever_blocks))
+        );
+        out.push(Line::from(vec![
+            Span::styled(
+                format!("🔥 FEVER [{fever_bar}] x{}   ", self.combo.max(1)),
+                Style::default()
+                    .fg(if self.combo >= 3 {
+                        Color::LightYellow
+                    } else {
+                        Color::Cyan
+                    })
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("[O] Snack ", Style::default().fg(Color::LightGreen)),
+            Span::styled("[★] Star ", Style::default().fg(Color::LightYellow)),
+            Span::styled("<♦> Gem ", Style::default().fg(Color::LightMagenta)),
+            Span::styled("[X] Bomb", Style::default().fg(Color::LightRed)),
+        ]));
+
+        // Top arcade cabinet border
+        out.push(Line::from(Span::styled(
+            format!("╔{}╗", "═".repeat(w)),
+            Style::default().fg(accent),
+        )));
 
         for y in 0..h {
             if y == bottom {
-                let mut row = vec![' '; w];
-                let basket = ['\\', '=', '=', '=', '=', '/'];
+                let mut cells: Vec<(char, Color)> = vec![(' ', Color::DarkGray); w];
+                let cart = ['▀', '█', '█', '▀', '▀', '█', '█', '▀'];
                 let center = self.player_x as isize;
-                for (i, ch) in basket.iter().enumerate() {
-                    let pos = center - 3 + i as isize;
+                for (i, ch) in cart.iter().enumerate() {
+                    let pos = center - 4 + i as isize;
                     if pos >= 0 && (pos as usize) < w {
-                        row[pos as usize] = *ch;
+                        cells[pos as usize] = (*ch, Color::LightYellow);
                     }
                 }
-                lines.push(row.into_iter().collect());
+                let mut spans = vec![Span::styled("║", Style::default().fg(accent))];
+                for (ch, col) in cells {
+                    spans.push(Span::styled(
+                        ch.to_string(),
+                        Style::default().fg(col).add_modifier(Modifier::BOLD),
+                    ));
+                }
+                spans.push(Span::styled("║", Style::default().fg(accent)));
+                out.push(Line::from(spans));
             } else {
-                let mut row = vec![' '; w];
+                let mut cells: Vec<(char, Color)> = vec![(' ', Color::DarkGray); w];
+                // Subtle retro starfield dots
+                for x in (0..w).step_by(9) {
+                    if (x + y * 3) % 7 == 0 {
+                        cells[x] = ('·', Color::DarkGray);
+                    }
+                }
                 for item in &self.items {
                     if item.y as usize == y {
                         let sym = item.kind.symbol();
+                        let col = item.kind.color();
                         let start = (item.x as isize) - 1;
                         for (i, ch) in sym.chars().enumerate() {
                             let pos = start + i as isize;
                             if pos >= 0 && (pos as usize) < w {
-                                row[pos as usize] = ch;
+                                cells[pos as usize] = (ch, col);
                             }
                         }
                     }
                 }
-                lines.push(row.into_iter().collect());
+                let mut spans = vec![Span::styled("║", Style::default().fg(accent))];
+                for (ch, col) in cells {
+                    spans.push(Span::styled(
+                        ch.to_string(),
+                        Style::default().fg(col).add_modifier(Modifier::BOLD),
+                    ));
+                }
+                spans.push(Span::styled("║", Style::default().fg(accent)));
+                out.push(Line::from(spans));
             }
         }
 
-        lines
+        out.push(Line::from(Span::styled(
+            format!("╚{}╝", "═".repeat(w)),
+            Style::default().fg(accent),
+        )));
+        out
+    }
+
+    fn render_colored_mind_reader(&self, accent: Color) -> Vec<Line<'static>> {
+        let mut round_badges = Vec::with_capacity(14);
+        round_badges.push(Span::styled(
+            format!(
+                "ROUND {}/{}  •  ",
+                self.mr_round, self.mr_total_rounds
+            ),
+            Style::default()
+                .fg(Color::LightYellow)
+                .add_modifier(Modifier::BOLD),
+        ));
+        for r in 0..self.mr_total_rounds as usize {
+            let badge = match self.mr_history.get(r) {
+                Some(true) => Span::styled(
+                    "[ ★ WIN ] ",
+                    Style::default()
+                        .fg(Color::LightGreen)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Some(false) => Span::styled("[ ✗ MISS] ", Style::default().fg(Color::LightRed)),
+                None if r + 1 == self.mr_round as usize => Span::styled(
+                    "[ ? NOW ] ",
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(Color::LightYellow)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                None => Span::styled("[ · · · ] ", Style::default().fg(Color::DarkGray)),
+            };
+            round_badges.push(badge);
+        }
+
+        let left_active = self.mr_last_pet_dir == Some(false);
+        let right_active = self.mr_last_pet_dir == Some(true);
+        let left_style = if left_active {
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::LightCyan)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::LightCyan)
+        };
+        let right_style = if right_active {
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::LightMagenta)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::LightMagenta)
+        };
+
+        let pet_face = match self.mr_last_pet_dir {
+            Some(false) => "◀◀  ( ◕ ω ◕ )    ",
+            Some(true) => "    ( ◕ ω ◕ )  ▶▶",
+            None => " ◀? ( ◕ . ◕ ) ?▶ ",
+        };
+
+        vec![
+            Line::from(round_badges),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("╔═══════════════╗   ", left_style),
+                Span::styled("▄███████████████▄", Style::default().fg(accent)),
+                Span::styled("   ╔═══════════════╗", right_style),
+            ]),
+            Line::from(vec![
+                Span::styled("║  ◀◀ LEFT [←]  ║   ", left_style),
+                Span::styled(
+                    pet_face,
+                    Style::default()
+                        .fg(Color::LightYellow)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled("   ║  [→] RIGHT ▶▶ ║", right_style),
+            ]),
+            Line::from(vec![
+                Span::styled("╚═══════════════╝   ", left_style),
+                Span::styled("▀███████████████▀", Style::default().fg(accent)),
+                Span::styled("   ╚═══════════════╝", right_style),
+            ]),
+            Line::from(""),
+            Line::from(Span::styled(
+                self.mr_last_result.clone(),
+                Style::default()
+                    .fg(Color::LightGreen)
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::from(""),
+            Line::from(Span::styled(
+                "Win 3 out of 5 rounds for a +10 Coin & +15 XP Champion Bonus!",
+                Style::default().fg(Color::Gray),
+            )),
+        ]
+    }
+
+    fn render_colored_dash(&self, accent: Color) -> Vec<Line<'static>> {
+        let w = self.width as usize;
+        let player_col = 6usize.min(w.saturating_sub(3));
+        let in_air = self.dash_jump_ticks > 0;
+
+        let mut sky_cells: Vec<(char, Color)> = vec![(' ', Color::DarkGray); w];
+        for x in (0..w).step_by(8) {
+            let pos = (x + w - (self.dash_scroll % 8)) % w;
+            sky_cells[pos] = ('✦', Color::DarkGray);
+        }
+        for &cx in &self.dash_coins {
+            if (cx as usize) < w {
+                sky_cells[cx as usize] = ('★', Color::LightYellow);
+            }
+        }
+        if in_air {
+            sky_cells[player_col] = ('▀', accent);
+            if player_col + 1 < w {
+                sky_cells[player_col + 1] = ('█', Color::LightYellow);
+            }
+        }
+
+        let mut ground_cells: Vec<(char, Color)> = vec![(' ', Color::DarkGray); w];
+        for &ox in &self.dash_obstacles {
+            if (ox as usize) < w {
+                ground_cells[ox as usize] = ('▲', Color::LightRed);
+            }
+        }
+        if !in_air {
+            ground_cells[player_col] = ('▄', accent);
+            if player_col + 1 < w {
+                ground_cells[player_col + 1] = ('█', Color::LightYellow);
+            }
+        }
+
+        let mut sky_spans = vec![Span::styled("║", Style::default().fg(accent))];
+        for (ch, col) in sky_cells {
+            sky_spans.push(Span::styled(
+                ch.to_string(),
+                Style::default().fg(col).add_modifier(Modifier::BOLD),
+            ));
+        }
+        sky_spans.push(Span::styled("║", Style::default().fg(accent)));
+
+        let mut ground_spans = vec![Span::styled("║", Style::default().fg(accent))];
+        for (ch, col) in ground_cells {
+            ground_spans.push(Span::styled(
+                ch.to_string(),
+                Style::default().fg(col).add_modifier(Modifier::BOLD),
+            ));
+        }
+        ground_spans.push(Span::styled("║", Style::default().fg(accent)));
+
+        let mut track_spans = vec![Span::styled("╚", Style::default().fg(accent))];
+        for x in 0..w {
+            let is_alt = (x + self.dash_scroll).is_multiple_of(2);
+            track_spans.push(Span::styled(
+                if is_alt { "▀" } else { "▄" },
+                Style::default().fg(if is_alt { accent } else { Color::Cyan }),
+            ));
+        }
+        track_spans.push(Span::styled("╝", Style::default().fg(accent)));
+
+        vec![
+            Line::from(vec![
+                Span::styled(
+                    format!(
+                        "⚡ HURDLE STREAK x{}   •   HITS: {}   •   ",
+                        self.combo.max(1),
+                        self.hits_taken
+                    ),
+                    Style::default()
+                        .fg(Color::LightYellow)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled("★ Air Coin (+25)   ", Style::default().fg(Color::LightYellow)),
+                Span::styled("▲ Fire Hurdle (Jump!)", Style::default().fg(Color::LightRed)),
+            ]),
+            Line::from(Span::styled(
+                format!("╔{}╗", "═".repeat(w)),
+                Style::default().fg(accent),
+            )),
+            Line::from(Span::styled(
+                format!("║{:^width$}║", "·  ✦  STARLIGHT STADIUM  ✦  ·", width = w),
+                Style::default().fg(Color::DarkGray),
+            )),
+            Line::from(sky_spans),
+            Line::from(ground_spans),
+            Line::from(track_spans),
+            Line::from(""),
+            Line::from(Span::styled(
+                "Press [SPACE] or [↑ / W] to LEAP over ▲ Fire Hurdles & grab ★ Air Coins!",
+                Style::default()
+                    .fg(Color::LightGreen)
+                    .add_modifier(Modifier::BOLD),
+            )),
+        ]
     }
 }
 
@@ -550,23 +793,23 @@ mod tests {
     }
 
     #[test]
-    fn test_mind_reader_and_dash_runner_modes() {
-        let mut mr = MiniGame::new_with_mode(GameMode::MindReader, 30, 8, 100);
+    fn test_mind_reader_and_dash_runner_modes_and_colored_render() {
+        let mut mr = MiniGame::new_with_mode(GameMode::MindReader, 36, 8, 100);
         for _ in 0..5 {
             mr.guess_direction(true);
         }
         assert!(mr.is_finished());
         assert!(mr.xp_earned > 0);
-        assert!(!mr.render_lines().is_empty());
+        assert!(!mr.render_colored_lines(Color::Cyan).is_empty());
 
-        let mut dash = MiniGame::new_with_mode(GameMode::DashRunner, 30, 8, 25);
+        let mut dash = MiniGame::new_with_mode(GameMode::DashRunner, 36, 8, 25);
         dash.jump();
         assert!(dash.dash_jump_ticks > 0);
         for _ in 0..25 {
             dash.step();
         }
         assert!(dash.is_finished());
-        assert!(!dash.render_lines().is_empty());
+        assert!(!dash.render_colored_lines(Color::LightYellow).is_empty());
     }
 
     #[test]
@@ -578,6 +821,7 @@ mod tests {
         assert_eq!(lines.len(), 6);
         assert!(lines[1].contains("[O]"));
         assert!(lines[5].contains("\\====/"));
+        assert!(!game.render_colored_lines(Color::LightGreen).is_empty());
 
         game.ticks_remaining = 1;
         game.step();

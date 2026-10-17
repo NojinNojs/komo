@@ -1,23 +1,23 @@
-//! High-Detail 32×20 TrueColor Half-Block Pixel Art Engine (`▀`, `▄`, `█`) for
-//! **Mochigotchi v1.1.0**.
+//! 40×24 TrueColor Half-Block Pixel Art Engine (`▀`, `▄`, `█`) for
+//! **Mochigotchi v1.0.0**.
 //!
-//! Every companion is rendered as a genuine **32×20 pixel bitmap** using
-//! Unicode half-blocks (`▀` upper half, `▄` lower half, `█` full block, and
-//! transparent space). Two vertical bitmap pixels pack into a single terminal
-//! cell (`1:1` square pixel aspect ratio, 32 cols × 10 rows), with a 10-tone
-//! retro pixel palette per species:
+//! Renders a genuine **40×24 pixel canvas** (40 columns × 12 terminal rows of
+//! `1:1` square half-block pixels) with a dramatic **4-Stage Silhouette
+//! Evolution** from **Cute Chibi (`Baby`) -> Agile (`Teen`) -> Fierce (`Adult`)
+//! -> Badass Apex Sovereign (`CyberElder`)**:
 //! - `.` = Transparent background
-//! - `O` = Dark pixel outline (`#201b32`)
-//! - `D` = Deep shadow (`0.72 × primary`) for 16-bit depth & shading
+//! - `O` = Dark pixel outline (`#1b162a`)
+//! - `D` = Deep armor/muscle shadow (`0.68 × primary`)
 //! - `B` = Primary species body color
-//! - `L` = Light highlight (`1.22 × primary`) on crests, scales & domes
-//! - `S` = Secondary / belly / highlight color
-//! - `A` = Accent color (horns, flames, pearl, ribbons, markings)
-//! - `W` = Pure white body/belly/cloud/pearl (never affected by eye blinking!)
-//! - `E` = Eye shine white (turns into eyelid `O` when blinking/sleeping)
-//! - `K` = Eye pupil dark (turns into eyelid `O` when blinking/sleeping)
+//! - `L` = Light highlight (`1.22 × primary`)
+//! - `S` = Secondary / chest armor / belly plates
+//! - `A` = Elemental accent (flames, tidal fins, foxfire, lightning)
+//! - `R` = Fierce crimson/ember glow (`#ff3b4e`) for apex eyes & fire
+//! - `G` = Royal Gold (horns, crowns, shoulder armor, claws)
+//! - `W` = Pure white fangs, claws, pearl & fur (isolated from blinking!)
+//! - `E` = Eye shine / sclera (turns into `O` when blinking/sleeping)
+//! - `K` = Eye pupil (turns into `O` when blinking/sleeping)
 //! - `P` = Rosy cheek / heart pink
-//! - `G` = Royal Gold
 
 use crate::pet::{EvolutionStage, Pet, PetMood, PetSpecies, ShellTheme};
 use ratatui::{
@@ -25,502 +25,813 @@ use ratatui::{
     text::{Line, Span},
 };
 
-pub const CANVAS_W: usize = 32;
-pub const CANVAS_H: usize = 20;
+pub const CANVAS_W: usize = 40;
+pub const CANVAS_H: usize = 24;
 
-/// Ultra-detailed 32×20 pixel art bitmaps for each species (Adult form).
-fn adult_bitmap(species: PetSpecies) -> [&'static str; CANVAS_H] {
+/// Badass, muscular, full-canvas (40×24) **APEX ELDER (`CyberElder`)** bitmaps!
+/// Every species transforms from its cute baby origins into a fierce sovereign beast.
+fn elder_bitmap(species: PetSpecies) -> [&'static str; CANVAS_H] {
     match species {
-        // 🐱 Neko Mochi — pointed ears with pink inner, bell collar, striped tail, shaded paws
-        PetSpecies::MochiCat => [
-            "................................",
-            ".....OOO................OOO.....",
-            "....OBLBO..............OBLBO....",
-            "...OBPPPBO............OBPPPBO...",
-            "...OBPPPBOOOOOOOOOOOOOBPPPBO....",
-            "..OBLLLLBBBBBBBBBBBBBBBBLLLBO...",
-            "..OBBBBBBBBBBBBBBBBBBBBBBBBBO...",
-            ".ODBBEEKKBBBBBBBBBBBBEEKKBBDO...",
-            ".ODBBKKKKBBBBBBBBBBBBKKKKBBDO...",
-            ".ODBBPPPBBBBBBAAABBBBBPPPBBDO...",
-            "..ODBBBBBBBBOOGGGOOBBBBBBBDO....",
-            "...OOOOOOOBBSSSSSSSSBBOOOOO.....",
-            "...ODBBBBSSSSSSSSSSSSSSBBBDO..OO",
-            "..ODBBBBBSSSSSSSSSSSSSSBBBBDOOBA",
-            "..ODBBBBBSSSSSSSSSSSSSSBBBBDOBBA",
-            "...ODBBBBBBSSSSSSSSSSBBBBBBDOBA.",
-            "...OODBBBBBBBBBBBBBBBBBBBBDOOO..",
-            "....OOODBBBOOOOOOOOOBBBDOOO.....",
-            "......OOOOO........OOOOO........",
-            "................................",
-        ],
-        // 🐶 Boba Pup — floppy dark ears, biscuit snout, boba pearls on belly, wagging tail
-        PetSpecies::BobaPup => [
-            "................................",
-            "....OOOOOO............OOOOOO....",
-            "...OSSSSSSOOOOOOOOOOOOSSSSSSO...",
-            "..OSSSSSSLLLBBBBBBBBLLLSSSSSSO..",
-            ".OSSSSSSBBBBBBBBBBBBBBBBSSSSSSO.",
-            ".OSSSSSBBBBBBBBBBBBBBBBBBSSSSSO.",
-            ".OSSSSBBEEKKBBBBBBBBEEKKBBSSSSO.",
-            "..OOOOBBKKKKBBBBBBBBKKKKBBOOOO..",
-            "...ODBBBBPPPSSSSSSSSPPPBBBBDO...",
-            "...ODBBBBSSSSOOOOOOSSSSBBBBDO...",
-            "....OOOOOBBBBOOAAOOBBBBOOOOO....",
-            "...ODBBBBBSSSSSSSSSSSSBBBBBDO...",
-            "..ODBBBBBBSSOSOSOSOSSBBBBBBDO.OO",
-            "..ODBBBBBBSSSSSSSSSSSSBBBBBBDOBS",
-            "...ODBBBBBBSSOSSOSSOSBBBBBBDOBBA",
-            "...ODBBBBBBBBBBBBBBBBBBBBBBDOOO.",
-            "....OOODBBBOOOOOOOOOBBBDOOOO....",
-            "......OOOOO........OOOOO........",
-            "................................",
-            "................................",
-        ],
-        // 🐰 Cloud Bun — long pastel bunny ears, fluffy cloud skirt, rosy cheeks
-        PetSpecies::CloudBun => [
-            "......OOOO............OOOO......",
-            ".....OBLPBO..........OBLPBO.....",
-            ".....OBPPBO..........OBPPBO.....",
-            ".....OBPPBO..........OBPPBO.....",
-            ".....OBBBBO..........OBBBBO.....",
-            ".....OBBBBOOOOOOOOOOOOBBBBO.....",
-            "....OBLLLBBBBBBBBBBBBBBLLLBO....",
-            "...OBBBBBBBBBBBBBBBBBBBBBBBBO...",
-            "..ODBBEEKKBBBBBBBBBBBBEEKKBBDO..",
-            "..ODBBKKKKBBBBBBBBBBBBKKKKBBDO..",
-            "..ODBBPPPBBBBBBPPBBBBBBPPPBBDO..",
-            "...ODBBBBBBBBOOOOOOBBBBBBBBDO...",
-            "..OOODBBBBBBSSSSSSSSBBBBBBDOOO..",
-            ".OWWWBBBBBBBSSSSSSSSBBBBBBBWWWO.",
-            "OWWWWWBBBBBBSSSSSSSSBBBBBBWWWWWO",
-            ".OWWWWBBBBBBBBBBBBBBBBBBBBWWWWO.",
-            "..OOOWWBBBBBBBBBBBBBBBBBBWWOOO..",
-            ".....OOODBBBOOOOOOOOBBBDOOO.....",
-            ".......OOOOO........OOOOO.......",
-            "................................",
-        ],
-        // 🐧 Star Pengu — aurora crest, snow white belly, golden beak & cozy scarf
-        PetSpecies::StarPengu => [
-            "................................",
-            ".........OOOOOOOOOOOOOO.........",
-            ".......OOBBLLLLLLLLLLBBOO.......",
-            ".....OOBBBBBBBGAAGBBBBBBBOO.....",
-            "....ODBBBBBWWWWWWWWWWBBBBBDO....",
-            "....ODBBBBEEKKWWWWEEKKBBBBDO....",
-            "....ODBBBBKKKKWWWWKKKKBBBBDO....",
-            "....ODBBBBWWWWGGGGWWWWBBBBDO....",
-            "...OODBBBWWWWGGGGGGWWWWBBBDOO...",
-            "..ODBBBBBAAAAAAAAAAAAAABBBBBDO..",
-            ".ODBBBBBWWWWWWWWWWWWWWWWBBBBBDO.",
-            ".ODBBBBWWWWWWWWGGWWWWWWWWBBBBDO.",
-            ".ODBBBBWWWWWWWGGGGWWWWWWWBBBBDO.",
-            "..OODBBWWWWWWWWWWWWWWWWWWBBDOO..",
-            "...OOODWWWWWWWWWWWWWWWWWWDOOO...",
-            ".....OOODBBBBBBBBBBBBBBDOOO.....",
-            "......OOOGGGGOOOOOOGGGGOOO......",
-            "........OOOOO......OOOOO........",
-            "................................",
-            "................................",
-        ],
-        // 🐉 Ignis Drake — golden horns, wide bat-like dragon wings, ribbed belly, fire tail
+        // 🐉 05/10 Ignis Drake (Elder — Inferno Bahamut Sovereign)
+        // Giant 40-col magma wings, twin golden horns, fierce crimson eyes, fangs, muscular claws & fire breath
         PetSpecies::IgnisDragon => [
-            "....AA....................AA....",
-            "...GAAG......OOOOOO......GAAG...",
-            "....OAAOOOOOBBLLLLBBOOOOAAOO....",
-            ".....OOOBBBBBBBBBBBBBBBBOOO.....",
-            ".OOO...OBBBEKKBBBBEEKKBBBO...OOO",
-            "OAAAO..OBBBKKKBBBBKKKKBBBO..OAAA",
-            "OABBBO.ODBBBBBBAAABBBBBBDO.OBBBA",
-            "OABBBBOOOODBBBSSSSBBBDOOOOBBBBBA",
-            "OADBBBBBBBBSSSSSSSSSSBBBBBBBBDAO",
-            ".OADBBBBBBBSSSSSSSSSSBBBBBBBDAO.",
-            "..OOODBBBBBSSSSSSSSSSBBBBBDOOO..",
-            "....ODBBBBBSSSSSSSSSSBBBBBDO..AA",
-            "....ODBBBBBSSSSSSSSSSBBBBBDO.AGG",
-            "....ODBBBBBBSSSSSSSSBBBBBBDOOAA.",
-            ".....ODBBBBBBBBBBBBBBBBBBDOOO...",
-            ".....OOODBBBOOOOOOOOBBBDOOO.....",
-            ".......OOOOO........OOOOO.......",
-            "................................",
-            "................................",
-            "................................",
+            "......GG........................GG......",
+            ".....OGGO......AA......AA......OGGO.....",
+            ".OO...OGGO....OAOOOOOOOOAO....OGGO...OO.",
+            "OAOO...OGGOOOBBLLLLLLLLLLBBOOGGO...OOAO",
+            "OAAOO...OOOOBBBBBBBBBBBBBBBBOOOO...OOAAO",
+            "OAGAAOOOO..ODBBREKBBBBKERBBDO..OOOOAAGAO",
+            "OAGGAAAAOO.ODBBROOBBBBOORBBDO.OOAAAAGGAO",
+            "OAGGGDBBBOOODBBBBWOOOOOWBBBBDOOOBBBDGGGA",
+            "OAGGDBBBBBBBBBBBOWWWWWWOABBBBBBBBBBDGGAO",
+            "OAGDBBBOOOODBBBSSSSSSSSSSBBBDOOOOBBBDGAO",
+            "OADBBBO...ODBBGGGSSSSSSGGGBBDO...OBBBDAO",
+            ".OABBBO..ODBBBSSSSSSSSSSSSBBBDO..OBBBAO.",
+            "..OABBO.ODBBBBGGGSSSSSSGGGBBBBDO.OBBAO..",
+            "...OABO.ODBBBBBSSSSSSSSSSBBBBBDO.OBAO...",
+            "....OO..OWWDBBBBSSSSSSSSBBBBDBWWO.OO..AA",
+            "........OWWODBBBBBBBBBBBBBBDOOWWO....AGA",
+            "...........ODBBBBBBBBBBBBBBDO.......AGGA",
+            "..........ODBBBBDOOOOOODBBBBDO.....OAGAO",
+            ".........ODBBBBDO......ODBBBBDO...OAAOO.",
+            "........OOWWWOO........OOWWWOO..OOAOO...",
+            "........OOOOOOO..........OOOOOOOOOO.....",
+            "........................................",
+            "........................................",
+            "........................................",
         ],
-        // 🐲 Azure Wyrm — serpentine celestial sea dragon, antler horns, glowing moon pearl
+        // 🐲 06/10 Azure Wyrm (Elder — Tidal Leviathan Sovereign)
+        // Towering S-coiled Sea-and-Sky Dragon with grand antler horns, fanged dragon jaws,
+        // spiked tsunami wing-fins, and serpentine coils guarding a blazing Moon Pearl!
         PetSpecies::AzureWyrm => [
-            ".....AA..................AA.....",
-            "....OAOO....OOOOOOOO....OOAO....",
-            ".....OOAOOOBBLLLLLLBBOOOAOO.....",
-            "......OOOBBBBBBBBBBBBBBOOO......",
-            ".....ODBBBEEKKBBBBEEKKBBBDO.....",
-            ".....ODBBBKKKKBBBBKKKKBBBDO.....",
-            "....OOODBBBBBBSSSSBBBBBBDOOO....",
-            "...OABBBOOOOBBWWWWBBOOOOBBBAO...",
-            "..OABBBBBBBBOWWWWWWOABBBBBBBBAO.",
-            ".OABBBBSSSSSOOWWWWOOSSSSSBBBBAO.",
-            "..OODBBSSSSSBBBBBBBBSSSSSBBDOO..",
-            "....OOOODBBBBBBBBBBBBBBDOOOO....",
-            "...OABBBBBSSSSSSSSSSSSBBBBBAO...",
-            "..OABBBBDDDDDDDDDDDDDDDDBBBBAO..",
-            "...OOOOO................OOOOO...",
-            "................................",
-            "................................",
-            "................................",
-            "................................",
-            "................................",
+            "....GG............................GG....",
+            "...OGGO....AA..............AA....OGGO...",
+            "....OGGO..OAAOOOOOOOOOOOOOOAAO..OGGO....",
+            ".....OGGOOOBBLLLLLLLLLLLLLLBBOOGGO.....",
+            "..AA..OOOOBBBBBBBBBBBBBBBBBBBBOOOO..AA..",
+            ".OAAO...ODBBBREKBBBBBBBBKERBBBDO...OAAO.",
+            "OAAAAOO.ODBBBROOBBSSSSBBOORBBBDO.OOAAAAO",
+            "OAGGAAAOODBBBBWWOOOOOOOOOWWBBBBDOOAAAGGA",
+            "OAGBBBBBBBBBBOWWWWWWWWWWWWOABBBBBBBBBGAO",
+            ".OADBBBBOOOODBBOAAWWWWAAOBBDOOOOBBBBDAO.",
+            "..OOOBBBO..ODBBAAWWWWWWAAABBDO..OBBBOOO.",
+            "....OABBO.ODBBBAWWWWWWWWABBBBDO.OBBAO...",
+            "...OABBBO.ODBBBBAAWWWWAAABBBBDO.OBBBAO..",
+            "..OADBBBO..ODBBBBOOOOOOOBBBBDO..OBBBDAO.",
+            ".OADBBBDO...OOODBBBBBBBBDOOOO...ODBBBDAO",
+            ".OABBBDO..OOOBBBSSSSSSSSBBBOOO..ODBBBAO.",
+            "..OOOOO..ODBBBBBSSSSSSSSBBBBBDO..OOOOO..",
+            "........ODBBBBDDDDDDDDDDDDBBBBDO........",
+            ".......ODBBBDOOOOOOOOOOOOOODBBBDO.......",
+            "......OOWWWOO..............OOWWWOO......",
+            "......OOOOOOO..............OOOOOOO......",
+            "........................................",
+            "........................................",
+            "........................................",
         ],
-        // 🦊 Kitsune Nine — shrine fox ears, vermilion fur, fanned 9-tail silhouette & foxfire
+        // 🦊 07/10 Kitsune Nine (Elder — Nine-Tailed Kyuubi Spirit Sovereign)
+        // Massive 9-tailed foxfire halo spanning the full width, fierce kitsune mask & golden armor
         PetSpecies::EmberFox => [
-            "...OOOO..................OOOO...",
-            "..OBWWBO................OBWWBO..",
-            "..OBWWWBO....OOOOOO....OBWWWBO..",
-            "...OBBBBBOOBBLLLLLLBBOOBBBBBO...",
-            "....OBBBBBBBBBBBBBBBBBBBBBBO....",
-            "...ODBBBEEKKBBBBBBBBEEKKBBBDO...",
-            "...ODBBBKKKKBBBBBBBBKKKKBBBDO...",
-            "...ODBBBPPPBBBWWWWBBBPPPBBBDO...",
-            "....OOODBBBBBBWAAWBBBBBBDOOO....",
-            ".AA....OOOOBBBSSSSBBBOOOO....AA.",
-            "AWWA.....ODBBSSSSSSBBDO.....AWWA",
-            ".AA.....ODBBBSSSSSSBBBDO.....AA.",
-            ".......ODBBBBSSSSSSBBBBDOOO.OO..",
-            "......ODBBBBBBBBBBBBBBBBDOSSWSO.",
-            ".....OOODBBBOOOOOOOOBBBDOOSSSSO.",
-            ".......OOOOO........OOOOO..OOO..",
-            "................................",
-            "................................",
-            "................................",
-            "................................",
+            "..AA....AA....................AA....AA..",
+            ".AWWA..AWWA...OOO......OOO...AWWA..AWWA.",
+            "..AA...OSSO..OBWBO....OBWBO..OSSO...AA..",
+            ".OSSO.OSSSSOOBWWWBOOOOBWWWBOOSSSSO.OSSO.",
+            "OSSSSOOSSSSBOBLLLLBBBBLLLLBOBSSSSOOSSSSO",
+            "OSSSSBBOSSBBOOBBBBBBBBBBBBOOBBSOBBSSSSO",
+            ".OSSSSBBOBBBOODBBREKKERBBDOOBBBOBBSSSSO.",
+            "..OSSSBBOBBBOODBBROOOORBBDOOBBBOBBSSSO..",
+            ".OOOSSBBOBBBOOOODBBWWBBDOOOOBBBOBBSSOOO.",
+            "OAAWSSBBOBBBGGGGBBSSSSBBGGGGBBBOBBSSWAAO",
+            "OAWWSSBBOBBBGGGGSSSSSSSSGGGGBBBOBBSSWWAO",
+            ".OOOSSBBOODBBBBSSSSSSSSSSBBBBDOOBBSSOOO.",
+            "...OSSSBBODBBBBBSSSSSSSSBBBBBDOBBSO.....",
+            "....OOOOOODBBBBBBBBBBBBBBBBBBDOOOOO.....",
+            "........OWWDBBBBBBBBBBBBBBBBDBWWO.......",
+            "........OWWODBBBDOOOOOODBBBDOOWWO.......",
+            "...........ODBBBDO....ODBBBDO...........",
+            "..........OOWWWOO......OOWWWOO..........",
+            "..........OOOOOOO......OOOOOOO..........",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
         ],
-        // 🦅 Sol Phoenix — solar crown plumes, blazing outspread wings, golden tail feathers
+        // 🦅 08/10 Sol Phoenix (Elder — Solar Garuda Deity)
+        // 40-column wingspan of golden & crimson solar fire, 5-plume sun crown & armored talons
         PetSpecies::PhoenixChick => [
-            "...........GG..GG..GG...........",
-            "..........OGGAAggaAGGO..........",
-            "..OOO....OBBLLLLLLLLBBO....OOO..",
-            ".OAAAO..OBBBBBBBBBBBBBBO..OAAAO.",
-            "OAGGGGOOBBBEEKKWWEEKKBBBOOGGGGAO",
-            "OAGBBBBOOBBKKKKGGKKKKBBOOBBBBGAO",
-            "OABBBBBBOODBBBBGGGGBBDOOBBBBBBAO",
-            ".OADBBBBBBBBBBBBBBBBBBBBBBBBDAO.",
-            "..OOODBBBBBBSSSSSSSSBBBBBBDOOO..",
-            "....OOOODBBBSSSSSSSSBBBDOOOO....",
-            "......ODBBBBSSSSSSSSBBBBDO......",
-            "......ODBBBBBBBBBBBBBBBBDO......",
-            ".....OOOGGGGOOOOOOOOGGGGOOO.....",
-            "....OAGAGAGAO......OAGAGAGAO....",
-            ".....OOOOOOO........OOOOOOO.....",
-            "................................",
-            "................................",
-            "................................",
-            "................................",
-            "................................",
+            ".............GG..GG..GG..GG.............",
+            ".AA.........OGGAAGGGGGGAAGGO.........AA.",
+            "OAAO..AA.....OOBBLLLLLLBBOO.....AA..OAAO",
+            "OAGAOOAAO...ODBBBBBBBBBBBBDO...OAAOOAGAO",
+            "OAGGAAAAOO.ODBBREKGGGGKERBBDO.OOAAAAGGAO",
+            "OAGGGGGGAAOODBBROOGGGGOORBBDOOAAAGGGGGAO",
+            "OAGBBBBGGGAOODBBBBGGGGGBBBBDOOAGGGBBBGAO",
+            "OADBBBBBBGGAAODBBGGGGGGGBBDOAAGGBBBBBDAO",
+            ".OADBBBBBBBBBBBBSSSSSSSSBBBBBBBBBBBBDAO.",
+            "..OADBBBBBBBOOOSSSSSSSSSSOOOBBBBBBBDAO..",
+            "...OADBBBBBO..ODSSSSSSSSDO..OBBBBBDAO...",
+            "....OOOOOOO..ODBBSSSSSSBBDO..OOOOOOO....",
+            ".............ODBBBBBBBBBBDO.............",
+            "............ODBBBBDDDDDBBBBDO...........",
+            "...........OOOGGGGOOOOOGGGGOOO..........",
+            "..........OAAAGGGGO...OGGGGAAAO.........",
+            ".........OAGAGAGAGAO.OAGAGAGAGAO........",
+            "..........OOOOOOOOO...OOOOOOOOO.........",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
         ],
-        // 🦄 Astra Unicorn — golden spiral horn, flowing prism mane, celestial hooves
+        // 🦄 09/10 Astra Unicorn (Elder — Celestial Kirin Pegasus)
+        // Long spiral golden lance-horn, giant astral feathered wings, armored chest & lightning hooves
         PetSpecies::CrystalUni => [
-            "..............GGGG..............",
-            ".............OGGGGO.............",
-            "........OO...OGGGGO...OO........",
-            ".......OBBOOOOGGGGOOOBBO........",
-            "......OBLLLLBBBBBBBBLLLLBO......",
-            ".....OBBBBBBBBBBBBBBBBBBBBO.....",
-            "....ODBBEEKKBBBBBBBBEEKKBBDO....",
-            "....ODBBKKKKBBBBBBBBKKKKBBDO....",
-            "....ODBBPPPBBBBBBBBBBPPPBBDO.AA.",
-            ".....OOODBBBBBBBBBBBBBBDOOOASSA.",
-            "....OOODBBBBSSSSSSSSBBBBDOOASSA.",
-            "...OABBBBBBBSSSSSSSSBBBBBBBOAA..",
-            "...OABBBBBBBBBBBBBBBBBBBBBBOO...",
-            "....OOODBBBDDDDDDDDDDBBBDOOO....",
-            ".....OOOGGGGOOOOOOOOGGGGOOO.....",
-            ".......OOOOO........OOOOO.......",
-            "................................",
-            "................................",
-            "................................",
-            "................................",
+            "...................GG...................",
+            "..................OGGO..................",
+            ".................OGGGGO.................",
+            "..OO.........OO..OGGGGO..OO.........OO..",
+            ".OWWOO......OBBOOOGGGGOOOBBO......OOWWO.",
+            "OWWWWOO....OBLLLLBBBBBBLLLLBO....OOWWWWO",
+            "OWWSSWWOO.ODBBREKBBBBBBKERBBDO.OOWWSSWWO",
+            "OWWSSSSWWOODBBROOBBBBBBOORBBDOOWWSSSSWWO",
+            ".OWWSSSSWWOOODBBBBWWWWBBBBDOOOWWSSSSWWO.",
+            "..OWWSSSSBBOODBBGGGSSGGGBBDOOBBSSSSWWO..",
+            "...OOOSSSBBOODBBSSSSSSSSBBDOOBBSSSOOO...",
+            ".....OOOOOOOODBBBSSSSSSBBBDOOOOOOO..AA..",
+            "...........ODBBBBBSSSSBBBBBDO......ASSA.",
+            "..........ODBBBBBBBBBBBBBBBBDO.....ASSA.",
+            ".........ODBBBBDDDDDDDDDDBBBBDO....OAA..",
+            "........ODBBBDOOOOOOOOOOOODBBBDO........",
+            ".......ODBBBDO............ODBBBDO.......",
+            "......OOGGGGO..............OGGGGOO......",
+            "......OOOOOOO..............OOOOOOO......",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
         ],
-        // 👑 Royal Jelly — grand golden crown with gems, glossy translucent slime monarch
+        // 👑 10/10 Royal Jelly (Elder — Titan Slime Emperor)
+        // Colossal armored slime titan with grand jeweled crown, fierce glowing war-eyes & spiked gauntlets
         PetSpecies::SlimeKing => [
-            "................................",
-            ".......GG.....GGGG.....GG.......",
-            "......OGGGO..OGAAGGO..OGGGO.....",
-            "......OGGGGGGGGGGGGGGGGGGGO.....",
-            "......OOOOOOOOOOOOOOOOOOOOO.....",
-            "....OOOBLLLLLLLLLLLLLLLLBBOOO...",
-            "...OBBBWWWBBBBBBBBBBBBBBBBBBBO..",
-            "..OBBBWWWBBBBBBBBBBBBBBBBBBBBBO.",
-            ".ODBBWWBBBBBBBBBBBBBBBBBBBBBBBDO",
-            ".ODBBBBBEEKKBBBBBBBBEEKKBBBBBBDO",
-            ".ODBBBBBKKKKBBBBBBBBKKKKBBBBBBDO",
-            ".ODBBBPPPBBBBWWWWWWBBBBPPPBBBBDO",
-            ".ODBBBBBBBBSSSSSSSSSSBBBBBBBBBDO",
-            ".ODBBBBBBBBBBBBBBBBBBBBBBBBBBBDO",
-            "..OODDDDDDDDDDDDDDDDDDDDDDDDDOO.",
-            "....OOOOOOOOOOOOOOOOOOOOOOOO....",
-            "................................",
-            "................................",
-            "................................",
-            "................................",
+            "...........GG......GG......GG...........",
+            "..........OGGO...OGRRGO...OGGO..........",
+            ".........OGGGGOOOGGRRGGOOOGGGGO.........",
+            ".........OGGGGGGGGGGGGGGGGGGGGO.........",
+            ".........OOOOOOOOOOOOOOOOOOOOOO.........",
+            "......OOOBLLLLLLLLLLLLLLLLLLLLBBOOO.....",
+            "....OOBBBWWWWBBBBBBBBBBBBBBBBBBBBBOO....",
+            "..OO..OBBWWBBBBBBBBBBBBBBBBBBBBBBBO..OO.",
+            ".OGGO.ODBBBBBREKBBBBBBBBKERBBBBBDO.OGGO.",
+            "OGBBGOODBBBBBROOBBBBBBBBOORBBBBBDOOGBBGO",
+            "OBBBBGOODBBBBBBWWOOOOOOWWBBBBBBDOOGBBBBO",
+            "OBBBBBBOODBBBBSSSSSSSSSSSSBBBBDOOBBBBBBO",
+            ".OODBBBBOODBBGGGSSSSSSSSGGGBBDOOBBBBDOO.",
+            "...OOOOO.ODBBBBSSSSSSSSSSBBBBDO.OOOOO...",
+            ".........ODBBBBBBBBBBBBBBBBBBDO.........",
+            "........ODDDDDDDDDDDDDDDDDDDDDDO........",
+            ".......OOOOOOOOOOOOOOOOOOOOOOOOOO.......",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+        ],
+        // 🐱 01/10 Neko Mochi (Elder — Byakko Saber Tiger Shogun)
+        // Muscular armored tiger beast with saber fangs, golden shogun shoulder-armor & twin tails
+        PetSpecies::MochiCat => [
+            ".....OOOO......................OOOO.....",
+            "....OBLLBO....................OBLLBO....",
+            "...OBBPPPBO.....OOOOOOOO.....OBPPPBBO...",
+            "...OBBPPPBOOOOOBBLLLLLLBBOOOOOBPPPBBO...",
+            "....OBBBOOBBBBBBBBBBBBBBBBBBBBOOBBBO....",
+            "..OO.OO..ODBBREKBBBBBBBBKERBBDO..OO.OO..",
+            ".OGGO....ODBBROOBBAAAABBOORBBDO....OGGO.",
+            "OGGGGGOO.ODBBBBWWOOOOOOWWBBBBDO.OOGGGGGO",
+            "OGGGGGGGODBBBBBBOWWWWWWOABBBBBBDOGAGGGGO",
+            ".OOOOOOODBBBBGGGSSSSSSSSGGGbbbBDOOOOOOO.",
+            "......ODBBBBBSSSSSSSSSSSSSSBBBBBDO...OO.",
+            ".....OWWDBBBBSSSSSSSSSSSSSSBBBBDBWWOOBBO",
+            ".....OWWODBBBBSSSSSSSSSSSSBBBBDOOWWOBBAO",
+            "........ODBBBBBBBBBBBBBBBBBBBBDO...OBAO.",
+            "........ODBBBBDDDDDDDDDDDDBBBBDO..OBAO..",
+            ".......ODBBBDOOOOOOOOOOOOOODBBBDOOOAO...",
+            "......OOWWWOO..............OOWWWOOOO....",
+            "......OOOOOOO..............OOOOOOO......",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+        ],
+        // 🐶 02/10 Boba Pup (Elder — Fenrir Dire Wolf Guardian)
+        // Broad-shouldered Dire Wolf with spiked golden mane, fierce eyes & saber fangs
+        PetSpecies::BobaPup => [
+            "....OOOO........................OOOO....",
+            "...OSSSSOO....................OOSSSSO...",
+            "..OSSSSSSBBO...OOOOOOOOOO...OBBSSSSSSO..",
+            "..OSSSSSSBBBOOBBLLLLLLLLBBOOBBBSSSSSSO..",
+            "...OSSSSBBBBBBBBBBBBBBBBBBBBBBBBSSSSO...",
+            "..OO.OOODBBBBREKBBBBBBBBKERBBBBDOOO.OO..",
+            ".OGGO..ODBBBBROOBBSSSSBBOORBBBBDO..OGGO.",
+            "OGGGGOODBBBBBBWWOOOOOOOOWWBBBBBBDOOGGGGO",
+            ".OOGGGGDBBBBBBBOAAWWWWAAOBBBBBBBAGGGGOO.",
+            "...OOOODBBBBGGGSSSSSSSSSSGGGbbbbDOOOO...",
+            ".....ODBBBBBSSSSSSSSSSSSSSSSBBBBBDO..OO.",
+            "....OWWDBBBBSSOSOSOSOSOSOSOSBBBBDBWWOSSO",
+            "....OWWODBBBSSSSSSSSSSSSSSSSBBBDOOWWOBSO",
+            ".......ODBBBBBBBBBBBBBBBBBBBBBBDO..OBAO.",
+            ".......ODBBBBDDDDDDDDDDDDDDBBBBDO.OOAO..",
+            "......ODBBBDOOOOOOOOOOOOOOOODBBBDOOOO...",
+            ".....OOWWWOO................OOWWWOO.....",
+            ".....OOOOOOO................OOOOOOO.....",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+        ],
+        // 🐰 03/10 Cloud Bun (Elder — Raijin Storm Valkyrie)
+        // Swept-back wing-ears, thunder-cloud shoulder armor, fierce eyes & storm gauntlets
+        PetSpecies::CloudBun => [
+            "..OOOO............................OOOO..",
+            ".OBLLBOO........................OOBLLBO.",
+            "OBBPPPBBOO....................OOBBPPPBBO",
+            ".OOBBPPPBBBO....OOOOOOOO....OBBBPPPBBOO.",
+            "...OOBBBBBBBBOOBBLLLLLLBBOOBBBBBBBBOO...",
+            ".....OOOBBBBBBBBBBBBBBBBBBBBBBBBOOO.....",
+            "..WWW..ODBBBBREKBBBBBBBBKERBBBBDO..WWW..",
+            ".OWWWO.ODBBBBROOBBPPPPBBOORBBBBDO.OWWWO.",
+            "OWGGGWOODBBBBBBBOOOOOOOOBBBBBBBDOOWGGGWO",
+            "OWWWWWWWDBBBBGGGSSSSSSSSGGGbbbbBDWWWWWWWO",
+            ".OWWWWWWDBBBBSSSSSSSSSSSSSSBBBBDBWWWWWO.",
+            "..OOOOOODBBBBSSSSSSSSSSSSSSBBBBDOOOOOO..",
+            ".......ODBBBBBSSSSSSSSSSSSBBBBBDO.......",
+            ".......ODBBBBBBBBBBBBBBBBBBBBBBDO.......",
+            "......ODBBBBDDDDDDDDDDDDDDDDBBBBDO......",
+            ".....ODBBBDOOOOOOOOOOOOOOOOOODBBBDO.....",
+            "....OOWWWOO..................OOWWWOO....",
+            "....OOOOOOO..................OOOOOOO....",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+        ],
+        // 🐧 04/10 Star Pengu (Elder — Empoleon Frost Kaiser)
+        // Golden trident crown, broad ice-armor wings, razor flippers & glowing visor eyes
+        PetSpecies::StarPengu => [
+            "............GG.....GG.....GG............",
+            "...........OGGO...OGGO...OGGO...........",
+            "...........OGGGOOOGGGGOOOGGGO...........",
+            "............OGGGGGGGGGGGGGGO............",
+            "..........OOOBBLLLLLLLLLLBBOOO..........",
+            "...AA...OOBBBBBBBBGGGGbbbbbbbBOO...AA...",
+            "..OAAO.ODBBBBREKWWGGGGWWKERBBBBDO.OAAO..",
+            ".OAAAAOODBBBBROOWWGGGGWWOORBBBBDOOAAAAO.",
+            "OAAWWAAODBBBBBWWWWGGGGGGWWWWBBBBBDOAAWWAO",
+            "OAWWWWAAODBBBBAAAAAAAAAAAAAABBBBDOAAWWWAO",
+            "OAWWBBAAODBBBWWWWWWGGGGWWWWWWBBBDOAABBWAO",
+            ".OABBBAO.ODBBWWWWWGGGGGGWWWWWBBDO.OABBAO.",
+            "..OABBO..ODBBWWWWWWGGGGWWWWWWBBDO..OBBAO.",
+            "...OOO...ODBBBWWWWWWWWWWWWWWBBBDO...OOO..",
+            ".........ODBBBBBBBBBBBBBBBBBBBBDO........",
+            "........OOOGGGGGGOOOOOOOOGGGGGGOOO.......",
+            ".......OGGGGGGGGGO......OGGGGGGGGGO......",
+            "........OOOOOOOOO........OOOOOOOOO.......",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
         ],
     }
 }
 
-/// Unique 32×20 Teen stage bitmaps with sleeker intermediate proportions.
+/// Fierce, full-stature **ADULT (`Adult`)** bitmaps (40×24 canvas).
+/// Stronger, taller, with spread wings, horns, fangs, and muscular posture!
+fn adult_bitmap(species: PetSpecies) -> [&'static str; CANVAS_H] {
+    match species {
+        PetSpecies::IgnisDragon => [
+            "........................................",
+            "........GG....................GG........",
+            ".......OGGO.....OOOOOOOO.....OGGO.......",
+            "....OO..OAOOOOOBBLLLLLLBBOOOOAO..OO.....",
+            "...OAAO..OOOBBBBBBBBBBBBBBBBOOO.OAAO....",
+            "..OABBBO...ODBBEEKKBBBBEEKKBBDO.OBBBAO..",
+            ".OABBBBBO..ODBBKKKKBBBBKKKKBBDOOBBBBBAO.",
+            ".OADBBBBBOOODBBBBBWAAAWBBBBBDOOBBBBBDAO.",
+            "..OADBBBBBBBBBBBSSSSSSSSSSBBBBBBBBBBDAO.",
+            "...OOODBBBBBBBBBSSSSSSSSSSBBBBBBBBBDOOO.",
+            ".....ODBBBBBBBBBSSSSSSSSSSBBBBBBBBBDO...",
+            ".....ODBBBBBBBBBSSSSSSSSSSBBBBBBBBBDO.AA",
+            "......ODBBBBBBBBBSSSSSSSSBBBBBBBBBDO.AGA",
+            "......ODBBBBBBBBBBBBBBBBBBBBBBBBBBDOOAA.",
+            ".......OOODBBBBBDOOOOOOOODBBBBBDOOOOO...",
+            ".........ODBBBBDO........ODBBBBDO.......",
+            "........OOWWWOO..........OOWWWOO........",
+            "........OOOOOOO..........OOOOOOO........",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+        ],
+        PetSpecies::AzureWyrm => [
+            "........................................",
+            ".........AA..................AA.........",
+            "........OAAO....OOOOOOOO....OAAO........",
+            ".........OOAOOOBBLLLLLLBBOOOAOO.........",
+            "..........OOOBBBBBBBBBBBBBBOOO..........",
+            "....OO...ODBBBEEKKBBBBEEKKBBBDO...OO....",
+            "...OAAO..ODBBBKKKKBBBBKKKKBBBDO..OAAO...",
+            "..OABBBO.OOODBBBBBBSSSSBBBBBBDOO.OBBBAO.",
+            ".OABBBBBBOOOBBBBBWWWWWWWWBBBBBOOOBBBBBAO",
+            "..OADBBBBBBBBBBOWWWWWWWWWWOBBBBBBBBBBDAO",
+            "...OOODBBBBSSSSOOWWWWWWWWOOSSSSBBBBDOOO.",
+            ".....OOOODBBSSSSSBBBBBBBBSSSSSBBDOOOO...",
+            "....OABBBBBBBBBSSSSSSSSSSSSBBBBBBBBBAO..",
+            "...OADBBBBBDDDDDDDDDDDDDDDDDDDDBBBBBDAO.",
+            "....OOOOOOO....................OOOOOOO..",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+        ],
+        PetSpecies::EmberFox => [
+            "........................................",
+            ".......OOOO..................OOOO.......",
+            "......OBWWBO................OBWWBO......",
+            "......OBWWWBO....OOOOOO....OBWWWBO......",
+            ".......OBBBBBOOBBLLLLLLBBOOBBBBBO.......",
+            "........OBBBBBBBBBBBBBBBBBBBBBBO........",
+            "...AA..ODBBBEEKKBBBBBBBBEEKKBBBDO..AA...",
+            "..AWWA.ODBBBKKKKBBBBBBBBKKKKBBBDO.AWWA..",
+            "...AA..ODBBBPPPBBBWWWWBBBPPPBBBDO..AA...",
+            "........OOODBBBBBBWAAWBBBBBBDOOO..OOOO..",
+            "..........OOOOBBBSSSSSSBBBOOOO...OSSSSO.",
+            "............ODBBBSSSSSSSSBBBDO..OSSSSWSO",
+            "...........ODBBBBSSSSSSSSBBBBDOOOSSSSSO.",
+            "..........ODBBBBBBBBBBBBBBBBBBDOOSSSSO..",
+            ".........OOODBBBBOOOOOOOOBBBBDOOOOOOO...",
+            "...........OOOOOO........OOOOOO.........",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+        ],
+        PetSpecies::PhoenixChick => [
+            "........................................",
+            "...............GG..GG..GG...............",
+            "..............OGGAAGGAAGGO..............",
+            "....OOO......OBBLLLLLLLLBBO......OOO....",
+            "...OAAAO....OBBBBBBBBBBBBBBO....OAAAO...",
+            "..OAGGGGOO.OBBBEEKKWWEEKKBBBO.OOGGGGAO..",
+            ".OAGBBBBBBOOBBBKKKKGGKKKKBBBOOBBBBBBGAO.",
+            ".OABBBBBBBBOODBBBBGGGGBBBBDOOBBBBBBBBAO.",
+            "..OADBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBDAO..",
+            "...OOODBBBBBBBSSSSSSSSSSSSBBBBBBBDOOO...",
+            ".....OOOODBBBBSSSSSSSSSSSSBBBBDOOOO.....",
+            "........ODBBBBBSSSSSSSSSSBBBBBDO........",
+            "........ODBBBBBBBBBBBBBBBBBBBBDO........",
+            ".......OOOGGGGGOOOOOOOOOOGGGGGOOO.......",
+            "......OAGAGAGAGAO......OAGAGAGAGAO......",
+            ".......OOOOOOOOO........OOOOOOOOO.......",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+        ],
+        PetSpecies::CrystalUni => [
+            "........................................",
+            "..................GGGG..................",
+            ".................OGGGGO.................",
+            "............OO...OGGGGO...OO............",
+            "...........OBBOOOOGGGGOOOBBO............",
+            "..........OBLLLLBBBBBBBBLLLLBO..........",
+            "....OO...OBBBBBBBBBBBBBBBBBBBBO.........",
+            "...OWWO.ODBBEEKKBBBBBBBBEEKKBBDO........",
+            "..OWWWWOODBBKKKKBBBBBBBBKKKKBBDO...AA...",
+            "..OWWSSWODBBPPPBBBBBBBBBBPPPBBDO..ASSA..",
+            "...OOOSSSOOODBBBBBBBBBBBBBBDOOO..OASSA..",
+            ".....OOOOOODBBBBSSSSSSSSBBBBDOOOOASSA...",
+            ".........OABBBBBSSSSSSSSBBBBBBBOOOAA....",
+            ".........OABBBBBBBBBBBBBBBBBBBBBO.......",
+            "..........OOODBBBDDDDDDDDDDBBBDOOO......",
+            "...........OOOGGGGOOOOOOOOGGGGOOO.......",
+            ".............OOOOO........OOOOO.........",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+        ],
+        PetSpecies::SlimeKing => [
+            "........................................",
+            "...........GG.....GGGG.....GG...........",
+            "..........OGGGO..OGAAGGO..OGGGO.........",
+            "..........OGGGGGGGGGGGGGGGGGGGO.........",
+            "..........OOOOOOOOOOOOOOOOOOOOO.........",
+            "........OOOBLLLLLLLLLLLLLLLLBBOOO.......",
+            ".......OBBBWWWBBBBBBBBBBBBBBBBBBBO......",
+            "......OBBBWWWBBBBBBBBBBBBBBBBBBBBBO.....",
+            ".....ODBBWWBBBBBBBBBBBBBBBBBBBBBBBDO....",
+            ".....ODBBBBBEEKKBBBBBBBBEEKKBBBBBBDO....",
+            ".....ODBBBBBKKKKBBBBBBBBKKKKBBBBBBDO....",
+            ".....ODBBBPPPBBBBWWWWWWBBBBPPPBBBBDO....",
+            ".....ODBBBBBBBBSSSSSSSSSSBBBBBBBBBDO....",
+            ".....ODBBBBBBBBBBBBBBBBBBBBBBBBBBBDO....",
+            "......OODDDDDDDDDDDDDDDDDDDDDDDDDOO.....",
+            "........OOOOOOOOOOOOOOOOOOOOOOOO........",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+        ],
+        PetSpecies::MochiCat => [
+            "........................................",
+            ".........OOO................OOO.........",
+            "........OBLBO..............OBLBO........",
+            ".......OBPPPBO............OBPPPBO.......",
+            ".......OBPPPBOOOOOOOOOOOOOBPPPBO........",
+            "......OBLLLLBBBBBBBBBBBBBBBBLLLBO.......",
+            "......OBBBBBBBBBBBBBBBBBBBBBBBBBO.......",
+            ".....ODBBEEKKBBBBBBBBBBBBEEKKBBDO.......",
+            ".....ODBBKKKKBBBBBBBBBBBBKKKKBBDO.......",
+            ".....ODBBPPPBBBBBBAAABBBBBPPPBBDO.......",
+            "......ODBBBBBBBBOOGGGOOBBBBBBBDO........",
+            ".......OOOOOOOBBSSSSSSSSBBOOOOO.........",
+            ".......ODBBBBSSSSSSSSSSSSSSBBBDO..OO....",
+            "......ODBBBBBSSSSSSSSSSSSSSBBBBDOOBA....",
+            "......ODBBBBBSSSSSSSSSSSSSSBBBBDOBBA....",
+            ".......ODBBBBBBSSSSSSSSSSBBBBBBDOBA.....",
+            ".......OODBBBBBBBBBBBBBBBBBBBBDOOO......",
+            "........OOODBBBOOOOOOOOOBBBDOOO.........",
+            "..........OOOOO........OOOOO............",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+        ],
+        PetSpecies::BobaPup => [
+            "........................................",
+            "........OOOOOO............OOOOOO........",
+            ".......OSSSSSSOOOOOOOOOOOOSSSSSSO.......",
+            "......OSSSSSSLLLBBBBBBBBLLLSSSSSSO......",
+            ".....OSSSSSSBBBBBBBBBBBBBBBBSSSSSSO.....",
+            ".....OSSSSSBBBBBBBBBBBBBBBBBBSSSSSO.....",
+            ".....OSSSSBBEEKKBBBBBBBBEEKKBBSSSSO.....",
+            "......OOOOBBKKKKBBBBBBBBKKKKBBOOOO......",
+            ".......ODBBBBPPPSSSSSSSSPPPBBBBDO.......",
+            ".......ODBBBBSSSSOOOOOOSSSSBBBBDO.......",
+            "........OOOOOBBBBOOAAOOBBBBOOOOO........",
+            ".......ODBBBBBSSSSSSSSSSSSBBBBBDO.......",
+            "......ODBBBBBBSSOSOSOSOSSBBBBBBDO.OO....",
+            "......ODBBBBBBSSSSSSSSSSSSBBBBBBDOBS....",
+            ".......ODBBBBBBSSOSSOSSOSBBBBBBDOBBA....",
+            ".......ODBBBBBBBBBBBBBBBBBBBBBBDOOO.....",
+            "........OOODBBBOOOOOOOOOBBBDOOOO........",
+            "..........OOOOO........OOOOO............",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+        ],
+        PetSpecies::CloudBun => [
+            "..........OOOO............OOOO..........",
+            ".........OBLPBO..........OBLPBO.........",
+            ".........OBPPBO..........OBPPBO.........",
+            ".........OBPPBO..........OBPPBO.........",
+            ".........OBBBBO..........OBBBBO.........",
+            ".........OBBBBOOOOOOOOOOOOBBBBO.........",
+            "........OBLLLBBBBBBBBBBBBBBLLLBO........",
+            ".......OBBBBBBBBBBBBBBBBBBBBBBBBO.......",
+            "......ODBBEEKKBBBBBBBBBBBBEEKKBBDO......",
+            "......ODBBKKKKBBBBBBBBBBBBKKKKBBDO......",
+            "......ODBBPPPBBBBBBPPBBBBBBPPPBBDO......",
+            ".......ODBBBBBBBBOOOOOOBBBBBBBBDO.......",
+            "......OOODBBBBBBSSSSSSSSBBBBBBDOOO......",
+            ".....OWWWBBBBBBBSSSSSSSSBBBBBBBWWWO.....",
+            "....OWWWWWBBBBBBSSSSSSSSBBBBBBWWWWWO....",
+            ".....OWWWWBBBBBBBBBBBBBBBBBBBBWWWWO.....",
+            "......OOOWWBBBBBBBBBBBBBBBBBBWWOOO......",
+            ".........OOODBBBOOOOOOOOBBBDOOO.........",
+            "...........OOOOO........OOOOO...........",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+        ],
+        PetSpecies::StarPengu => [
+            "........................................",
+            ".............OOOOOOOOOOOOOO.............",
+            "...........OOBBLLLLLLLLLLBBOO...........",
+            ".........OOBBBBBBBGAAGBBBBBBBOO.........",
+            "........ODBBBBBWWWWWWWWWWBBBBBDO........",
+            "........ODBBBBEEKKWWWWEEKKBBBBDO........",
+            "........ODBBBBKKKKWWWWKKKKBBBBDO........",
+            "........ODBBBBWWWWGGGGWWWWBBBBDO........",
+            ".......OODBBBWWWWGGGGGGWWWWBBBDOO.......",
+            "......ODBBBBBAAAAAAAAAAAAAABBBBBDO......",
+            ".....ODBBBBBWWWWWWWWWWWWWWWWBBBBBDO.....",
+            ".....ODBBBBWWWWWWWWGGWWWWWWWWBBBBDO.....",
+            ".....ODBBBBWWWWWWWGGGGWWWWWWWBBBBDO.....",
+            "......OODBBWWWWWWWWWWWWWWWWWWBBDOO......",
+            ".......OOODWWWWWWWWWWWWWWWWWWDOOO.......",
+            ".........OOODBBBBBBBBBBBBBBDOOO.........",
+            "..........OOOGGGGOOOOOOGGGGOOO..........",
+            "............OOOOO......OOOOO............",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+        ],
+    }
+}
+
+/// Agile intermediate **TEEN (`Teen`)** bitmaps (medium proportions, budding wings/horns).
 fn teen_bitmap(species: PetSpecies) -> [&'static str; CANVAS_H] {
     match species {
         PetSpecies::IgnisDragon | PetSpecies::PhoenixChick => [
-            "................................",
-            ".......AA..............AA.......",
-            "......OAAO...OOOOOO...OAAO......",
-            ".......OOOBBBLLLLLLBBBOOO.......",
-            "....OO..OBBBEEKKBBEEKKBBBO..OO..",
-            "...OAAO.OBBBKKKKBBKKKKBBBO.OAAO.",
-            "...OABBBBBBBBBAAABBBBBBBBBBAO...",
-            "....OADBBBBSSSSSSSSSSBBBBDAO....",
-            ".....OOODBBSSSSSSSSSSBBDOOO.....",
-            "......ODBBBSSSSSSSSSSBBBDO......",
-            "......ODBBBBBBBBBBBBBBBBDO..AA..",
-            ".......OOODBBBOOOOBBBDOOOOAA....",
-            ".........OOOOO....OOOOO.OO......",
-            "................................",
-            "................................",
-            "................................",
-            "................................",
-            "................................",
-            "................................",
-            "................................",
+            "........................................",
+            "........................................",
+            "...........AA..............AA...........",
+            "..........OAAO...OOOOOO...OAAO..........",
+            "...........OOOBBBLLLLLLBBBOOO...........",
+            "........OO..OBBBEEKKBBEEKKBBBO..OO......",
+            ".......OAAO.OBBBKKKKBBKKKKBBBO.OAAO.....",
+            ".......OABBBBBBBBBAAABBBBBBBBBBAO.......",
+            "........OADBBBBSSSSSSSSSSBBBBDAO........",
+            ".........OOODBBSSSSSSSSSSBBDOOO.........",
+            "..........ODBBBSSSSSSSSSSBBBDO..........",
+            "..........ODBBBBBBBBBBBBBBBBDO..AA......",
+            "...........OOODBBBOOOOBBBDOOOOAA........",
+            ".............OOOOO....OOOOO.OO..........",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
         ],
         PetSpecies::AzureWyrm | PetSpecies::CrystalUni => [
-            "................................",
-            ".........AA..........AA.........",
-            "........OAOOOOOOOOOOOOAO........",
-            ".......OBBLLLLLLLLLLLLBBO.......",
-            "......OBBBEEKKBBBBEEKKBBBO......",
-            "......OBBBKKKKBBBBKKKKBBBO......",
-            "......OBBBPPPBBBBBBPPPBBBO......",
-            ".......OOOBBSSSSSSSSBBOOO.......",
-            "......OABBBBSSSSSSSSBBBBAO......",
-            ".....OADBBBBSSSSSSSSBBBBDAO.....",
-            "......OOODBBBBBBBBBBBBDOOO......",
-            ".......OOODBBBOOOOBBBDOOO.......",
-            ".........OOOOO....OOOOO.........",
-            "................................",
-            "................................",
-            "................................",
-            "................................",
-            "................................",
-            "................................",
-            "................................",
+            "........................................",
+            "........................................",
+            ".............AA..........AA.............",
+            "............OAOOOOOOOOOOOOAO............",
+            "...........OBBLLLLLLLLLLLLBBO...........",
+            "..........OBBBEEKKBBBBEEKKBBBO..........",
+            "..........OBBBKKKKBBBBKKKKBBBO..........",
+            "..........OBBBPPPBBBBBBPPPBBBO..........",
+            "...........OOOBBSSSSSSSSBBOOO...........",
+            "..........OABBBBSSSSSSSSBBBBAO..........",
+            ".........OADBBBBSSSSSSSSBBBBDAO.........",
+            "..........OOODBBBBBBBBBBBBDOOO..........",
+            "...........OOODBBBOOOOBBBDOOO...........",
+            ".............OOOOO....OOOOO.............",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
         ],
         PetSpecies::SlimeKing => [
-            "................................",
-            "................................",
-            "..........GG....GG..............",
-            ".........OGGGGGGGGO.............",
-            ".........OOOOOOOOOO.............",
-            ".......OOBBLLLLLLBBOO...........",
-            ".....OOBBWWBBBBBBBBBBBOO........",
-            "....ODBBBEEKKBBBBEEKKBBBDO......",
-            "....ODBBBKKKKBBBBKKKKBBBDO......",
-            "....ODBBPPPBBBWWBBBPPPBBDO......",
-            "....ODBBBBBSSSSSSSSBBBBBDO......",
-            ".....OODDDDDDDDDDDDDDDDDOO......",
-            ".......OOOOOOOOOOOOOOOO.........",
-            "................................",
-            "................................",
-            "................................",
-            "................................",
-            "................................",
-            "................................",
-            "................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "..............GG....GG..................",
+            ".............OGGGGGGGGO.................",
+            ".............OOOOOOOOOO.................",
+            "...........OOBBLLLLLLBBOO...............",
+            ".........OOBBWWBBBBBBBBBBBOO............",
+            "........ODBBBEEKKBBBBEEKKBBBDO..........",
+            "........ODBBBKKKKBBBBKKKKBBBDO..........",
+            "........ODBBPPPBBBWWBBBPPPBBDO..........",
+            "........ODBBBBBSSSSSSSSBBBBBDO..........",
+            ".........OODDDDDDDDDDDDDDDDDOO..........",
+            "...........OOOOOOOOOOOOOOOO.............",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
         ],
         _ => [
-            "................................",
-            "......OOOO............OOOO......",
-            ".....OBLPBOOOOOOOOOOOOBPLBO.....",
-            "....OBLLLBBBBBBBBBBBBBBLLLBO....",
-            "....OBBBEEKKBBBBBBBBEEKKBBBO....",
-            "....OBBBKKKKBBBBBBBBKKKKBBBO....",
-            "....OBBBPPPBBBAAAABBBPPPBBBO....",
-            ".....OOODBBBBSSSSSSBBBBDOOO.....",
-            "....OOODBBBBBSSSSSSBBBBBDOOO....",
-            "....ODBBBBBBBSSSSSSBBBBBBBDO....",
-            ".....ODBBBBBBBBBBBBBBBBBBDO.....",
-            "......OOODBBBOOOOOOBBBDOOO......",
-            "........OOOOO......OOOOO........",
-            "................................",
-            "................................",
-            "................................",
-            "................................",
-            "................................",
-            "................................",
-            "................................",
+            "........................................",
+            "........................................",
+            "..........OOOO............OOOO..........",
+            ".........OBLPBOOOOOOOOOOOOBPLBO.........",
+            "........OBLLLBBBBBBBBBBBBBBLLLBO........",
+            "........OBBBEEKKBBBBBBBBEEKKBBBO........",
+            "........OBBBKKKKBBBBBBBBKKKKBBBO........",
+            "........OBBBPPPBBBAAAABBBPPPBBBO........",
+            ".........OOODBBBBSSSSSSBBBBDOOO.........",
+            "........OOODBBBBBSSSSSSBBBBBDOOO........",
+            "........ODBBBBBBBSSSSSSBBBBBBBDO........",
+            ".........ODBBBBBBBBBBBBBBBBBBDO.........",
+            "..........OOODBBBOOOOOOBBBDOOO..........",
+            "............OOOOO......OOOOO............",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
         ],
     }
 }
 
-/// 10 distinct 32×20 Baby stage bitmaps so every species has its own chibi silhouette!
+/// Super-cute, compact **BABY (`Baby`)** chibi bitmaps (small & adorable!).
 fn baby_bitmap(species: PetSpecies) -> [&'static str; CANVAS_H] {
     match species {
         PetSpecies::MochiCat | PetSpecies::EmberFox => [
-            "................................",
-            "................................",
-            ".......OOO............OOO.......",
-            "......OBPBOOOOOOOOOOOOBPBO......",
-            ".....OBLLLBBBBBBBBBBBBLLLBO.....",
-            "....OBBBBBBBBBBBBBBBBBBBBBBO....",
-            "....ODBBEEKKBBBBBBBBEEKKBBDO....",
-            "....ODBBKKKKBBBBBBBBKKKKBBDO....",
-            "....ODBBPPPBBBBAAABBBPPPBBDO....",
-            ".....ODBBBBBBSSSSSSBBBBBBDO..OO.",
-            "......ODBBBBBSSSSSSBBBBBDO..OBO.",
-            "......OOODBBBBBBBBBBBBDOOO.OBA..",
-            "........OOODBBBOOOOBBBDOOOOO....",
-            "..........OOOOO....OOOOO........",
-            "................................",
-            "................................",
-            "................................",
-            "................................",
-            "................................",
-            "................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "............OOO..........OOO............",
+            "...........OBPBOOOOOOOOOOBPBO...........",
+            "..........OBLLLBBBBBBBBBBLLLBO..........",
+            ".........OBBBEEKKBBBBBBEEKKBBBO.........",
+            ".........OBBBKKKKBBBBBBKKKKBBBO.........",
+            ".........ODBBPPPBBBBBBBBPPPBBDO.........",
+            "..........ODBBBBBSSSSSSBBBBBDO..........",
+            "...........OODBBBBBBBBBBBBDOO...........",
+            "............OOODBBBOOOOBBDOO............",
+            "..............OOOOO....OOOO.............",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
         ],
-        PetSpecies::CloudBun => [
-            "........OOO..........OOO........",
-            ".......OBPBO........OBPBO.......",
-            ".......OBPBO........OBPBO.......",
-            ".......OBBBOOOOOOOOOOBBBO.......",
-            "......OBLLLBBBBBBBBBBLLLBO......",
-            ".....OBBBEKKBBBBBBBBEEKKBBO.....",
-            ".....OBBBKKKBBBBBBBBKKKKBBO.....",
-            ".....ODBBPPPBBBBBBBBPPPBBDO.....",
-            "....OWWDBBBBBSSSSSSBBBBBDBWWO...",
-            "....OWWWBBBBBBBBBBBBBBBBWWWO....",
-            ".....OOODBBBOOOOOOOOBBBDOOO.....",
-            ".......OOOOO........OOOOO.......",
-            "................................",
-            "................................",
-            "................................",
-            "................................",
-            "................................",
-            "................................",
-            "................................",
-            "................................",
-        ],
-        PetSpecies::IgnisDragon | PetSpecies::PhoenixChick => [
-            "................................",
-            "........AA............AA........",
-            ".......OAAOOOOOOOOOOOOAAO.......",
-            "......OBLLLBBBBBBBBBBLLLBO......",
-            "....OOOBBBEKKBBBBBBEEKKBBBOOO...",
-            "...OAAOBBBKKKBBBBBBKKKKBBBOAAO..",
-            "...OAAODBBPPPBBBBBBPPPBBDOAAO...",
-            "....OO.ODBBBBSSSSSSBBBBDO.OO....",
-            ".......ODBBBBSSSSSSBBBBDO..AA...",
-            "........OODBBBBBBBBBBDOO..OAG...",
-            ".........OODBBBOOOOBBDOOOOO.....",
-            "..........OOOOO....OOOOO........",
-            "................................",
-            "................................",
-            "................................",
-            "................................",
-            "................................",
-            "................................",
-            "................................",
-            "................................",
-        ],
-        PetSpecies::SlimeKing => [
-            "................................",
-            "................................",
-            "..............GGGG..............",
-            ".............OGGGGO.............",
-            "...........OOOBLLBBOOO..........",
-            ".........OOBBWWBBBBBBBOO........",
-            "........OBBBEEKKBBEEKKBBBO......",
-            "........OBBBKKKKBBKKKKBBBO......",
-            "........ODBBPPPBBBBPPPBBDO......",
-            "........ODBBBBSSSSSSBBBBDO......",
-            ".........OODDDDDDDDDDDDOO.......",
-            "...........OOOOOOOOOOOO.........",
-            "................................",
-            "................................",
-            "................................",
-            "................................",
-            "................................",
-            "................................",
-            "................................",
-            "................................",
+        PetSpecies::IgnisDragon | PetSpecies::PhoenixChick | PetSpecies::AzureWyrm => [
+            "........................................",
+            "........................................",
+            "........................................",
+            ".............AA..........AA.............",
+            "............OAAOOOOOOOOOOAAO............",
+            "...........OBLLLBBBBBBBBLLLBO...........",
+            ".........OOOBBEEKKBBBBEEKKBBOOO.........",
+            "........OAAOBBKKKKBBBBKKKKBBOAAO........",
+            ".........OOODBBPPPBBBBPPPBBDOOO.........",
+            "...........ODBBBBSSSSSSBBBBDO...........",
+            "............OODBBBBBBBBBBDOO............",
+            ".............OODBBBOOOOBBDO.............",
+            "..............OOOOO....OOOO.............",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
         ],
         _ => [
-            "................................",
-            "................................",
-            ".......OOOO..........OOOO.......",
-            "......OSSSSOOOOOOOOOOSSSSO......",
-            ".....OBLLLBBBBBBBBBBBBLLLBO.....",
-            "....OBBBBBBBBBBBBBBBBBBBBBBO....",
-            "....ODBBEEKKBBBBBBBBEEKKBBDO....",
-            "....ODBBKKKKBBBBBBBBKKKKBBDO....",
-            "....ODBBPPPBBBBGGBBBBPPPBBDO....",
-            ".....ODBBBBBBSSSSSSBBBBBBDO.....",
-            "......ODBBBBBSSSSSSBBBBBDO......",
-            "......OOODBBBBBBBBBBBBDOOO......",
-            "........OOODBBBOOOOBBBDOOO......",
-            "..........OOOOO....OOOOO........",
-            "................................",
-            "................................",
-            "................................",
-            "................................",
-            "................................",
-            "................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "............OOOO........OOOO............",
+            "...........OSSSSOOOOOOOOSSSSO...........",
+            "..........OBLLLBBBBBBBBBBLLLBO..........",
+            ".........OBBBEEKKBBBBBBEEKKBBBO.........",
+            ".........OBBBKKKKBBBBBBKKKKBBBO.........",
+            ".........ODBBPPPBBBBBBBBPPPBBDO.........",
+            "..........ODBBBBBSSSSSSBBBBBDO..........",
+            "...........OODBBBBBBBBBBBBDOO...........",
+            "............OOODBBBOOOOBBDOO............",
+            "..............OOOOO....OOOO.............",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
         ],
     }
 }
 
-/// Species-customized 32×20 Egg stage bitmap with rocking animation.
+/// Species-customized 40×24 Egg stage bitmap with rocking animation.
 fn egg_bitmap(species: PetSpecies, frame_idx: usize) -> [&'static str; CANVAS_H] {
     let mut base = if frame_idx.is_multiple_of(2) {
         [
-            "................................",
-            "...........OOOOOOOOOO...........",
-            ".........OOBBLLLLLLBBOO.........",
-            ".......OOBBBWWWBBBBBBBBOO.......",
-            "......OBBBBBWWWBBBBAAAABBO......",
-            ".....OBBBBBBBBBBBBBAAAABBBO.....",
-            ".....OBBBBBAAAABBBBBBBBBBBO.....",
-            "....ODBBBBBAAAABBBBBSSSSBBDO....",
-            "....ODBBBBBBBBBBBBBBSSSSBBDO....",
-            "....ODBBBBSSSSBBBBBBBBBBBBDO....",
-            "....ODBBBBSSSSBBBBBBAAAABBDO....",
-            ".....ODBBBBBBBBBBBBBAAAABDO.....",
-            ".....OODBBBBBBBBBBBBBBBBDOO.....",
-            "......OOODDDDDDDDDDDDDDOOO......",
-            ".....OOSSSSSSSSSSSSSSSSSSOO.....",
-            "....OAAAAAAAAAAAAAAAAAAAAAAO....",
-            ".....OOOOOOOOOOOOOOOOOOOOOO.....",
-            "................................",
-            "................................",
-            "................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "...............OOOOOOOOOO...............",
+            ".............OOBBLLLLLLBBOO.............",
+            "...........OOBBBWWWBBBBBBBBOO...........",
+            "..........OBBBBBWWWBBBBAAAABBO..........",
+            ".........OBBBBBBBBBBBBBAAAABBBO.........",
+            ".........OBBBBBAAAABBBBBBBBBBBO.........",
+            "........ODBBBBBAAAABBBBBSSSSBBDO........",
+            "........ODBBBBBBBBBBBBBBSSSSBBDO........",
+            "........ODBBBBSSSSBBBBBBBBBBBBDO........",
+            "........ODBBBBSSSSBBBBBBAAAABBDO........",
+            ".........ODBBBBBBBBBBBBBAAAABDO.........",
+            ".........OODBBBBBBBBBBBBBBBBDOO.........",
+            "..........OOODDDDDDDDDDDDDDOOO..........",
+            ".........OOSSSSSSSSSSSSSSSSSSOO.........",
+            "........OAAAAAAAAAAAAAAAAAAAAAAO........",
+            ".........OOOOOOOOOOOOOOOOOOOOOO.........",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
         ]
     } else {
         [
-            "................................",
-            "............OOOOOOOOOO..........",
-            "..........OOBBLLLLLLBBOO........",
-            "........OOBBBWWWBBBBBBBBOO......",
-            ".......OBBBBBWWWBBBBAAAABBO.....",
-            "......OBBBBBBBBBBBBBAAAABBBO....",
-            "......OBBBBBAAAABBBBBBBBBBBO....",
-            ".....ODBBBBBAAAABBBBBSSSSBBDO...",
-            ".....ODBBBBBBBBBBBBBBSSSSBBDO...",
-            ".....ODBBBBSSSSBBBBBBBBBBBBDO...",
-            ".....ODBBBBSSSSBBBBBBAAAABBDO...",
-            "......ODBBBBBBBBBBBBBAAAABDO....",
-            ".....OODBBBBBBBBBBBBBBBBDOO.....",
-            "......OOODDDDDDDDDDDDDDOOO......",
-            ".....OOSSSSSSSSSSSSSSSSSSOO.....",
-            "....OAAAAAAAAAAAAAAAAAAAAAAO....",
-            ".....OOOOOOOOOOOOOOOOOOOOOO.....",
-            "................................",
-            "................................",
-            "................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "................OOOOOOOOOO..............",
+            "..............OOBBLLLLLLBBOO............",
+            "............OOBBBWWWBBBBBBBBOO..........",
+            "...........OBBBBBWWWBBBBAAAABBO.........",
+            "..........OBBBBBBBBBBBBBAAAABBBO........",
+            "..........OBBBBBAAAABBBBBBBBBBBO........",
+            ".........ODBBBBBAAAABBBBBSSSSBBDO.......",
+            ".........ODBBBBBBBBBBBBBBSSSSBBDO.......",
+            ".........ODBBBBSSSSBBBBBBBBBBBBDO.......",
+            ".........ODBBBBSSSSBBBBBBAAAABBDO.......",
+            "..........ODBBBBBBBBBBBBBAAAABDO........",
+            ".........OODBBBBBBBBBBBBBBBBDOO.........",
+            "..........OOODDDDDDDDDDDDDDOOO..........",
+            ".........OOSSSSSSSSSSSSSSSSSSOO.........",
+            "........OAAAAAAAAAAAAAAAAAAAAAAO........",
+            ".........OOOOOOOOOOOOOOOOOOOOOO.........",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
+            "........................................",
         ]
     };
 
@@ -528,17 +839,17 @@ fn egg_bitmap(species: PetSpecies, frame_idx: usize) -> [&'static str; CANVAS_H]
         species,
         PetSpecies::IgnisDragon | PetSpecies::PhoenixChick | PetSpecies::SlimeKing
     ) {
-        base[0] = "............GG....GG............";
+        base[2] = "................GG....GG................";
     } else if matches!(
         species,
         PetSpecies::MochiCat | PetSpecies::CloudBun | PetSpecies::EmberFox
     ) {
-        base[0] = "..........OO........OO..........";
+        base[2] = "..............OO........OO..............";
     }
     base
 }
 
-/// Build the 32×20 character grid for any `(species, stage, mood, frame_idx)`.
+/// Build the 40×24 character grid for any `(species, stage, mood, frame_idx)`.
 fn build_grid(
     species: PetSpecies,
     stage: EvolutionStage,
@@ -549,7 +860,8 @@ fn build_grid(
         EvolutionStage::Egg => egg_bitmap(species, frame_idx),
         EvolutionStage::Baby => baby_bitmap(species),
         EvolutionStage::Teen => teen_bitmap(species),
-        EvolutionStage::Adult | EvolutionStage::CyberElder => adult_bitmap(species),
+        EvolutionStage::Adult => adult_bitmap(species),
+        EvolutionStage::CyberElder => elder_bitmap(species),
     };
 
     let mut grid = [['.'; CANVAS_W]; CANVAS_H];
@@ -559,38 +871,14 @@ fn build_grid(
         }
     }
 
-    // CyberElder form: stamp a gleaming golden crown & starlight sparkles in the corners
-    if stage == EvolutionStage::CyberElder {
-        let crown = ["..G..G..G..", "..GGGGGGG..", "..OOOOOOO.."];
-        for (cy, crow) in crown.iter().enumerate() {
-            for (cx, cch) in crow.chars().enumerate() {
-                if cch != '.' && cx + 10 < CANVAS_W && cy < CANVAS_H {
-                    grid[cy][cx + 10] = cch;
-                }
-            }
-        }
-        grid[1][3] = 'G';
-        grid[2][28] = 'G';
-        grid[14][2] = 'W';
-        grid[13][29] = 'W';
-    }
-
     // Blink / sleeping eye transform: ONLY turn `E` and `K` eye pixels into closed eyelids `O`!
-    // White body/belly/cloud pixels (`W`) remain 100% untouched!
+    // White body/fangs/claws/pearl pixels (`W`) and fierce red iris (`R`) remain untouched on wake!
     let blink = frame_idx % 2 == 1 || mood == PetMood::Sleeping;
     if stage != EvolutionStage::Egg && blink {
         for row in &mut grid {
             for cell in row.iter_mut() {
-                if *cell == 'E' || *cell == 'K' {
+                if *cell == 'E' || *cell == 'K' || (mood == PetMood::Sleeping && *cell == 'R') {
                     *cell = 'O';
-                }
-            }
-        }
-    } else if stage != EvolutionStage::Egg && mood == PetMood::Sick {
-        for row in &mut grid {
-            for cell in row.iter_mut() {
-                if *cell == 'E' {
-                    *cell = 'P';
                 }
             }
         }
@@ -601,25 +889,6 @@ fn build_grid(
         let mut shifted = [['.'; CANVAS_W]; CANVAS_H];
         shifted[..CANVAS_H - 1].copy_from_slice(&grid[1..CANVAS_H]);
         grid = shifted;
-    }
-
-    // Stamp a 4×4 pixel mood badge in the top-right corner on frame 0
-    if stage != EvolutionStage::Egg && frame_idx.is_multiple_of(2) {
-        let badge: [&str; 4] = match mood {
-            PetMood::Happy => [".P.P", "PPPP", ".PP.", "..P."],
-            PetMood::Sleeping => ["GGGG", "..G.", ".G..", "GGGG"],
-            PetMood::Eating => [".GG.", "GWWG", "GWWG", ".GG."],
-            PetMood::Sick => [".P..", "PPP.", ".P..", "..P."],
-            PetMood::Training => ["..G.", ".GGG", "GGA.", ".G.."],
-            PetMood::Idle => ["..G.", ".GGG", "..G.", "...."],
-        };
-        for (by, brow) in badge.iter().enumerate() {
-            for (bx, bch) in brow.chars().enumerate() {
-                if bch != '.' && bx + 26 < CANVAS_W && by < CANVAS_H {
-                    grid[by][bx + 26] = bch;
-                }
-            }
-        }
     }
 
     grid
@@ -696,21 +965,22 @@ fn pixel_color(code: char, species: PetSpecies) -> Option<Color> {
     let (primary, secondary, accent) = species_palette(species);
     match code {
         '.' => None,
-        'O' | '0' => Some(Color::Rgb(34, 28, 54)),
-        'D' => Some(scale_rgb(primary, 0.72)),
+        'O' | '0' => Some(Color::Rgb(27, 22, 44)),
+        'D' => Some(scale_rgb(primary, 0.68)),
         'B' | 'b' => Some(primary),
-        'L' => Some(scale_rgb(primary, 1.18)),
+        'L' => Some(scale_rgb(primary, 1.22)),
         'S' | 's' => Some(secondary),
         'A' | 'a' => Some(accent),
+        'R' | 'r' => Some(Color::Rgb(255, 55, 75)),
         'W' | 'E' => Some(Color::Rgb(250, 252, 255)),
-        'K' => Some(Color::Rgb(20, 16, 32)),
+        'K' => Some(Color::Rgb(18, 14, 30)),
         'P' => Some(Color::Rgb(255, 110, 165)),
-        'G' | 'g' => Some(Color::Rgb(255, 220, 75)),
+        'G' | 'g' => Some(Color::Rgb(255, 220, 70)),
         _ => Some(primary),
     }
 }
 
-/// Convert a 32×20 pixel grid into 10 half-block terminal [`Line`]s.
+/// Convert a 40×24 pixel grid into 12 half-block terminal [`Line`]s.
 fn render_grid_colored(
     grid: &[[char; CANVAS_W]; CANVAS_H],
     species: PetSpecies,
@@ -738,7 +1008,7 @@ fn render_grid_colored(
     lines
 }
 
-/// Convert a 32×20 pixel grid into 10 monochrome half-block String lines.
+/// Convert a 40×24 pixel grid into 12 monochrome half-block String lines.
 fn render_grid_plain(grid: &[[char; CANVAS_W]; CANVAS_H]) -> String {
     let mut rows = Vec::with_capacity(CANVAS_H / 2);
     for pair in 0..(CANVAS_H / 2) {
@@ -771,14 +1041,14 @@ pub fn get_sprite_frames(species: PetSpecies, stage: EvolutionStage, mood: PetMo
 /// Ambient retro status particles above the pixel sprite.
 pub fn get_mood_particles(mood: PetMood, tick: usize) -> &'static str {
     let frames: &[&str] = match mood {
-        PetMood::Idle => &["·   ✦   ·   ★   ·   ✦   ·", "✦   ·   ★   ·   ✦   ·   ★"],
-        PetMood::Eating => &["♪   ♥   ★   ♥   ♪   ★   ♪", "★   ♪   ♥   ♪   ★   ♥   ★"],
-        PetMood::Sleeping => &["☾   z   Z   zZ  ·   ✦   ☾", "✦   Z   zZ  z   ☾   ·   ✦"],
-        PetMood::Happy => &["✦   ♥   ★   ♥   ✦   ♥   ✦", "♥   ✦   ♥   ✦   ★   ✦   ♥"],
-        PetMood::Sick => &[".   ~   x   ~   .   x   .", "~   .   x   .   ~   .   x"],
-        PetMood::Training => &["★   ♦   ▲   ♦   ★   ▲   ★", "♦   ★   ▲   ★   ♦   ★   ♦"],
+        PetMood::Idle => &["·   ✦   ·   ★   ·   ✦   ·   ★   ·", "✦   ·   ★   ·   ✦   ·   ★   ·   ✦"],
+        PetMood::Eating => &["♪   ♥   ★   ♥   ♪   ★   ♪   ♥   ♪", "★   ♪   ♥   ♪   ★   ♥   ★   ♪   ★"],
+        PetMood::Sleeping => &["☾   z   Z   zZ  ·   ✦   ☾   z   Z", "✦   Z   zZ  z   ☾   ·   ✦   Z   z"],
+        PetMood::Happy => &["✦   ♥   ★   ♥   ✦   ♥   ✦   ★   ♥", "♥   ✦   ♥   ✦   ★   ✦   ♥   ✦   ★"],
+        PetMood::Sick => &[".   ~   x   ~   .   x   .   ~   x", "~   .   x   .   ~   .   x   .   ~"],
+        PetMood::Training => &["★   ♦   ▲   ♦   ★   ▲   ★   ♦   ▲", "♦   ★   ▲   ★   ♦   ★   ♦   ▲   ★"],
     };
-    frames[tick % frames.len()]
+    frames[(tick / 4) % frames.len()]
 }
 
 /// Plain String lines of the current animation frame (used by CLI & tests).
@@ -796,20 +1066,20 @@ pub fn render_animated_sprite(pet: &Pet, tick: usize) -> Vec<String> {
     lines
 }
 
-/// TrueColor 32×20 Half-Block Pixel Art [`Line`]s for the habitat LCD screen.
+/// TrueColor 40×24 Half-Block Pixel Art [`Line`]s for the habitat LCD screen.
 pub fn render_colored_sprite(pet: &Pet, tick: usize) -> Vec<Line<'static>> {
-    let frame_idx = usize::from(tick % 6 == 5);
+    let frame_idx = usize::from(tick % 8 == 7);
     let grid = build_grid(pet.species, pet.stage, pet.mood, frame_idx);
     let (_, secondary, accent) = species_palette(pet.species);
 
-    let mut out = Vec::with_capacity(13);
+    let mut out = Vec::with_capacity(14);
     out.push(Line::from(Span::styled(
         get_mood_particles(pet.mood, tick).to_string(),
         Style::default().fg(accent),
     )));
     out.extend(render_grid_colored(&grid, pet.species));
     out.push(Line::from(Span::styled(
-        "▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀".to_string(),
+        "▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀".to_string(),
         Style::default().fg(secondary),
     )));
 
@@ -824,18 +1094,18 @@ pub fn render_colored_sprite(pet: &Pet, tick: usize) -> Vec<Line<'static>> {
     out
 }
 
-/// TrueColor 32×20 Half-Block Pixel Art [`Line`]s for the Step 1 Companion Selector.
+/// TrueColor 40×24 Half-Block Pixel Art [`Line`]s for the Step 1 Companion Selector.
 pub fn render_colored_preview(
     species: PetSpecies,
     stage: EvolutionStage,
     tick: usize,
 ) -> Vec<Line<'static>> {
-    let frame_idx = usize::from(tick % 6 == 5);
+    let frame_idx = usize::from(tick % 8 == 7);
     let grid = build_grid(species, stage, PetMood::Happy, frame_idx);
     let (_, secondary, _) = species_palette(species);
     let mut out = render_grid_colored(&grid, species);
     out.push(Line::from(Span::styled(
-        "▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀".to_string(),
+        "▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀".to_string(),
         Style::default().fg(secondary),
     )));
     out
@@ -848,6 +1118,7 @@ pub fn render_species_preview(species: PetSpecies) -> Vec<String> {
 }
 
 /// What your companion is saying out loud right now (`💬`).
+/// Rotates slowly every 48 ticks (~12 seconds) so you can easily read every word!
 pub fn speech_bubble(pet: &Pet, tick: usize) -> String {
     if pet.stage == EvolutionStage::Egg {
         return if pet.incubation >= 80 {
@@ -881,10 +1152,11 @@ pub fn speech_bubble(pet: &Pet, tick: usize) -> String {
         "💬 \"Let's play the 3-in-1 Retro Arcade [G]!\"".to_string(),
         "💬 \"Headpats [T] & chats [Y] grow our bond!\"".to_string(),
     ];
-    chatter[(tick / 3) % chatter.len()].clone()
+    chatter[(tick / 48) % chatter.len()].clone()
 }
 
 /// Inner thought bubble (`💭`) revealing what your companion is secretly thinking!
+/// Rotates slowly every 48 ticks (~12 seconds) so you have plenty of time to read it.
 pub fn thought_bubble(pet: &Pet, tick: usize) -> String {
     if pet.stage == EvolutionStage::Egg {
         return "💭 (Thinking: It's so cozy in here... I want to meet my keeper soon!)"
@@ -903,56 +1175,56 @@ pub fn thought_bubble(pet: &Pet, tick: usize) -> String {
     let species_thoughts = match pet.species {
         PetSpecies::MochiCat => [
             "💭 (Thinking: If I purr louder, maybe I'll get extra Taiyaki...)",
-            "💭 (Thinking: That sunny spot on the floor looks perfect for a nap.)",
+            "💭 (Thinking: Soon I'll awaken my Byakko Tiger Shogun form!)",
             "💭 (Thinking: My keeper's keyboard clicks sound like a lullaby!)",
         ],
         PetSpecies::BobaPup => [
             "💭 (Thinking: Is it playtime yet?! My tail won't stop wagging!)",
-            "💭 (Thinking: I wonder where I buried my favorite honey biscuit...)",
+            "💭 (Thinking: One day I'll grow into a mighty Fenrir Dire Wolf!)",
             "💭 (Thinking: I'll guard the Sanctuary while my keeper works!)",
         ],
         PetSpecies::CloudBun => [
             "💭 (Thinking: My ears feel extra fluffy today~)",
-            "💭 (Thinking: Floating on a daydream... carrot clouds everywhere!)",
+            "💭 (Thinking: In my Elder form, I'll command the storm clouds!)",
             "💭 (Thinking: Press [Y] to chat with me anytime!)",
         ],
         PetSpecies::StarPengu => [
             "💭 (Thinking: I counted 42 shooting stars in the aurora last night!)",
-            "💭 (Thinking: Waddling is the most dignified way to travel.)",
+            "💭 (Thinking: Training hard to earn my Frost Kaiser trident crown!)",
             "💭 (Thinking: Snowberries taste best when shared with a friend!)",
         ],
         PetSpecies::IgnisDragon => [
-            "💭 (Thinking: My flame breath is getting warmer! Soon I'll soar!)",
+            "💭 (Thinking: My flame breath is getting hotter! Soon I'll be Bahamut!)",
             "💭 (Thinking: Every true dragon hoards shiny coins and spicy chilies!)",
             "💭 (Thinking: I love when my keeper polishes my golden horns.)",
         ],
         PetSpecies::AzureWyrm => [
-            "💭 (Thinking: The tides and stars are in harmony today...)",
+            "💭 (Thinking: The tides and stars are awakening my Leviathan power...)",
             "💭 (Thinking: My moon pearl glows brighter whenever you visit!)",
             "💭 (Thinking: Ancient dragons value patience, wisdom, and snacks.)",
         ],
         PetSpecies::EmberFox => [
-            "💭 (Thinking: One day I'll grow all nine tails of cyan foxfire!)",
-            "💭 (Thinking: Inari tofu is the secret to spiritual power~)",
+            "💭 (Thinking: Soon I'll unleash all nine tails of cyan foxfire!)",
+            "💭 (Thinking: Inari tofu is the secret to Kyuubi spirit power~)",
             "💭 (Thinking: Should I play a tiny harmless prank, or behave?)",
         ],
         PetSpecies::PhoenixChick => [
-            "💭 (Thinking: My feathers feel warm like sunrise!)",
+            "💭 (Thinking: My wings burn like sunrise — Solar Garuda awaits!)",
             "💭 (Thinking: Even a legendary solar firebird loves headpats.)",
             "💭 (Thinking: Let's set a new high score in Hurdle Dash [G]!)",
         ],
         PetSpecies::CrystalUni => [
-            "💭 (Thinking: My prism horn caught a rainbow beam just now!)",
+            "💭 (Thinking: My prism horn is evolving into a Celestial Kirin lance!)",
             "💭 (Thinking: Starlight sugar makes my hooves sparkle~)",
             "💭 (Thinking: Our bond feels stronger every single day!)",
         ],
         PetSpecies::SlimeKing => [
-            "💭 (Thinking: *boing* *wobble* Being a royal monarch is hard work!)",
+            "💭 (Thinking: Soon I'll grow into a colossal Titan Slime Emperor!)",
             "💭 (Thinking: Make sure my golden crown isn't tilted!)",
-            "💭 (Thinking: Crystal dew keeps my gel 100% bouncy!)",
+            "💭 (Thinking: Crystal dew keeps my royal gel 100% powerful!)",
         ],
     };
-    species_thoughts[(tick / 4) % species_thoughts.len()].to_string()
+    species_thoughts[(tick / 48) % species_thoughts.len()].to_string()
 }
 
 pub fn mood_dialogue(pet: &Pet) -> String {
@@ -1004,8 +1276,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_all_species_stages_and_moods_render_32x20_half_block_pixel_sprites() {
+    fn test_all_species_stages_and_moods_render_40x24_half_block_pixel_sprites() {
         for species in PetSpecies::all() {
+            let baby = get_sprite_frames(*species, EvolutionStage::Baby, PetMood::Idle);
+            let adult = get_sprite_frames(*species, EvolutionStage::Adult, PetMood::Idle);
+            let elder = get_sprite_frames(*species, EvolutionStage::CyberElder, PetMood::Idle);
+            assert_ne!(
+                baby[0], adult[0],
+                "{species:?} Baby and Adult must have distinct silhouettes"
+            );
+            assert_ne!(
+                adult[0], elder[0],
+                "{species:?} Adult and Apex Elder must have distinct silhouettes"
+            );
+
             for stage in EvolutionStage::all() {
                 for mood in PetMood::all() {
                     let frames = get_sprite_frames(*species, *stage, *mood);
@@ -1036,7 +1320,7 @@ mod tests {
     }
 
     #[test]
-    fn test_render_animated_colored_sprite_and_thought_bubble() {
+    fn test_render_animated_colored_sprite_and_slow_readable_thoughts() {
         let mut pet = Pet::new("Mochi");
         let lines_t0 = render_animated_sprite(&pet, 0);
         let lines_t1 = render_animated_sprite(&pet, 1);
@@ -1045,14 +1329,15 @@ mod tests {
 
         let colored = render_colored_sprite(&pet, 0);
         assert!(!colored.is_empty());
-        assert!(thought_bubble(&pet, 0).contains("Thinking"));
 
-        pet.stage = EvolutionStage::Baby;
+        pet.stage = EvolutionStage::Adult;
+        // Verify thought & speech stay identical across 30 consecutive ticks (~7.5s) so user can read comfortably!
+        assert_eq!(thought_bubble(&pet, 0), thought_bubble(&pet, 30));
+        assert_eq!(speech_bubble(&pet, 0), speech_bubble(&pet, 30));
+
         pet.poop_count = 2;
         let dirty_lines = render_animated_sprite(&pet, 0);
         assert!(dirty_lines.iter().any(|l| l.contains('💩')));
-        assert!(speech_bubble(&pet, 0).contains("bubble bath"));
-        assert!(thought_bubble(&pet, 0).contains("Thinking"));
     }
 
     #[test]
@@ -1066,12 +1351,12 @@ mod tests {
         for mood in PetMood::all() {
             let _ = mood_color(*mood);
             assert!(!get_mood_particles(*mood, 0).is_empty());
-            assert_ne!(get_mood_particles(*mood, 0), get_mood_particles(*mood, 1));
+            assert_ne!(get_mood_particles(*mood, 0), get_mood_particles(*mood, 4));
         }
         for species in PetSpecies::all() {
             let preview = render_species_preview(*species);
             assert_eq!(preview.len(), CANVAS_H / 2);
-            let colored_preview = render_colored_preview(*species, EvolutionStage::Adult, 0);
+            let colored_preview = render_colored_preview(*species, EvolutionStage::CyberElder, 0);
             assert!(!colored_preview.is_empty());
         }
         let _ = sky_scene(500);
