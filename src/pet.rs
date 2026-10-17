@@ -643,15 +643,29 @@ pub fn format_hearts(filled: u8) -> String {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MemorialRecord {
+    pub pet_name: String,
+    pub species: PetSpecies,
+    pub stage: EvolutionStage,
+    pub age_seconds: u64,
+    pub cause_of_death: String,
+    pub epitaph: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Pet {
     pub name: String,
+    pub caretaker_title: String,
     pub species: PetSpecies,
     pub theme: ShellTheme,
     pub stage: EvolutionStage,
     pub mood: PetMood,
     pub is_alive: bool,
     pub cause_of_death: Option<String>,
+    pub revival_count: u8,
+    pub vigil_steps_completed: u8,
+    pub buried: bool,
     pub incubation: u8,
     pub hunger: u8,
     pub happiness: u8,
@@ -710,12 +724,16 @@ impl Pet {
 
         Self {
             name: final_name,
+            caretaker_title: "Keeper".to_string(),
             species,
             theme,
             stage: EvolutionStage::Egg,
             mood: PetMood::Idle,
             is_alive: true,
             cause_of_death: None,
+            revival_count: 0,
+            vigil_steps_completed: 0,
+            buried: false,
             incubation: 0,
             hunger: 65,
             happiness: 80,
@@ -820,45 +838,72 @@ impl Pet {
         }
     }
 
+    pub fn caretaker_label(&self) -> &str {
+        let trimmed = self.caretaker_title.trim();
+        if trimmed.is_empty() {
+            "Keeper"
+        } else {
+            trimmed
+        }
+    }
+
+    pub fn set_caretaker_title(&mut self, title: &str) {
+        let trimmed = title.trim();
+        if !trimmed.is_empty() {
+            self.caretaker_title = trimmed.to_string();
+            self.last_pet_speech = None;
+            self.last_pet_thought = None;
+            self.reaction_ticks_left = 0;
+            self.log_action(format!(
+                "🔖 {} will now call you '{}'.",
+                self.name, self.caretaker_title
+            ));
+        }
+    }
+
     pub fn dialogue_prompt(&self, tick: usize) -> DialoguePrompt {
+        let caretaker = self.caretaker_label();
         if !self.is_alive {
             return DialoguePrompt {
-                inner_thought: "💭 (Roh pet kamu melayang sedih menunggu keajaiban...)".to_string(),
+                inner_thought: "💭 (A quiet stillness fills the habitat around the resting spirit.)"
+                    .to_string(),
                 pet_line: format!(
-                    "💬 \"👻 Keeper... tolong bangkitkan {} pakai Phoenix Tear [H]...\"",
-                    self.name
+                    "💬 \"{}, {} has fallen. Will you hold a Vigil [B] or use a Phoenix Tear [H]?\"",
+                    caretaker, self.name
                 ),
-                option_1: "1. Berdoa dan berjanji akan merawatnya lebih baik (+Bond)".to_string(),
-                option_2: "2. Gunakan Phoenix Tear sekarang untuk membangkitkannya!".to_string(),
+                option_1: "1. Hold a quiet Vigil step and vow better care (+Bond)".to_string(),
+                option_2: "2. Use a Sacred Phoenix Tear to revive them now".to_string(),
             };
         }
 
         if self.stage == EvolutionStage::Egg {
             return DialoguePrompt {
                 inner_thought:
-                    "💭 (Di dalam cangkang, siluet kecil bergerak mendekati suaramu.)".to_string(),
+                    "💭 (Inside the shell, a small shadow shifts toward the sound of your voice.)"
+                        .to_string(),
                 pet_line: format!(
-                    "💬 \"*tok... tok...* Telur {} bergetar hangat mendengar suaramu!\"",
-                    self.name
+                    "💬 \"*tap... tap...* {}'s egg rocks gently against the cushion when {} speaks.\"",
+                    self.name, caretaker
                 ),
-                option_1: "1. Nyanyikan lagu pengantar yang hangat (+Bond)".to_string(),
-                option_2: "2. Janjikan camilan enak setelah menetas nanti (+Warmth)".to_string(),
+                option_1: "1. Hum a steady, low melody beside the nest (+Bond)".to_string(),
+                option_2: "2. Tuck the warm blanket closer around the shell (+Warmth)".to_string(),
             };
         }
 
         if self.is_sleeping {
             return DialoguePrompt {
                 inner_thought: format!(
-                    "💭 ({} mengigau tentang mengejar {} di atas awan...)",
+                    "💭 ({} twitches a paw in sleep, dreaming of {}.)",
                     self.name,
                     self.species.favorite_snack()
                 ),
                 pet_line: format!(
-                    "💬 \"*Zzz...* sisakan {} paling besar buat keeper-ku...\"",
-                    self.species.favorite_snack()
+                    "💬 \"*murmurs in sleep* ...save a piece of {} for {}...\"",
+                    self.species.favorite_snack(),
+                    caretaker
                 ),
-                option_1: "1. Bisikkan 'Mimpi indah ya!' dan rapikan selimut (+Bond)".to_string(),
-                option_2: "2. Taruh camilan kejutan di samping bantalnya (+Happy)".to_string(),
+                option_1: "1. Pull the blanket up to their shoulders quietly (+Bond)".to_string(),
+                option_2: "2. Leave a small treat beside the mat for morning (+Happy)".to_string(),
             };
         }
 
@@ -866,59 +911,62 @@ impl Pet {
         match (self.species, topic) {
             (PetSpecies::IgnisDragon, 0) => DialoguePrompt {
                 inner_thought:
-                    "💭 (Ignis mengepulkan cincin asap emas dan menatap langit penuh semangat.)"
+                    "💭 (Exhales a thin ring of warm smoke and looks straight at you.)"
                         .to_string(),
                 pet_line: format!(
-                    "💬 \"Keeper! Sayap nagaku makin kekar nih! Hari ini {} harus latihan apa?\"",
-                    self.name
+                    "💬 \"{}, the scales along my wings feel heavier today. What should we practice?\"",
+                    caretaker
                 ),
-                option_1: "1. Terbang menembus awan bersama (+12 XP, +5 Bond)".to_string(),
-                option_2: "2. Panggang marshmallow pakai api naga (+14 Happy, +5 coins)".to_string(),
+                option_1: "1. Practice wind-draft glides across the yard (+12 XP, +5 Bond)".to_string(),
+                option_2: "2. Toast sweet chestnuts over a low ember (+14 Happy, +5 coins)".to_string(),
             },
             (PetSpecies::AzureWyrm, 0) => DialoguePrompt {
                 inner_thought:
-                    "💭 (Mutiara laut di cakar Azure Wyrm berpendar biru menenangkan.)".to_string(),
+                    "💭 (Rolls the pale sea-pearl between front claws, listening to it hum.)".to_string(),
                 pet_line: format!(
-                    "💬 \"Keeper, coba dengarkan... suara deburan samudra kuno di mutiara {} tenang banget ya?\"",
-                    self.name
+                    "💬 \"Listen closely, {}. You can hear the tide inside this pearl.\"",
+                    caretaker
                 ),
-                option_1: "1. Bermeditasi di tepi samudra berbintang (+12 XP, +5 Bond)".to_string(),
-                option_2: "2. Poles mutiara lautnya sampai berkilau (+14 Happy, +5 coins)".to_string(),
+                option_1: "1. Sit together and listen to the low tide (+12 XP, +5 Bond)".to_string(),
+                option_2: "2. Polish the sea-pearl with a soft cloth (+14 Happy, +5 coins)".to_string(),
             },
             (PetSpecies::CrystalUni, 0) => DialoguePrompt {
                 inner_thought:
-                    "💭 (Tanduk kristal Astra memancarkan cahaya pelangi ke seluruh kamar.)"
+                    "💭 (Tilts its horn so a thin band of prism light falls across your keyboard.)"
                         .to_string(),
                 pet_line: format!(
-                    "💬 \"Keeper! Sebentar lagi {} berevolusi jadi Celestial Kirin Pegasus! Mau jalan-jalan ke rasi bintang?\"",
-                    self.name
+                    "💬 \"The air feels clear tonight, {}. Want to step outside for a bit?\"",
+                    caretaker
                 ),
-                option_1: "1. Berpacu melintasi bintang jatuh (+12 XP, +5 Bond)".to_string(),
-                option_2: "2. Sisir surai kristalnya sampai berkilau (+14 Happy, +5 coins)"
+                option_1: "1. Pace the garden path under the stars (+12 XP, +5 Bond)".to_string(),
+                option_2: "2. Brush the tangles out of its mane (+14 Happy, +5 coins)"
                     .to_string(),
             },
             (_, 1) => DialoguePrompt {
                 inner_thought: format!(
-                    "💭 ({} penasaran gimana harimu hari ini di depan terminal...)",
+                    "💭 ({} rests its chin near the glass, watching your hands on the keys.)",
                     self.name
                 ),
-                pet_line: "💬 \"Setiap kali kamu buka terminal, aku langsung semangat! Gimana kabarmu hari ini, Keeper?\""
+                pet_line: format!(
+                    "💬 \"You've been at the terminal a while, {}. How is the work going?\"",
+                    caretaker
+                ),
+                option_1: "1. 'Making steady progress—let's keep going.' (+12 XP, +5 Bond)"
                     .to_string(),
-                option_1: "1. 'Lagi semangat ngoding & siap berpetualang!' (+12 XP, +5 Bond)"
-                    .to_string(),
-                option_2: "2. 'Pengen santai bareng pet kesayanganku~' (+14 Happy, +5 Bond)"
+                option_2: "2. 'Taking a five-minute breather with you.' (+14 Happy, +5 Bond)"
                     .to_string(),
             },
             _ => DialoguePrompt {
                 inner_thought: format!(
-                    "💭 ({} lagi membayangkan rasa {} dan harta karun sanctuary!)",
-                    self.name,
-                    self.species.favorite_snack()
+                    "💭 ({} nudges a shiny pebble across the floor toward you.)",
+                    self.name
                 ),
-                pet_line: "💬 \"Lihat deh yang kutemukan di taman! Kita rayakan pakai cerita atau tarian kemenangan?\""
-                    .to_string(),
-                option_1: "1. Ceritakan kisah legenda Apex Sovereign (+12 XP, +5 coins)".to_string(),
-                option_2: "2. Menari gembira berdua (+14 Happy, +5 Bond)".to_string(),
+                pet_line: format!(
+                    "💬 \"Found this by the garden border, {}. Keep it for the coin pouch?\"",
+                    caretaker
+                ),
+                option_1: "1. Practice a quick recall drill together (+12 XP, +5 coins)".to_string(),
+                option_2: "2. Scratch behind their ears and share a rest (+14 Happy, +5 Bond)".to_string(),
             },
         }
     }
@@ -926,31 +974,26 @@ impl Pet {
     pub fn answer_dialogue(&mut self, choice: u8) -> String {
         let now = Utc::now();
         self.last_updated = now;
+        let caretaker = self.caretaker_label().to_string();
 
         if !self.is_alive {
             if choice == 2 {
                 return self.heal();
             }
-            self.bond = (self.bond + 3).min(100);
-            let msg = format!(
-                "💬 Roh {} tersentuh oleh doamu (+3 Bond). Tekan [H] untuk membangkitkannya!",
-                self.name
-            );
-            self.log_action(msg.clone());
-            return msg;
+            return self.hold_vigil_step();
         }
 
         if self.stage == EvolutionStage::Egg {
             self.bond = (self.bond + 3).min(100);
             self.incubation = (self.incubation + 2).min(99);
             let msg = format!(
-                "💬 Kamu mengajak ngobrol telur {}! Cangkangnya bergoyang hangat (+2% warmth, +3 Bond).",
+                "💬 Spoke softly to {}'s egg (+2% warmth, +3 Bond).",
                 self.name
             );
             self.set_pet_reaction(
                 PetAction::Talk,
-                "💬 \"*Tok tok!* Aku dengar suaramu, Keeper! Tunggu aku menetas ya!\"",
-                "💭 (Inside Egg: Suara keeper-ku bikin hati tenang banget~)",
+                format!("💬 \"*tap-tap* Heard your voice, {caretaker}. Warm and safe in here.\""),
+                format!("💭 (Hearing: {caretaker}'s voice carries clearly through the shell.)"),
                 Some(PetMood::Loved),
             );
             self.log_action(msg.clone());
@@ -965,10 +1008,10 @@ impl Pet {
             self.set_pet_reaction(
                 PetAction::Talk,
                 format!(
-                    "💬 \"Wah seru banget ngobrol sama kamu! {} jadi makin semangat! 🤩\"",
+                    "💬 \"Glad we talked, {caretaker}. {} feels focused and ready.\"",
                     self.name
                 ),
-                "💭 (Feeling Loved: Keeper-ku selalu ngerti apa yang kupikirkan!)",
+                format!("💭 (Feeling: Steady trust with {caretaker}.)"),
                 Some(if self.is_sleeping {
                     PetMood::Sleeping
                 } else {
@@ -976,7 +1019,7 @@ impl Pet {
                 }),
             );
             let msg = format!(
-                "💬 Ngobrol akrab dengan {}! (+12 XP, +5 Bond, +8 Happy)",
+                "💬 Shared a quiet talk with {} (+12 XP, +5 Bond, +8 Happy).",
                 self.name
             );
             self.log_action(msg.clone());
@@ -988,8 +1031,8 @@ impl Pet {
             self.add_xp(8);
             self.set_pet_reaction(
                 PetAction::Talk,
-                "💬 \"Hehe makasih Keeper! Ini koin keberuntungan buatmu (+5 💰)! 🥰\"",
-                "💭 (Affectionate: Seneng banget punya keeper sebaik kamu~)",
+                format!("💬 \"Thanks, {caretaker}. Dropped +5 coins into our pouch.\""),
+                format!("💭 (Feeling: Warm and relaxed beside {caretaker}.)"),
                 Some(if self.is_sleeping {
                     PetMood::Sleeping
                 } else {
@@ -997,7 +1040,7 @@ impl Pet {
                 }),
             );
             let msg = format!(
-                "💬 Momen hangat bersama {}! Dikasih hadiah +5 coins! (+14 Happy, +5 Bond)",
+                "💬 Warm moment with {}! Found +5 coins (+14 Happy, +5 Bond).",
                 self.name
             );
             self.log_action(msg.clone());
@@ -1252,16 +1295,29 @@ impl Pet {
     }
 
     pub fn advisor_tip(&self, now: DateTime<Utc>) -> String {
+        let caretaker = self.caretaker_label();
         if !self.is_alive {
+            if self.buried {
+                return format!(
+                    "🪦 {} rests in the Memorial Hall. Press [N] to adopt a new companion.",
+                    self.name
+                );
+            }
+            if self.revival_count >= 1 {
+                return format!(
+                    "🕯 {} has fallen a second time (Phoenix Tear spent). Hold Vigil [B] ({}/3) to lay to rest.",
+                    self.name, self.vigil_steps_completed
+                );
+            }
             return format!(
-                "👻 {} pingsan/gugur! Tekan [H] Phoenix Tear Revival atau [N] Adopt!",
-                self.name
+                "👻 {} has fallen! Press [B] for Vigil Rite ({}/3) or [H] Phoenix Tear (1× per life).",
+                self.name, self.vigil_steps_completed
             );
         }
         if self.stage == EvolutionStage::Egg {
             let rem = self.warm_cooldown_remaining(now);
             if self.incubation >= 99 {
-                return "🥚 Ready to hatch! Press [W] or [Space] now!".to_string();
+                return "🥚 Shell is cracking! Press [W] or [Space] to hatch.".to_string();
             } else if rem == 0 {
                 return "🤲 Press [W] or [Space] to warm the egg (+20%).".to_string();
             } else {
@@ -1274,35 +1330,35 @@ impl Pet {
         }
 
         if self.has_toothache {
-            return format!("🦷 {} has a Toothache! Press [H] for Medicine!", self.name);
+            return format!("🦷 {} has a Toothache! Press [H] for Medicine.", self.name);
         }
         if self.is_sick {
             return format!(
-                "🤒 {} sakit (Health {}%)! Segera tekan [H] Medicine!",
+                "🤒 {} is running a fever (Health {}%)! Press [H] Medicine now.",
                 self.name, self.health
             );
         }
         if self.hunger == 0 {
             return format!(
-                "🚨 {} KELAPARAN PARAH (Health {}%)! Cepat tekan [F] Meal!",
+                "🚨 {} is starving (Health {}%)! Feed a meal [F] immediately!",
                 self.name, self.health
             );
         }
         if self.is_sleeping && self.light_on {
             return format!(
-                "💡 {} is asleep with Light ON! Press [K] to turn OFF!",
+                "💡 {} is asleep with the lamp ON! Press [K] to switch it OFF.",
                 self.name
             );
         }
         if self.attention_call == AttentionCall::Misbehaving {
-            return format!("📢 {} is acting spoiled! Press [D] to Scold!", self.name);
+            return format!("📢 {} is acting spoiled! Press [D] to Scold.", self.name);
         }
         if self.attention_call == AttentionCall::Crying {
-            return format!("🥺 {} is crying! Press [T] to Praise & Pat!", self.name);
+            return format!("🥺 {} is crying for {caretaker}! Press [T] to Comfort.", self.name);
         }
         if self.poop_count > 0 || self.cleanliness < 45 {
             return format!(
-                "🚽 Mess on floor (Poop {})! Press [C] for a Bath!",
+                "🚽 Floor needs washing (Mess {})! Press [C] for a Bath.",
                 self.poop_count
             );
         }
@@ -1310,24 +1366,24 @@ impl Pet {
             if self.energy >= 95 {
                 return format!("🌞 {} is fully rested! Press [S] to wake up.", self.name);
             }
-            return format!("🌙 {} is sleeping peacefully ({}% Energy).", self.name, self.energy);
+            return format!("🌙 {} is curled up asleep ({}% Energy).", self.name, self.energy);
         }
         if self.hungry_hearts() <= 1 {
             return "🍙 Hungry Hearts low! Press [F] Meal or [M] Pantry.".to_string();
         }
         if self.is_overweight() {
             return format!(
-                "🏋 {} is chubby ({}g)! Play [P] or Arcade [G]!",
+                "🏋 {} is overweight ({}g)! Exercise with [P] or Arcade [G].",
                 self.name, self.weight_grams
             );
         }
         if self.energy <= 25 {
-            return "🥱 Getting sleepy! Press [S] Sleep, then [K] Light OFF.".to_string();
+            return "🥱 Getting drowsy! Press [S] Sleep, then [K] Light OFF.".to_string();
         }
         if self.happy_hearts() <= 1 {
             return "🎾 Happy Hearts low! Press [P] Play or [Y] Talk.".to_string();
         }
-        "🌟 Cozy! [Y] Talk • [G] 3-in-1 Arcade • [I] Meter • [?] Keys".to_string()
+        format!("🌟 Calm in the sanctuary, {caretaker}. [Y] Talk • [G] Arcade • [O] Title • [?] Keys")
     }
 
     pub fn perform_action(&mut self, action: PetAction) -> String {
@@ -1357,17 +1413,18 @@ impl Pet {
 
     fn dead_guard(&mut self) -> Option<String> {
         if !self.is_alive {
+            let caretaker = self.caretaker_label().to_string();
             self.set_pet_reaction(
                 PetAction::Heal,
                 format!(
-                    "💬 \"👻 {} sudah pingsan/gugur... Tekan [H] untuk Phoenix Revival!\"",
+                    "💬 \"👻 {} has passed out, {caretaker}... Press [H] for Phoenix Revival or [B] for Vigil.\"",
                     self.name
                 ),
-                "💭 (Spirit: Aku butuh Phoenix Tear [H] untuk kembali hidup...)",
+                "💭 (Spirit: Waiting for a Phoenix Tear [H] or the 3-step Burial Vigil [B]...)".to_string(),
                 Some(PetMood::PassedOut),
             );
             Some(format!(
-                "👻 {} has passed out! Press [H] to revive them with a Phoenix Tear!",
+                "👻 {} has passed out! Press [H] to revive them with a Phoenix Tear or [B] to hold a Vigil!",
                 self.name
             ))
         } else {
@@ -1397,15 +1454,16 @@ impl Pet {
         }
 
         let now = Utc::now();
+        let caretaker = self.caretaker_label().to_string();
         let remaining = self.warm_cooldown_remaining(now);
         if remaining > 0 {
             self.set_pet_reaction(
                 PetAction::WarmEgg,
                 format!(
-                    "💬 \"*Tok tok~* Cangkangku masih hangat kok! Tunggu {} lagi ya!\"",
+                    "💬 \"*tap-tap* The shell is still holding your warmth, {caretaker}. Wait {}.\"",
                     format_duration_human(remaining)
                 ),
-                "💭 (Inside Egg: Kalau dipeluk terus nanti aku kepanasan hehe~)",
+                "💭 (Inside Egg: Resting in the steady heat of the cushion.)".to_string(),
                 None,
             );
             return self.refuse(format!(
@@ -1431,10 +1489,10 @@ impl Pet {
             self.set_pet_reaction(
                 PetAction::WarmEgg,
                 format!(
-                    "💬 \"KRAK!!🐣 Halo Keeper! Aku {} akhirnya menetas! Senang bertemu denganmu!\"",
+                    "💬 \"*CRACK!* {} blinks up at you for the first time, {caretaker}.\"",
                     self.name
                 ),
-                "💭 (Hatched: Dunia luar terang banget! Keeper-ku keren!)",
+                format!("💭 (Sight: Locking eyes with {caretaker} right outside the shell.)"),
                 Some(PetMood::Excited),
             );
             let msg = format!(
@@ -1450,10 +1508,10 @@ impl Pet {
             self.set_pet_reaction(
                 PetAction::WarmEgg,
                 format!(
-                    "💬 \"*Deg-deg...* Hangat banget dipeluk Keeper! ({}% menuju menetas)\"",
+                    "💬 \"*thump-thump* Warmth settles into the shell, {caretaker} ({}% incubated).\"",
                     self.incubation
                 ),
-                "💭 (Warming: Sebentar lagi cangkang ini retak!)",
+                "💭 (Feeling: The inner membrane is growing warm and strong.)".to_string(),
                 Some(PetMood::Loved),
             );
             let msg = format!(
@@ -1474,6 +1532,7 @@ impl Pet {
         }
         self.light_on = !self.light_on;
         self.last_updated = Utc::now();
+        let caretaker = self.caretaker_label().to_string();
 
         let msg = if !self.light_on {
             if self.is_sleeping {
@@ -1481,19 +1540,19 @@ impl Pet {
                 self.add_xp(5);
                 self.set_pet_reaction(
                     PetAction::ToggleLight,
-                    "💬 \"Zzz... makasih udah matiin lampu, Keeper... boboku makin nyenyak~\"",
-                    "💭 (Sleeping Soundly: Gelap dan hangat, nyaman banget!)",
+                    format!("💬 \"*exhales softly* Thanks for dimming the lamp, {caretaker}...\""),
+                    "💭 (Feeling: Deep, uninterrupted sleep in the dark.)".to_string(),
                     Some(PetMood::Sleeping),
                 );
                 format!(
-                    "🌙 Switched room light OFF. {} sleeps soundly in the cozy dark! (+3 Bond, +5 XP)",
+                    "🌙 Switched room light OFF. {} sleeps soundly in the dark! (+3 Bond, +5 XP)",
                     self.name
                 )
             } else {
                 self.set_pet_reaction(
                     PetAction::ToggleLight,
-                    "💬 \"Loh kok lampunya dimatiin?👀 Aku kan belum ngantuk, nyalain lagi dong [K]!\"",
-                    "💭 (Confused: Kok tiba-tiba gelap gulita gini ya?)",
+                    format!("💬 \"It went dark all of a sudden, {caretaker}. Are we turning in early [K]?\""),
+                    "💭 (Sight: Pupils dilating in the dark room.)".to_string(),
                     Some(PetMood::Lonely),
                 );
                 format!(
@@ -1504,8 +1563,8 @@ impl Pet {
         } else if self.is_sleeping {
             self.set_pet_reaction(
                 PetAction::ToggleLight,
-                "💬 \"Silauuu!😣 Aku lagi bobo nih Keeper, tolong matiin lampunya [K]!\"",
-                "💭 (Annoyed: Mata silau nggak bisa tidur nyenyak!)",
+                format!("💬 \"*shields eyes* Too bright, {caretaker}... I'm still trying to sleep [K].\""),
+                "💭 (Sight: Harsh lamp glare pressing through closed eyelids.)".to_string(),
                 Some(PetMood::Angry),
             );
             "💡 Switched room light ON while sleeping! (Turn it OFF with [K] so they can rest!)"
@@ -1513,11 +1572,11 @@ impl Pet {
         } else {
             self.set_pet_reaction(
                 PetAction::ToggleLight,
-                "💬 \"Nah gitu dong terang lagi!🌞 Siap beraktivitas!\"",
-                "💭 (Happy: Kamar jadi terang dan hangat lagi~)",
+                format!("💬 \"Warm lamp light again. Good to see you clearly, {caretaker}.\""),
+                "💭 (Sight: Room is warmly lit and clear.)".to_string(),
                 Some(PetMood::Happy),
             );
-            "💡 Switched room light ON! Bright and sunny in the habitat.".to_string()
+            "💡 Switched room light ON! Warm light fills the habitat.".to_string()
         };
         self.refresh_mood();
         self.log_action(msg.clone());
@@ -1531,11 +1590,12 @@ impl Pet {
         if let Some(msg) = self.egg_guard() {
             return self.refuse(msg);
         }
+        let caretaker = self.caretaker_label().to_string();
         if self.is_sleeping {
             self.set_pet_reaction(
                 PetAction::DisciplineScold,
-                "💬 \"Zzz... jangan marahin aku pas lagi bobo dong...\"",
-                "💭 (Sleeping: Lagi mimpi indah malah dibangunin...)",
+                format!("💬 \"*flinches in sleep* ...please let me rest, {caretaker}...\""),
+                "💭 (Hearing: Startled half-awake by a sharp voice.)".to_string(),
                 Some(PetMood::Sleeping),
             );
             return self.refuse(format!("💤 {} is sleeping — don't scold them in bed!", self.name));
@@ -1551,10 +1611,9 @@ impl Pet {
             self.set_pet_reaction(
                 PetAction::DisciplineScold,
                 format!(
-                    "💬 \"Ehehe maaf Keeper!🙏 {} janji nggak bakal iseng pencet bel palsu lagi!\"",
-                    self.name
+                    "💬 \"Ears dip low. 'Sorry, {caretaker}. I'll stop ringing the bell for nothing.'\""
                 ),
-                "💭 (Disciplined: Oke deh, aku bakal jadi pet yang lebih patuh!)",
+                "💭 (Feeling: Chastened, but respects your clear boundary.)".to_string(),
                 Some(PetMood::Proud),
             );
             self.refresh_mood();
@@ -1566,27 +1625,34 @@ impl Pet {
             msg
         } else {
             let repeated = self.last_action_kind == Some(PetAction::DisciplineScold);
-            self.happiness = self.happiness.saturating_sub(if repeated { 12 } else { 8 });
-            self.bond = self.bond.saturating_sub(2);
+            self.happiness = self.happiness.saturating_sub(if repeated { 14 } else { 8 });
+            self.bond = self.bond.saturating_sub(if repeated { 6 } else { 3 });
             if repeated {
+                self.care_mistakes = self.care_mistakes.saturating_add(1);
                 self.set_pet_reaction(
                     PetAction::DisciplineScold,
-                    "💬 \"HMPH!!💢 Kamu galak banget marahin aku terus padahal aku nggak nakal! Ngambek!\"",
-                    "💭 (Angry: Jahat banget diomelin terus tanpa salah apa-apa!)",
+                    format!(
+                        "💬 \"HMPH! Why do you keep yelling at me when I did nothing wrong, {caretaker}?!\""
+                    ),
+                    "💭 (Feeling: Hurt and resentful from repeated unfair scolding; turning away.)"
+                        .to_string(),
                     Some(PetMood::Angry),
                 );
             } else {
                 self.set_pet_reaction(
                     PetAction::DisciplineScold,
-                    "💬 \"Hiks...🥺 Kok aku dimarahin sih Keeper? Aku kan lagi nggak bandel!\"",
-                    "💭 (Sad: Sedih dimarahin padahal udah jadi anak baik...)",
+                    format!(
+                        "💬 \"Flinches back. 'What did I do wrong, {caretaker}? I was behaving...'\""
+                    ),
+                    "💭 (Feeling: Confused and stung by an unprovoked scold.)".to_string(),
                     Some(PetMood::Lonely),
                 );
             }
             self.refresh_mood();
             let msg = format!(
-                "🥺 {} wasn't misbehaving! Unfair scold lowered Happiness (-8%). Only scold during a Spoiled Call!",
-                self.name
+                "🥺 {} wasn't misbehaving! Unfair scold damaged trust (-Bond, -Happiness{}).",
+                self.name,
+                if repeated { ", +1 Care Mistake" } else { "" }
             );
             self.log_action(msg.clone());
             msg
@@ -1604,11 +1670,12 @@ impl Pet {
         if let Some(msg) = self.egg_guard() {
             return self.refuse(msg);
         }
+        let caretaker = self.caretaker_label().to_string();
         if self.is_sleeping {
             self.set_pet_reaction(
                 PetAction::Feed,
-                "💬 \"Zzz... aku lagi bobo Keeper, bangunin pakai [S] dulu kalau mau makan...\"",
-                "💭 (Sleeping: Wangi makanan sih, tapi mata masih ngantuk berat~)",
+                format!("💬 \"*mumbles* Still asleep, {caretaker}... wake me with [S] first...\""),
+                "💭 (Smell: Catches the scent of food, but too drowsy to chew.)".to_string(),
                 Some(PetMood::Sleeping),
             );
             return self.refuse(format!(
@@ -1619,8 +1686,10 @@ impl Pet {
         if self.has_toothache {
             self.set_pet_reaction(
                 PetAction::Feed,
-                "💬 \"ADUHHH!🦷 Gigiku cenat-cenut nggak bisa ngunyah! Kasih obat [H] dulu dong!\"",
-                "💭 (Toothache: Jangankan makan, buka mulut aja ngilu banget!)",
+                format!(
+                    "💬 \"Winces and paws at its jaw. 'My tooth hurts too much to chew, {caretaker}. Need [H].'\""
+                ),
+                "💭 (Feeling: Sharp molar pain blocks every bite.)".to_string(),
                 Some(PetMood::Sick),
             );
             return self.refuse(format!(
@@ -1637,23 +1706,30 @@ impl Pet {
 
         if !is_snack && self.hunger >= 95 {
             if repeated_feed {
-                self.happiness = self.happiness.saturating_sub(4);
+                self.happiness = self.happiness.saturating_sub(6);
+                self.health = self.health.saturating_sub(6);
+                self.bond = self.bond.saturating_sub(3);
+                self.care_mistakes = self.care_mistakes.saturating_add(1);
                 self.set_pet_reaction(
                     PetAction::Feed,
-                    "💬 \"UEKKK!🤢 Jangan paksa suapin terus dong! Perutku udah begah mau meledak nih!\"",
-                    "💭 (Overstuffed: Aduh mual banget disuapin terus padahal udah kenyang 4/4 ♥!)",
+                    format!(
+                        "💬 \"UGH! Stop forcing food on me, {caretaker}! My stomach feels sick and cramped!\""
+                    ),
+                    "💭 (Feeling: Nauseous from being force-fed while already 4/4 full.)".to_string(),
                     Some(PetMood::Overstuffed),
                 );
             } else {
                 self.set_pet_reaction(
                     PetAction::Feed,
-                    "💬 \"Uwaa makasih Keeper, tapi perutku udah kenyang banget (4/4 ♥)! Ajak main [P] yuk!\"",
-                    "💭 (Full Tummy: Perutku udah bundar kenyang, belum muat makan lagi~)",
+                    format!(
+                        "💬 \"Pats its round belly. 'I'm completely full (4/4 ♥), {caretaker}. Let's play [P] instead.'\""
+                    ),
+                    "💭 (Feeling: Stomach is warm and full to capacity.)".to_string(),
                     Some(PetMood::Overstuffed),
                 );
             }
             return self.refuse(format!(
-                "🍱 {} shakes their head: tummy is already completely full (4/4 ♥)!",
+                "🍱 {} shakes their head: stomach is already completely full (4/4 ♥)!",
                 self.name
             ));
         }
@@ -1664,10 +1740,10 @@ impl Pet {
             self.set_pet_reaction(
                 PetAction::Feed,
                 format!(
-                    "💬 \"Tunggu {} lagi ya Keeper!🤢 Makanan barusan masih kucerna, kalau dipaksa nanti muntah!\"",
+                    "💬 \"Still digesting the last portion, {caretaker}. Give me {} more.\"",
                     format_duration_human(remaining)
                 ),
-                "💭 (Digesting: Pelan-pelan dong ngasih makannya, perutku masih penuh~)",
+                "💭 (Feeling: Stomach is still settling after the last meal.)".to_string(),
                 Some(PetMood::Overstuffed),
             );
             return self.refuse(format!(
@@ -1682,11 +1758,11 @@ impl Pet {
             self.set_pet_reaction(
                 PetAction::Feed,
                 format!(
-                    "💬 \"Yah koin kita kurang buat beli {} (butuh {} 💰)... Makan yang gratis dulu yuk!\"",
+                    "💬 \"We're short on coins for {} (need {} 💰), {caretaker}. A free meal works too.\"",
                     choice.title(self.species),
                     cost
                 ),
-                "💭 (Thinking: Yuk main Arcade [G] biar dapat banyak koin emas!)",
+                "💭 (Sight: Looking at the light coin pouch; Arcade [G] pays well.)".to_string(),
                 None,
             );
             return self.refuse(format!(
@@ -1745,10 +1821,14 @@ impl Pet {
 
         if self.snacks_in_a_row >= 3 {
             self.has_toothache = true;
+            self.care_mistakes = self.care_mistakes.saturating_add(1);
             self.set_pet_reaction(
                 PetAction::FeedSnack,
-                "💬 \"ADUHHH!🦷 Gigiku langsung sakit gara-gara makan 3 camilan manis berturut-turut! Obatin [H]!\"",
-                "💭 (Toothache: Kapok deh kebanyakan makan manis tanpa sikat gigi!)",
+                format!(
+                    "💬 \"OUCH! Three sweets in a row gave me a sharp toothache, {caretaker}! Need medicine [H]!\""
+                ),
+                "💭 (Feeling: Throbbing molar ache from three consecutive sugary treats.)"
+                    .to_string(),
                 Some(PetMood::Sick),
             );
             msg.push_str(
@@ -1757,18 +1837,20 @@ impl Pet {
         } else if is_snack && self.snacks_in_a_row == 2 {
             self.set_pet_reaction(
                 PetAction::FeedSnack,
-                "💬 \"Nyam nyam manis banget~🍡 Tapi udah 2x permen nih, jangan 1x lagi ya nanti sakit gigi!\"",
-                "💭 (Warning: Satu camilan manis lagi bakal bikin gigiku bolong!)",
+                format!(
+                    "💬 \"Sweet and warm, {caretaker}... that's two treats in a row though; one more will hurt my teeth.\""
+                ),
+                "💭 (Feeling: Sugar rush—better eat a real meal or brush teeth next.)".to_string(),
                 Some(PetMood::Eating),
             );
         } else {
             self.set_pet_reaction(
                 PetAction::Feed,
                 format!(
-                    "💬 \"Nyam nyam!🍡 {} enak banget Keeper! Tenaga & perutku langsung pulih!\"",
+                    "💬 \"Finishes the {} happily. 'That hit the spot, {caretaker}. Thank you.'\"",
                     food_name
                 ),
-                "💭 (Nomming Happily: Masakan pilhan keeper-ku memang paling mantap!)",
+                "💭 (Feeling: Warm food settling comfortably into the stomach.)".to_string(),
                 Some(PetMood::Eating),
             );
         }
@@ -1785,11 +1867,12 @@ impl Pet {
         if let Some(msg) = self.egg_guard() {
             return self.refuse(msg);
         }
+        let caretaker = self.caretaker_label().to_string();
         if self.is_sleeping {
             self.set_pet_reaction(
                 PetAction::Play,
-                "💬 \"Zzz... aku lagi tidur Keeper, besok lagi ya mainnya...\"",
-                "💭 (Sleeping: Lagi mimpi seru nih~)",
+                format!("💬 \"*curls tighter* Let me sleep a bit longer, {caretaker}...\""),
+                "💭 (Feeling: Deeply asleep on the mat.)".to_string(),
                 Some(PetMood::Sleeping),
             );
             return self.refuse(format!("💤 {} is sleeping! Wake them first.", self.name));
@@ -1797,8 +1880,10 @@ impl Pet {
         if self.is_sick || self.has_toothache {
             self.set_pet_reaction(
                 PetAction::Play,
-                "💬 \"Uhuk...🤒 Badanku lagi sakit Keeper, sembuhin pakai obat [H] dulu sebelum main!\"",
-                "💭 (Sick: Kepala pusing nggak kuat lari-larian...)",
+                format!(
+                    "💬 \"Shivers weakly. 'I feel too sick to run around, {caretaker}. Need medicine [H] first.'\""
+                ),
+                "💭 (Feeling: Limbs ache and head feels dizzy.)".to_string(),
                 Some(PetMood::Sick),
             );
             return self.refuse(format!(
@@ -1809,8 +1894,10 @@ impl Pet {
         if self.energy < 20 {
             self.set_pet_reaction(
                 PetAction::Play,
-                "💬 \"Hah... hah...🥱 Aku kecapekan banget Keeper! Tidurin aku pakai [S] dulu yuk!\"",
-                "💭 (Exhausted: Kakiku lemes butuh istirahat...)",
+                format!(
+                    "💬 \"Pants softly. 'My legs are worn out, {caretaker}. Let me rest [S] first.'\""
+                ),
+                "💭 (Feeling: Muscles heavy and low on stamina.)".to_string(),
                 Some(PetMood::Sleepy),
             );
             return self.refuse(format!(
@@ -1821,8 +1908,10 @@ impl Pet {
         if self.hunger < 20 {
             self.set_pet_reaction(
                 PetAction::Play,
-                "💬 \"Perutku keroncongan parah!🍙 Kasih aku makan [F] dulu dong sebelum main!\"",
-                "💭 (Hungry: Mana kuat main kalau perut kosong melompong...)",
+                format!(
+                    "💬 \"Stomach growls. 'Too hungry to chase anything right now, {caretaker}. Feed me [F] first?'\""
+                ),
+                "💭 (Feeling: Empty stomach makes it hard to run.)".to_string(),
                 Some(PetMood::Lonely),
             );
             return self.refuse(format!(
@@ -1837,10 +1926,10 @@ impl Pet {
             self.set_pet_reaction(
                 PetAction::Play,
                 format!(
-                    "💬 \"Hah.. hah..😆 Seru banget tapi nafas dulu {} ya! Atau buka Arcade [G]!\"",
+                    "💬 \"Catching my breath for {}, {caretaker}. Or open the Arcade [G] if you want a match!\"",
                     format_duration_human(remaining)
                 ),
-                "💭 (Catching Breath: Habis lari-larian seru bareng keeper!)",
+                "💭 (Feeling: Heart beating fast after a good sprint.)".to_string(),
                 Some(PetMood::Playful),
             );
             return self.refuse(format!(
@@ -1864,10 +1953,10 @@ impl Pet {
         self.set_pet_reaction(
             PetAction::Play,
             format!(
-                "💬 \"Yuhuuu seru banget main barengmu!🎵 Berat badanku turun jadi {}g & dapat +5 koin!\"",
+                "💬 \"Good match, {caretaker}! Trimmed down to {}g and found +5 coins.\"",
                 self.weight_grams
             ),
-            "💭 (Playful: Main bareng keeper bikin hatiku bahagia banget!)",
+            format!("💭 (Feeling: Warm and energized after playing with {caretaker}.)"),
             Some(PetMood::Playful),
         );
         self.refresh_attention();
@@ -1887,11 +1976,12 @@ impl Pet {
         if let Some(msg) = self.egg_guard() {
             return self.refuse(msg);
         }
+        let caretaker = self.caretaker_label().to_string();
         if self.is_sleeping {
             self.set_pet_reaction(
                 PetAction::PetLove,
-                "💬 \"*Purrrr...* Zzz... (tersenyum dalam tidur saat kamu elus kepalanya)\"",
-                "💭 (Dreaming Warmly: Tangan keeper hangat banget...)",
+                format!("💬 \"*purrs softly in sleep* ...warm hand, {caretaker}...\""),
+                "💭 (Touch: Feels a gentle hand resting on its head while asleep.)".to_string(),
                 Some(PetMood::Sleeping),
             );
             return self.refuse(format!("💤 You watch {} sleep peacefully.", self.name));
@@ -1909,8 +1999,10 @@ impl Pet {
             self.add_xp(10);
             self.set_pet_reaction(
                 PetAction::PetLove,
-                "💬 \"Hiks... makasih udah peluk aku Keeper!🥰 Sekarang aku nggak sedih lagi!\"",
-                "💭 (Comforted: Pelukan keeper langsung bikin tenang!)",
+                format!(
+                    "💬 \"Leans into your hand and stops sniffling. 'Thanks for staying close, {caretaker}.'\""
+                ),
+                format!("💭 (Touch: Calmed down as soon as {caretaker} reached out.)"),
                 Some(PetMood::Loved),
             );
             let msg = format!(
@@ -1926,10 +2018,10 @@ impl Pet {
             self.set_pet_reaction(
                 PetAction::PetLove,
                 format!(
-                    "💬 \"Hahaha geli tau Keeper!😆 Kepalaku dielus terus sampe berantakan nih! (tunggu {}s)\"",
+                    "💬 \"Haha, that tickles, {caretaker}! My fur is getting ruffled (wait {}s).\"",
                     remaining
                 ),
-                "💭 (Ticklish: Keeper-ku gemes banget ya elus-elus aku terus~)",
+                "💭 (Touch: Ticklish from rapid headpats!)".to_string(),
                 Some(PetMood::Playful),
             );
             return self.refuse(format!(
@@ -1941,8 +2033,10 @@ impl Pet {
             self.happiness = 100;
             self.set_pet_reaction(
                 PetAction::PetLove,
-                "💬 \"Hehe~ hatiku udah 100% penuh cinta buatmu Keeper! 🥰💖\"",
-                "💭 (Max Happiness: Aku pet paling bahagia di dunia!)",
+                format!(
+                    "💬 \"Closes both eyes and leans against your palm, {caretaker}. Couldn't be happier.\""
+                ),
+                "💭 (Feeling: Completely content and safe.)".to_string(),
                 Some(PetMood::Loved),
             );
             return self.refuse(format!(
@@ -1958,8 +2052,10 @@ impl Pet {
         self.add_xp(6);
         self.set_pet_reaction(
             PetAction::PetLove,
-            "💬 \"Purrrr~🥰 Elusan tanganmu hangat banget Keeper! Sayang kamu! (+5 Bond)\"",
-            "💭 (Affectionate: Semoga keeper elus kepalaku setiap hari~)",
+            format!(
+                "💬 \"Nuzzles your palm warmly. 'Your hand is always warm, {caretaker}.' (+5 Bond)\""
+            ),
+            format!("💭 (Touch:Steady warmth from {caretaker}'s hand.)"),
             Some(PetMood::Loved),
         );
 
@@ -1978,6 +2074,7 @@ impl Pet {
         if let Some(msg) = self.egg_guard() {
             return self.refuse(msg);
         }
+        let caretaker = self.caretaker_label().to_string();
         if self.is_sleeping {
             return self.refuse(format!(
                 "💤 {} is asleep and cannot train right now.",
@@ -1987,8 +2084,10 @@ impl Pet {
         if self.is_sick || self.has_toothache {
             self.set_pet_reaction(
                 PetAction::Train,
-                "💬 \"Uhuk...🤒 Aku lagi sakit Keeper, jangan disuruh latihan berat dulu! Obatin [H]!\"",
-                "💭 (Sick: Butuh istirahat dan obat, bukan latihan...)",
+                format!(
+                    "💬 \"Coughs softly. 'I'm not well enough for drills today, {caretaker}. Need medicine [H].'\""
+                ),
+                "💭 (Feeling: Too weak and feverish for training.)".to_string(),
                 Some(PetMood::Sick),
             );
             return self.refuse(format!(
@@ -1999,8 +2098,10 @@ impl Pet {
         if self.energy < 25 {
             self.set_pet_reaction(
                 PetAction::Train,
-                "💬 \"Nggak kuat angkat beban lagi Keeper...🥱 Tidurin aku [S] dulu ya!\"",
-                "💭 (Exhausted: Energi tinggal dikit, butuh tidur!)",
+                format!(
+                    "💬 \"Legs are shaking, {caretaker}... let me sleep [S] before another drill.\""
+                ),
+                "💭 (Feeling: Stamina is nearly depleted.)".to_string(),
                 Some(PetMood::Sleepy),
             );
             return self.refuse(format!(
@@ -2011,8 +2112,10 @@ impl Pet {
         if self.hunger < 20 {
             self.set_pet_reaction(
                 PetAction::Train,
-                "💬 \"Perut kosong nggak bisa fokus latihan Keeper!🍙 Suapin [F] dulu dong!\"",
-                "💭 (Hungry: Butuh asupan gizi sebelum latihan keras!)",
+                format!(
+                    "💬 \"Can't focus on an empty stomach, {caretaker}. Let's eat [F] first.\""
+                ),
+                "💭 (Feeling: Stomach is too empty for heavy drills.)".to_string(),
                 Some(PetMood::Lonely),
             );
             return self.refuse(format!(
@@ -2027,10 +2130,10 @@ impl Pet {
             self.set_pet_reaction(
                 PetAction::Train,
                 format!(
-                    "💬 \"Hosh.. hosh..💪 Ototku masih panas habis latihan tadi! Istirahat {} dulu ya!\"",
+                    "💬 \"Muscles are still warm from the last set, {caretaker}. Rest {} before the next drill.\"",
                     format_duration_human(remaining)
                 ),
-                "💭 (Recovering: Latihan terus tanpa jeda nanti malah cedera!)",
+                "💭 (Feeling: Pacing recovery between training sets.)".to_string(),
                 Some(PetMood::Proud),
             );
             return self.refuse(format!(
@@ -2053,8 +2156,10 @@ impl Pet {
         self.add_xp(22);
         self.set_pet_reaction(
             PetAction::Train,
-            "💬 \"HIYAAA!!💪 Latihan sukses! Kekuatanku makin gahar (+22 XP, +10 💰)!\"",
-            "💭 (Fired Up: Selangkah lebih dekat menuju wujud Apex Sovereign!)",
+            format!(
+                "💬 \"Stands tall after the drill. 'Getting stronger every day, {caretaker} (+22 XP, +10 💰).'\""
+            ),
+            "💭 (Feeling: Muscles warm, posture sharp and disciplined.)".to_string(),
             Some(PetMood::Training),
         );
 
@@ -2075,12 +2180,15 @@ impl Pet {
         }
         self.is_sleeping = !self.is_sleeping;
         self.last_updated = Utc::now();
+        let caretaker = self.caretaker_label().to_string();
 
         if self.is_sleeping {
             self.set_pet_reaction(
                 PetAction::ToggleSleep,
-                "💬 \"*Hoaaam~*🌙 Selamat malam Keeper... jangan lupa matiin lampu pakai [K] ya... Zzz\"",
-                "💭 (Drifting to Sleep: Selimutnya hangat banget~)",
+                format!(
+                    "💬 \"Curls onto the woven mat. 'Goodnight, {caretaker}... please switch off the lamp [K].'\""
+                ),
+                "💭 (Feeling: Tucking paws in and drifting to sleep.)".to_string(),
                 Some(PetMood::Sleeping),
             );
             self.refresh_attention();
@@ -2090,7 +2198,7 @@ impl Pet {
                 ""
             };
             let msg = format!(
-                "🌙 Tucked {} into a cozy blanket. Goodnight!{}",
+                "🌙 Tucked {} onto the sleeping mat. Goodnight!{}",
                 self.name, light_hint
             );
             self.log_action(msg.clone());
@@ -2100,8 +2208,10 @@ impl Pet {
             self.energy = (self.energy + 15).min(100);
             self.set_pet_reaction(
                 PetAction::ToggleSleep,
-                "💬 \"Selamat pagi Keeper!!🌞 Tidurku پulas banget, sekarang siap beraksi lagi!\"",
-                "💭 (Refreshed: Badan segar bugar 100% siap main!)",
+                format!(
+                    "💬 \"Stretches all four limbs and yawns. 'Morning, {caretaker}. Ready for the day.'\""
+                ),
+                "💭 (Feeling: Rested and clear-headed after sleep.)".to_string(),
                 Some(PetMood::Happy),
             );
             self.refresh_mood();
@@ -2121,11 +2231,14 @@ impl Pet {
         if let Some(msg) = self.egg_guard() {
             return self.refuse(msg);
         }
+        let caretaker = self.caretaker_label().to_string();
         if self.cleanliness >= 100 && self.poop_count == 0 {
             self.set_pet_reaction(
                 PetAction::Clean,
-                "💬 \"Hehe~✨ Badanku & lantai kamar udah wangi dan kinclong kok Keeper!\"",
-                "💭 (Sparkling Clean: Nggak ada kotoran sama sekali di kamar!)",
+                format!(
+                    "💬 \"Looks around the spotless floor. 'Everything is already clean, {caretaker}.'\""
+                ),
+                "💭 (Sight: Floor and coat are already clean and dry.)".to_string(),
                 Some(PetMood::Proud),
             );
             return self.refuse("🌟 The habitat floor is already sparkling clean!".to_string());
@@ -2142,16 +2255,95 @@ impl Pet {
         self.add_xp(8);
         self.set_pet_reaction(
             PetAction::Clean,
-            "💬 \"Segerrr banget habis mandi busa & sikat gigi!🫧✨ Makasih Keeper!\"",
-            "💭 (Fresh & Clean: Wangi sabun buah bikin mood langsung naik!)",
+            format!(
+                "💬 \"Shakes off warm water droplets. 'That feels much better, {caretaker}. Thanks for the wash.'\""
+            ),
+            "💭 (Feeling: Coat is clean, dry, and fresh.)".to_string(),
             Some(PetMood::Happy),
         );
         self.refresh_mood();
 
         let msg = format!(
-            "🚽 Flushed the mess, brushed teeth & gave {} a warm bubble bath! (+8 XP)",
+            "🚽 Flushed the mess, brushed teeth & gave {} a warm bath! (+8 XP)",
             self.name
         );
+        self.log_action(msg.clone());
+        msg
+    }
+
+    /// Advance the 3-step Burial & Vigil Rite (`[B]`) when a companion has died.
+    pub fn hold_vigil_step(&mut self) -> String {
+        let caretaker = self.caretaker_label().to_string();
+        if self.is_alive {
+            return self.refuse(format!(
+                "🕯 {} is alive and well! Vigil rites are only for fallen companions.",
+                self.name
+            ));
+        }
+        if self.buried {
+            return self.refuse(format!(
+                "🪦 {} has already been laid to rest in the Memorial Hall. Press [N] to adopt.",
+                self.name
+            ));
+        }
+
+        self.vigil_steps_completed = (self.vigil_steps_completed + 1).min(3);
+        self.last_updated = Utc::now();
+
+        let msg = match self.vigil_steps_completed {
+            1 => {
+                self.poop_count = 0;
+                self.cleanliness = 100;
+                self.set_pet_reaction(
+                    PetAction::Clean,
+                    format!(
+                        "💬 \"[ Vigil 1/3 ] You wash the habitat floor and fold {}'s woven mat.\"",
+                        self.name
+                    ),
+                    "💭 (Vigil Step 1/3: Cleaning the room in quiet remembrance. Press [B] again.)"
+                        .to_string(),
+                    Some(PetMood::PassedOut),
+                );
+                format!(
+                    "🕯 Vigil Step 1/3: Cleaned the habitat and folded {}'s mat. Press [B] for Step 2.",
+                    self.name
+                )
+            }
+            2 => {
+                self.set_pet_reaction(
+                    PetAction::Talk,
+                    format!(
+                        "💬 \"[ Vigil 2/3 ] You carve {}'s name and {} lived onto a memorial stone.\"",
+                        self.name,
+                        format_duration_human(self.age_seconds)
+                    ),
+                    "💭 (Vigil Step 2/3: Inscribing the memorial stone. Press [B] once more to finish.)"
+                        .to_string(),
+                    Some(PetMood::PassedOut),
+                );
+                format!(
+                    "🪦 Vigil Step 2/3: Inscribed {}'s memorial stone. Press [B] for the final vow.",
+                    self.name
+                )
+            }
+            _ => {
+                self.buried = true;
+                self.set_pet_reaction(
+                    PetAction::Talk,
+                    format!(
+                        "💬 \"[ Epitaph ] Here rests {}, cherished by {}. You may now adopt again [N].\"",
+                        self.name, caretaker
+                    ),
+                    "💭 (Laid to Rest: Permanently recorded in the Sanctuary Memorial Hall.)"
+                        .to_string(),
+                    Some(PetMood::PassedOut),
+                );
+                format!(
+                    "🪦 Vigil Complete (3/3): {} has been laid to rest in the Memorial Hall. You may now press [N] to adopt.",
+                    self.name
+                )
+            }
+        };
         self.log_action(msg.clone());
         msg
     }
@@ -2160,10 +2352,35 @@ impl Pet {
         if let Some(msg) = self.egg_guard() {
             return self.refuse(msg);
         }
+        let caretaker = self.caretaker_label().to_string();
 
-        // Phoenix Tear Revival if the companion has passed out / died!
+        // Sacred Phoenix Tear Revival if the companion has died — strictly ONCE per lifetime!
         if !self.is_alive {
+            if self.buried {
+                return self.refuse(format!(
+                    "🪦 {} has already been laid to rest in the Memorial Hall and cannot be revived.",
+                    self.name
+                ));
+            }
+            if self.revival_count >= 1 {
+                self.set_pet_reaction(
+                    PetAction::Heal,
+                    format!(
+                        "💬 \"The Phoenix Tear has already been spent once in {}'s life, {caretaker}. Hold a Vigil [B] to lay them to rest.\"",
+                        self.name
+                    ),
+                    "💭 (Permanent Consequence: A companion can only be revived once per lifetime.)"
+                        .to_string(),
+                    Some(PetMood::PassedOut),
+                );
+                return self.refuse(format!(
+                    "🕯 {} already used their one-time Phoenix Revival! Death is now permanent — press [B] to hold the Burial Vigil ({}/3).",
+                    self.name, self.vigil_steps_completed
+                ));
+            }
+
             self.is_alive = true;
+            self.revival_count = self.revival_count.saturating_add(1);
             self.cause_of_death = None;
             self.is_sick = false;
             self.has_toothache = false;
@@ -2174,17 +2391,22 @@ impl Pet {
             self.happiness = 65;
             self.energy = 75;
             self.cleanliness = 100;
-            self.care_mistakes = self.care_mistakes.saturating_add(1);
+            self.coins = self.coins.saturating_sub(50);
+            self.bond = self.bond.saturating_sub(5).max(5);
+            self.care_mistakes = self.care_mistakes.saturating_add(3);
             self.last_updated = Utc::now();
             self.set_pet_reaction(
                 PetAction::Heal,
-                "💬 \"✨ Cahaya Phoenix Tear menghangatkanku... Makasih udah membangkitkanku kembali, Keeper! 😭💖\"",
-                "💭 (Reborn: Aku berjanji bakal tumbuh makin kuat bersama keeper-ku!)",
+                format!(
+                    "💬 \"Draws a shaky breath as the Phoenix Tear takes hold. 'Don't leave me to fade again, {caretaker}...'\""
+                ),
+                "💭 (Reborn Once: Survived on the single Phoenix Tear; a second death will be permanent.)"
+                    .to_string(),
                 Some(PetMood::Loved),
             );
             self.refresh_mood();
             let msg = format!(
-                "🔥 PHOENIX REVIVAL! {} returned to life with 80% Health! Never let them starve again!",
+                "🔥 PHOENIX REVIVAL! {} returned to life with 80% Health (+3 Care Mistakes, 0 revivals left)!",
                 self.name
             );
             self.log_action(msg.clone());
@@ -2194,8 +2416,10 @@ impl Pet {
         if !self.is_sick && !self.has_toothache && self.health >= 95 {
             self.set_pet_reaction(
                 PetAction::Heal,
-                "💬 \"Uwek pahit!😝 Aku lagi sehat walafiat (100% 💚) Keeper, nggak perlu minum obat!\"",
-                "💭 (Healthy: Badan lagi fit kok dikasih jamu pahit sih~)",
+                format!(
+                    "💬 \"Makes a wry face at the bitter bottle. 'I'm already healthy (100% 💚), {caretaker}.'\""
+                ),
+                "💭 (Feeling: Already healthy; no need for bitter medicine.)".to_string(),
                 Some(PetMood::Playful),
             );
             return self.refuse(format!("💚 {} is already in tip-top health!", self.name));
@@ -2213,11 +2437,15 @@ impl Pet {
         self.set_pet_reaction(
             PetAction::Heal,
             if was_toothache {
-                "💬 \"Fiuhhh~💉 Sakit gigiku langsung sembuh total! Makasih banyak Keeper!\""
+                format!(
+                    "💬 \"Sighs in relief as the clove remedy numbs the ache. 'My tooth finally stopped throbbing, {caretaker}.'\""
+                )
             } else {
-                "💬 \"Alhamdulillah~💚 Badan demamku langsung segar bugar lagi berkat obatmu!\""
+                format!(
+                    "💬 \"Breathing steadies as the fever breaks. 'Thank you for the medicine, {caretaker}.'\""
+                )
             },
-            "💭 (Relieved: Untung keeper cepat ngasih obat sebelum makin parah!)",
+            "💭 (Feeling: Fever and pain subsiding quickly.)".to_string(),
             Some(PetMood::Happy),
         );
         self.refresh_mood();
@@ -2238,6 +2466,7 @@ impl Pet {
     }
 
     pub fn apply_minigame_reward(&mut self, score: u32, coins_earned: u32, xp_earned: u32) -> String {
+        let caretaker = self.caretaker_label().to_string();
         self.coins = self.coins.saturating_add(coins_earned);
         self.happiness = (self.happiness + 12).min(100);
         self.bond = (self.bond + 3).min(100);
@@ -2248,10 +2477,9 @@ impl Pet {
         self.set_pet_reaction(
             PetAction::Play,
             format!(
-                "💬 \"GGWP Keeper!!🎮 Kita cetak skor {} & panen +{} koin emas!\"",
-                score, coins_earned
+                "💬 \"Great run in the Arcade, {caretaker}! Scored {score} and brought back +{coins_earned} coins.\""
             ),
-            "💭 (Ecstatic: Main game bareng keeper seru banget!)",
+            "💭 (Feeling: Proud of the high score and coin haul.)".to_string(),
             Some(PetMood::Excited),
         );
         self.refresh_mood();
@@ -2640,6 +2868,9 @@ pub struct Sanctuary {
     pub pets: Vec<Pet>,
     pub active_index: usize,
     pub sanctuary_level: u32,
+    pub caretaker_title: String,
+    pub caretaker_karma: i32,
+    pub memorials: Vec<MemorialRecord>,
 }
 
 impl Default for Sanctuary {
@@ -2649,11 +2880,64 @@ impl Default for Sanctuary {
 }
 
 impl Sanctuary {
-    pub fn new_with_pet(pet: Pet) -> Self {
+    pub fn new_with_pet(mut pet: Pet) -> Self {
+        let title = pet.caretaker_label().to_string();
+        pet.caretaker_title = title.clone();
         Self {
             pets: vec![pet],
             active_index: 0,
             sanctuary_level: 1,
+            caretaker_title: title,
+            caretaker_karma: 0,
+            memorials: Vec::new(),
+        }
+    }
+
+    pub fn set_caretaker_title_all(&mut self, title: &str) {
+        let trimmed = title.trim();
+        if !trimmed.is_empty() {
+            self.caretaker_title = trimmed.to_string();
+            for p in &mut self.pets {
+                p.caretaker_title = trimmed.to_string();
+                p.last_pet_speech = None;
+                p.last_pet_thought = None;
+                p.reaction_ticks_left = 0;
+            }
+        }
+    }
+
+    pub fn can_adopt_new(&self) -> Result<(), String> {
+        let active = self.active_pet();
+        if !active.is_alive && !active.buried {
+            return Err(format!(
+                "🕯 Cannot adopt yet! {} has fallen — you must hold the 3-step Burial Vigil [B] ({}/3) or revive them [H] first.",
+                active.name, active.vigil_steps_completed
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn record_memorial_if_buried(&mut self, pet: &Pet) {
+        if !pet.is_alive && pet.buried {
+            let already = self
+                .memorials
+                .iter()
+                .any(|m| m.pet_name == pet.name && m.age_seconds == pet.age_seconds);
+            if !already {
+                let caretaker = pet.caretaker_label();
+                self.memorials.push(MemorialRecord {
+                    pet_name: pet.name.clone(),
+                    species: pet.species,
+                    stage: pet.stage,
+                    age_seconds: pet.age_seconds,
+                    cause_of_death: pet
+                        .cause_of_death
+                        .clone()
+                        .unwrap_or_else(|| "Neglect".to_string()),
+                    epitaph: format!("Here rests {}, remembered by {}.", pet.name, caretaker),
+                });
+                self.caretaker_karma = self.caretaker_karma.saturating_sub(15);
+            }
         }
     }
 
@@ -2676,7 +2960,21 @@ impl Sanctuary {
         &mut self.pets[self.active_index]
     }
 
-    pub fn add_pet(&mut self, pet: Pet) -> usize {
+    pub fn add_pet(&mut self, mut pet: Pet) -> usize {
+        if pet.caretaker_title.trim().is_empty() || pet.caretaker_title == "Keeper" {
+            if !self.caretaker_title.trim().is_empty() {
+                pet.caretaker_title = self.caretaker_title.clone();
+            }
+        } else {
+            self.caretaker_title = pet.caretaker_title.clone();
+        }
+        // Caretaker Karma consequence: if karma is negative from past neglect deaths,
+        // newly adopted pets start cautious with lower initial bond!
+        if self.caretaker_karma < 0 {
+            pet.bond = 4;
+        } else if self.caretaker_karma >= 20 {
+            pet.bond = 18;
+        }
         self.pets.push(pet);
         self.active_index = self.pets.len() - 1;
         self.refresh_level();

@@ -13,7 +13,8 @@
 //! 5. `🌟 CyberElder`: Massive Apex Sovereign boss form with golden armor & aura.
 //! 6. `👻 PassedOut`: Floating spirit & pixel memorial when a pet faints/dies.
 
-use crate::pet::{EvolutionStage, Pet, PetMood, PetSpecies, ShellTheme};
+use crate::pet::{EvolutionStage, LcdIcon, Pet, PetMood, PetSpecies, ShellTheme};
+use crate::senses::{compute_posture_and_gaze, render_window_backdrop, sense_environment, PetGaze};
 use ratatui::{
     style::{Color, Style},
     text::{Line, Span},
@@ -850,14 +851,174 @@ fn ghost_bitmap() -> [&'static str; CANVAS_H] {
     ]
 }
 
-/// Build the 40×22 character grid for any `(species, stage, mood, frame_idx, walk_offset, facing_right)`.
-fn build_grid_with_motion(
+/// Transform the head/face region into a symmetric **Front-Facing Gaze (`PetGaze::Center`)**
+/// so the companion looks directly at the player with two expressive eyes!
+fn apply_front_gaze(
+    grid: &mut [[char; CANVAS_W]; CANVAS_H],
+    species: PetSpecies,
+    stage: EvolutionStage,
+) {
+    if stage == EvolutionStage::Egg {
+        return;
+    }
+
+    // Find the first eye pixel ('E' or 'K') to anchor the face center
+    let mut eye_pos: Option<(usize, usize)> = None;
+    'search: for (y, row) in grid.iter().enumerate() {
+        for (x, &c) in row.iter().enumerate() {
+            if c == 'E' || c == 'K' {
+                eye_pos = Some((x, y));
+                break 'search;
+            }
+        }
+    }
+
+    let Some((_, eye_y)) = eye_pos else {
+        return;
+    };
+
+    // Paint a clear front-facing pair of eyes and central nose/beak on the head rows
+    let y0 = eye_y.min(CANVAS_H - 3);
+    let y1 = (y0 + 1).min(CANVAS_H - 2);
+    let cx = match stage {
+        EvolutionStage::Baby => 19,
+        EvolutionStage::Teen => 17,
+        EvolutionStage::Adult => 14,
+        EvolutionStage::CyberElder => 12,
+        EvolutionStage::Egg => 20,
+    };
+
+    if cx >= 5 && cx + 5 < CANVAS_W {
+        // Ensure solid face backdrop between the two front-facing eyes
+        for dx in -4isize..=4 {
+            let x = (cx as isize + dx) as usize;
+            if grid[y0][x] == '.' {
+                grid[y0][x] = 'B';
+            }
+            if grid[y1][x] == '.' {
+                grid[y1][x] = 'B';
+            }
+        }
+        // Left eye looking at you
+        grid[y0][cx - 3] = 'E';
+        grid[y0][cx - 2] = 'K';
+        grid[y1][cx - 3] = 'K';
+        grid[y1][cx - 2] = 'K';
+        // Right eye looking at you
+        grid[y0][cx + 2] = 'E';
+        grid[y0][cx + 3] = 'K';
+        grid[y1][cx + 2] = 'K';
+        grid[y1][cx + 3] = 'K';
+        // Rosy cheeks & center nose/beak
+        grid[y1][cx - 4] = 'P';
+        grid[y1][cx + 4] = 'P';
+        grid[y1][cx] = match species {
+            PetSpecies::StarPengu | PetSpecies::PhoenixChick => 'G',
+            _ => 'O',
+        };
+    }
+}
+
+/// Apply full-body posture and detailed facial expressions for Sleeping, Hungry, Full, Sick, etc.
+fn apply_pose_and_expression(
+    grid: &mut [[char; CANVAS_W]; CANVAS_H],
+    stage: EvolutionStage,
+    mood: PetMood,
+    frame_idx: usize,
+) {
+    if stage == EvolutionStage::Egg || mood == PetMood::PassedOut {
+        return;
+    }
+
+    // 1. Sleeping Pose: curl down low onto a woven sleeping cushion with rising zZz!
+    if mood == PetMood::Sleeping {
+        let mut curled = [['.'; CANVAS_W]; CANVAS_H];
+        // Drop the upper body down by 3 rows so legs tuck into a lying/curled posture
+        let drop = if frame_idx.is_multiple_of(2) { 3 } else { 4 };
+        curled[drop..(CANVAS_H - 2)].copy_from_slice(&grid[..((CANVAS_H - 2) - drop)]);
+        // Close eyes into peaceful sleeping arcs
+        for row in &mut curled {
+            for cell in row.iter_mut() {
+                if *cell == 'E' || *cell == 'K' || *cell == 'R' {
+                    *cell = 'O';
+                }
+            }
+        }
+        // Draw cozy woven sleeping mat under the curled companion
+        for (x, cell) in curled[CANVAS_H - 2].iter_mut().enumerate().take(34).skip(6) {
+            *cell = if x % 2 == 0 { 'S' } else { 'A' };
+        }
+        for cell in curled[CANVAS_H - 1].iter_mut().take(34).skip(6) {
+            *cell = 'O';
+        }
+        // Pixel 'z' floating above the sleeping head
+        let z_y = if frame_idx.is_multiple_of(2) { 2 } else { 1 };
+        curled[z_y][28] = 'A';
+        curled[z_y][29] = 'A';
+        curled[z_y + 1][28] = 'A';
+        *grid = curled;
+        return;
+    }
+
+    // 2. Hungry / Lonely Slouch: droop top rows by 1 pixel, watery eyes, belly rumble wave
+    if mood == PetMood::Lonely {
+        let mut slouched = [['.'; CANVAS_W]; CANVAS_H];
+        slouched[1..CANVAS_H].copy_from_slice(&grid[..CANVAS_H - 1]);
+        for row in &mut slouched {
+            for cell in row.iter_mut() {
+                if *cell == 'E' {
+                    *cell = 'A'; // watery tear glint
+                }
+            }
+        }
+        // Belly rumble wave on the side
+        if frame_idx.is_multiple_of(2) {
+            slouched[13][4] = 'G';
+            slouched[14][3] = 'G';
+        }
+        *grid = slouched;
+        return;
+    }
+
+    // 3. Full / Eating / Overstuffed Pose: happy curved eyes, warm blush, plump belly
+    if matches!(mood, PetMood::Eating | PetMood::Overstuffed) {
+        for row in grid.iter_mut() {
+            for cell in row.iter_mut() {
+                if *cell == 'E' {
+                    *cell = 'O';
+                } else if *cell == 'K' {
+                    *cell = if mood == PetMood::Overstuffed {
+                        'P'
+                    } else {
+                        'O'
+                    };
+                }
+            }
+        }
+    }
+
+    // 4. Sick / Feverish Pose: heavy half-lidded eyes, fever cheeks, cold sweat drop
+    if mood == PetMood::Sick {
+        for row in grid.iter_mut() {
+            for cell in row.iter_mut() {
+                if *cell == 'E' {
+                    *cell = 'R';
+                }
+            }
+        }
+        grid[4][8] = 'A';
+        grid[5][8] = 'W';
+    }
+}
+
+/// Build the 40×22 character grid for any `(species, stage, mood, frame_idx, walk_offset, gaze)`.
+pub fn build_grid_with_gaze(
     species: PetSpecies,
     stage: EvolutionStage,
     mood: PetMood,
     frame_idx: usize,
     walk_offset: isize,
-    facing_right: bool,
+    gaze: PetGaze,
 ) -> [[char; CANVAS_W]; CANVAS_H] {
     let raw = if mood == PetMood::PassedOut {
         ghost_bitmap()
@@ -878,10 +1039,18 @@ fn build_grid_with_motion(
         }
     }
 
-    // Flip horizontally when strolling right!
-    if facing_right && stage != EvolutionStage::Egg && mood != PetMood::PassedOut {
-        for row in &mut grid {
-            row.reverse();
+    // Apply 3-way gaze: Left (3/4 left), Right (3/4 right), or Center (looking directly at you!)
+    if stage != EvolutionStage::Egg && mood != PetMood::PassedOut {
+        match gaze {
+            PetGaze::Left => {}
+            PetGaze::Right => {
+                for row in &mut grid {
+                    row.reverse();
+                }
+            }
+            PetGaze::Center => {
+                apply_front_gaze(&mut grid, species, stage);
+            }
         }
     }
 
@@ -931,7 +1100,10 @@ fn build_grid_with_motion(
         grid = aligned;
     }
 
-    // Dynamic eye expressions based on rich Emotions (`PetMood`)!
+    // Apply full-body posture & rich expressions (Sleeping mat curl, Hungry slouch, Full, Sick)
+    apply_pose_and_expression(&mut grid, stage, mood, frame_idx);
+
+    // Natural blink on frame 1 when awake
     let blink = frame_idx % 2 == 1 || matches!(mood, PetMood::Sleeping | PetMood::Sleepy);
     if stage != EvolutionStage::Egg && mood != PetMood::PassedOut {
         if blink {
@@ -950,20 +1122,15 @@ fn build_grid_with_motion(
                     }
                 }
             }
-        } else if matches!(mood, PetMood::Sick | PetMood::Overstuffed) {
-            for row in &mut grid {
-                for cell in row.iter_mut() {
-                    if *cell == 'E' {
-                        *cell = 'P';
-                    }
-                }
-            }
         }
     }
 
     // Gentle 1-pixel vertical breathing hop on frame 1 when awake & hatched
     if stage != EvolutionStage::Egg
-        && !matches!(mood, PetMood::Sleeping | PetMood::PassedOut)
+        && !matches!(
+            mood,
+            PetMood::Sleeping | PetMood::PassedOut | PetMood::Lonely | PetMood::Sick
+        )
         && frame_idx % 2 == 1
     {
         let mut shifted = [['.'; CANVAS_W]; CANVAS_H];
@@ -972,6 +1139,22 @@ fn build_grid_with_motion(
     }
 
     grid
+}
+
+fn build_grid_with_motion(
+    species: PetSpecies,
+    stage: EvolutionStage,
+    mood: PetMood,
+    frame_idx: usize,
+    walk_offset: isize,
+    facing_right: bool,
+) -> [[char; CANVAS_W]; CANVAS_H] {
+    let gaze = if facing_right {
+        PetGaze::Right
+    } else {
+        PetGaze::Left
+    };
+    build_grid_with_gaze(species, stage, mood, frame_idx, walk_offset, gaze)
 }
 
 fn build_grid(
@@ -1170,64 +1353,45 @@ pub fn render_animated_sprite(pet: &Pet, tick: usize) -> Vec<String> {
     lines
 }
 
-/// Autonomous horizontal strolling motion (`walk_offset`, `facing_right`) so your
-/// companion physically walks around the habitat when awake!
-fn autonomous_motion(pet: &Pet, tick: usize) -> (isize, bool) {
-    if !pet.is_alive
-        || pet.stage == EvolutionStage::Egg
-        || pet.is_sleeping
-        || pet.is_sick
-        || pet.has_toothache
-    {
-        return (0, false);
-    }
-    let phase = (tick / 8) % 12;
-    let waypoints: [(isize, bool); 12] = [
-        (0, false),
-        (-1, false),
-        (-2, false),
-        (-2, false),
-        (-1, true),
-        (0, true),
-        (1, true),
-        (2, true),
-        (2, true),
-        (1, false),
-        (0, false),
-        (0, false),
-    ];
-    waypoints[phase]
-}
-
 /// TrueColor 40×22 Half-Block Pixel Art [`Line`]s for the habitat LCD screen.
 pub fn render_colored_sprite(pet: &Pet, tick: usize) -> Vec<Line<'static>> {
     let frame_idx = usize::from(tick % 8 == 7);
-    let (walk_offset, facing_right) = autonomous_motion(pet, tick);
-    let grid = build_grid_with_motion(
+    let (walk_offset, gaze) = compute_posture_and_gaze(pet, tick, 0);
+    let grid = build_grid_with_gaze(
         pet.species,
         pet.stage,
         pet.mood,
         frame_idx,
         walk_offset,
-        facing_right,
+        gaze,
     );
     let (_, secondary, accent) = species_palette(pet.species);
+    let floor_color = if !pet.light_on {
+        Color::Rgb(55, 65, 95)
+    } else {
+        secondary
+    };
 
-    let mut out = Vec::with_capacity(14);
+    let mut out = Vec::with_capacity(15);
+    out.push(render_window_backdrop(pet, tick));
     out.push(Line::from(Span::styled(
         get_mood_particles(pet.mood, tick).to_string(),
         Style::default().fg(accent),
     )));
     out.extend(render_grid_colored(&grid, pet.species));
-    out.push(Line::from(Span::styled(
-        "▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀".to_string(),
-        Style::default().fg(secondary),
-    )));
+    out.push(Line::from(vec![
+        Span::styled("▀▀▄▄", Style::default().fg(accent)),
+        Span::styled(
+            "▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀",
+            Style::default().fg(floor_color),
+        ),
+        Span::styled("▄▄▀▀", Style::default().fg(accent)),
+    ]));
 
     if pet.poop_count > 0 {
         let messes = "💩 ".repeat(pet.poop_count.min(5) as usize);
         out.push(Line::from(Span::styled(
-            format!("{} (press [C] to bath)", messes.trim()),
+            format!("{} (press [C] to wash floor)", messes.trim()),
             Style::default().fg(Color::LightRed),
         )));
     }
@@ -1242,7 +1406,12 @@ pub fn render_colored_preview(
     tick: usize,
 ) -> Vec<Line<'static>> {
     let frame_idx = usize::from(tick % 8 == 7);
-    let grid = build_grid(species, stage, PetMood::Happy, frame_idx);
+    let gaze = match (tick / 12) % 3 {
+        0 => PetGaze::Center,
+        1 => PetGaze::Left,
+        _ => PetGaze::Right,
+    };
+    let grid = build_grid_with_gaze(species, stage, PetMood::Happy, frame_idx, 0, gaze);
     let (_, secondary, _) = species_palette(species);
     let mut out = render_grid_colored(&grid, species);
     out.push(Line::from(Span::styled(
@@ -1258,132 +1427,108 @@ pub fn render_species_preview(species: PetSpecies) -> Vec<String> {
 }
 
 /// What your companion is saying out loud right now (`💬`).
-/// Immediately displays direct first-person feedback (`pet.active_reaction_speech()`)
-/// when you interact or spam an action!
+/// Grounded, behavioral English that uses your custom `caretaker_title` (`pet.caretaker_label()`).
 pub fn speech_bubble(pet: &Pet, tick: usize) -> String {
     if let Some(ref reaction) = pet.last_pet_speech {
         return reaction.clone();
     }
+    let caretaker = pet.caretaker_label();
     if !pet.is_alive || pet.mood == PetMood::PassedOut {
+        if pet.buried {
+            return format!(
+                "💬 \"[ Epitaph: Here rests {}, remembered by {}. ]\"",
+                pet.name, caretaker
+            );
+        }
         return format!(
-            "💬 \"👻 {} has passed out... Press [H] for Phoenix Revival!\"",
+            "💬 \"{} lies still. Hold a Vigil [B] or spend 50 coins on a Phoenix Tear [H].\"",
             pet.name
         );
     }
     if pet.stage == EvolutionStage::Egg {
         return if pet.incubation >= 80 {
-            "💬 \"*crack* Almost ready to hatch!\"".to_string()
+            format!(
+                "💬 \"*tap... tap...* Hairline cracks spread across the warm shell, {caretaker}.\""
+            )
         } else {
-            "💬 \"A warm heartbeat waits inside...\"".to_string()
+            "💬 \"A steady pulse beats beneath the shell.\"".to_string()
         };
     }
     if pet.has_toothache {
-        return "💬 \"ADUH!🦷 Gigiku ngilu! Kasih obat [H] dong!\"".to_string();
+        return format!(
+            "💬 \"My back tooth is throbbing, {caretaker}. Do we have medicine [H]?\""
+        );
     }
     if pet.is_sleeping || pet.mood == PetMood::Sleeping {
-        return "💬 \"Zzz... mimpi indah makan camilan...\"".to_string();
+        return if pet.light_on {
+            format!(
+                "💬 \"*squints* The lamp is still bright, {caretaker}... could you switch it off [K]?\""
+            )
+        } else {
+            format!(
+                "💬 \"*soft breathing* ...warm mat... save the last {} for {}...\"",
+                pet.species.favorite_snack(),
+                caretaker
+            )
+        };
     }
     if pet.is_sick || pet.mood == PetMood::Sick {
-        return "💬 \"Uhuk...🤒 Badan lemes, butuh obat [H]...\"".to_string();
+        return format!(
+            "💬 \"I'm shivering, {caretaker}... my paws feel heavy. Need herbal medicine [H].\""
+        );
     }
     if pet.hunger == 0 {
-        return "💬 \"PERUTKU KERONCONGAN PARAH!🍙 Tolong suapin [F]!\"".to_string();
+        return format!(
+            "💬 \"My stomach is cramping hard, {caretaker}. Please feed me [F] before I faint.\""
+        );
     }
     if pet.poop_count > 0 {
-        return "💬 \"Ih bau!🚽 Mandiin aku pakai [C] dong!\"".to_string();
+        return format!(
+            "💬 \"The floor is getting messy, {caretaker}. Could we wash up [C]?\""
+        );
     }
     if pet.hunger <= 30 {
-        return format!("💬 \"Laper nih... pengen {} [F]!\"", pet.species.favorite_snack());
+        return format!(
+            "💬 \"My belly just rumbled, {caretaker}. Do we have any {} [F]?\"",
+            pet.species.favorite_snack()
+        );
     }
     if pet.energy <= 25 {
-        return "💬 \"*Hoaaam*🥱 Ngantuk berat... bobo yuk [S]?\"".to_string();
+        return format!(
+            "💬 \"*blinks slowly* My eyelids are heavy, {caretaker}. Time for sleep [S]?\""
+        );
     }
 
     let chatter = [
-        format!("💬 \"{} seneng banget lihat kamu! ([Y] Ngobrol)\"", pet.name),
-        format!("💬 \"Hmm... pengen nyemil {} deh~\"", pet.species.favorite_snack()),
-        "💬 \"Main 3-in-1 Retro Arcade [G] bareng yuk!\"".to_string(),
-        "💬 \"Elus kepalaku [T] atau ngobrol [Y] yuk!\"".to_string(),
+        format!(
+            "💬 \"You're back at the desk, {caretaker}. Let's talk [Y] whenever you have a minute.\""
+        ),
+        format!(
+            "💬 \"I can smell {} from the pantry [M].\"",
+            pet.species.favorite_snack()
+        ),
+        format!(
+            "💬 \"Want to run a round in the Arcade [G], {caretaker}?\""
+        ),
+        format!(
+            "💬 \"Looking right at you, {caretaker}. Everything feels calm in here.\""
+        ),
     ];
     chatter[(tick / 48) % chatter.len()].clone()
 }
 
-/// Inner thought bubble (`💭`) revealing what your companion is thinking or doing!
+/// Inner sensory & thought line (`💭`) showing Sight, Hearing, and Feeling in real time!
 pub fn thought_bubble(pet: &Pet, tick: usize) -> String {
     if let Some(ref thought) = pet.last_pet_thought {
         return thought.clone();
     }
-    if !pet.is_alive || pet.mood == PetMood::PassedOut {
-        return "💭 (Spirit: Menunggu keajaiban Phoenix Tear [H] atau telur baru [N]...)".to_string();
+    let window_tick = (tick / 48) * 48;
+    let snap = sense_environment(pet, window_tick, LcdIcon::Meter, 0, 0);
+    match (tick / 48) % 3 {
+        0 => format!("💭 👁 Sight ({}) • {}", snap.gaze.label(), snap.sight),
+        1 => format!("💭 👂 Hearing • {}", snap.hearing),
+        _ => format!("💭 🫳 Feeling • {}", snap.feeling),
     }
-    if pet.stage == EvolutionStage::Egg {
-        return "💭 (Thinking: Hangat banget di dalam cangkang ini~)".to_string();
-    }
-    if pet.has_toothache {
-        return "💭 (Thinking: Kapok makan 3 permen manis berturut-turut!)".to_string();
-    }
-    if pet.hunger == 0 {
-        return "💭 (Starving: Lemes banget... kalau nggak makan bisa pingsan!)".to_string();
-    }
-    if pet.is_sleeping {
-        return format!(
-            "💭 (Dreaming of a mountain of {}...)",
-            pet.species.favorite_snack()
-        );
-    }
-    let species_thoughts = match pet.species {
-        PetSpecies::MochiCat => [
-            "💭 (Activity: 🐾 Jalan-jalan santai sambil mengibaskan ekor~)",
-            "💭 (Thinking: Sebentar lagi wujud Byakko Tiger-ku bangkit!)",
-            "💭 (Activity: 👀 Menempelkan hidung ke kaca layar ngelihatin kamu!)",
-        ],
-        PetSpecies::BobaPup => [
-            "💭 (Activity: 🐾 Mengejar kupu-kupu pixel di pojok kamar!)",
-            "💭 (Thinking: Aku bakal tumbuh jadi Fenrir Dire Wolf yang gagah!)",
-            "💭 (Activity: 🎵 Menggoyangkan ekor mengikuti ketukan keyboard-mu!)",
-        ],
-        PetSpecies::CloudBun => [
-            "💭 (Activity: ☁️ Melompat-lompat ringan di atas awan lembut~)",
-            "💭 (Thinking: Di wujud Elder nanti, aku penguasa badai petir!)",
-            "💭 (Activity: 👀 Mengintip ke arahmu sambil menggoyang telinga!)",
-        ],
-        PetSpecies::StarPengu => [
-            "💭 (Activity: ❄️ Meluncur santai di lantai es sanctuary~)",
-            "💭 (Thinking: Berlatih keras demi mahkota trisula Frost Kaiser!)",
-            "💭 (Activity: 🎵 Bersenandung lagu chiptune 8-bit sendirian~)",
-        ],
-        PetSpecies::IgnisDragon => [
-            "💭 (Activity: 🔥 Latihan menyemburkan cincin api kecil di udara!)",
-            "💭 (Thinking: Sayap nagaku makin kekar — Bahamut menanti!)",
-            "💭 (Activity: 🐾 Berpatroli gagah menjaga koin emas sanctuary!)",
-        ],
-        PetSpecies::AzureWyrm => [
-            "💭 (Activity: 🫧 Memutar mutiara laut bercahaya di antara cakarnya!)",
-            "💭 (Thinking: Kekuatan Leviathan Samudra mengalir di sisikku...)",
-            "💭 (Activity: 🌊 Melayang anggun mengikuti arus angin sanctuary~)",
-        ],
-        PetSpecies::EmberFox => [
-            "💭 (Activity: 🦊 Menyalakan lentera api biru foxfire di sekelilingnya!)",
-            "💭 (Thinking: Sebentar lagi ke-9 ekor Kyuubi-ku mekar sempurna!)",
-            "💭 (Activity: 👀 Tersenyum jahil sambil melirik ke arahmu~)",
-        ],
-        PetSpecies::PhoenixChick => [
-            "💭 (Activity: 🌞 Merentangkan sayap api emasnya biar tetap hangat!)",
-            "💭 (Thinking: Bulu apiku makin membara menuju wujud Solar Garuda!)",
-            "💭 (Activity: 🎵 Berkicau merdu dengan nada chiptune pagi hari!)",
-        ],
-        PetSpecies::CrystalUni => [
-            "💭 (Activity: ✨ Tanduk kristalnya membiaskan pelangi ke dinding!)",
-            "💭 (Thinking: Wujud Celestial Kirin Pegasus sudah makin dekat!)",
-            "💭 (Activity: 🐾 Berderap anggun mengelilingi taman sanctuary~)",
-        ],
-        PetSpecies::SlimeKing => [
-            "💭 (Activity: 👑 Membenarkan posisi mahkota emasnya sambil membal!)",
-            "💭 (Thinking: Sebentar lagi aku jadi Titan Slime Emperor raksasa!)",
-            "💭 (Activity: 💧 Berkilau bening memantulkan cahaya layar!)",
-        ],
-    };
-    species_thoughts[(tick / 48) % species_thoughts.len()].to_string()
 }
 
 pub fn mood_dialogue(pet: &Pet) -> String {

@@ -2,13 +2,13 @@
 name = "mochigotchi"
 version = "1.0.0"
 edition = "2021"
-description = "Mochigotchi — Minimalist Retro Handheld V-Pet & 32x20 TrueColor Pixel Art Tamagotchi in the Terminal"
+description = "KOMO — Pocket Soul & Living Terminal Companion (40x22 TrueColor Pixel Art, 4 Senses, Real Consequences)"
 authors = ["Muhammad Raffi Aqsan (NojinNojs)"]
 license = "MIT"
 readme = "README.md"
-repository = "https://github.com/NojinNojs/mochigotchi"
-homepage = "https://github.com/NojinNojs/mochigotchi"
-keywords = ["tamagotchi", "virtual-pet", "tui", "ratatui", "pixel-art"]
+repository = "https://github.com/NojinNojs/komo"
+homepage = "https://github.com/NojinNojs/komo"
+keywords = ["komo", "tamagotchi", "virtual-pet", "tui", "ratatui"]
 categories = ["games", "command-line-utilities"]
 
 [dependencies]

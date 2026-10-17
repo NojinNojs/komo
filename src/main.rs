@@ -11,35 +11,37 @@ use mochigotchi::{
 fn print_help() {
     println!(
         "\
-🍡 Mochigotchi v{} — Retro Handheld V-Pet & 32x20 TrueColor Pixel Art Edition
+🌿 KOMO v{} — Pocket Soul & Living Terminal Companion
 
 USAGE:
-    mochigotchi [OPTIONS]      (or: mochi / tamagotchi)
+    komo [OPTIONS]             (aliases: mochi / mochigotchi)
 
 OPTIONS:
     -h, --help                Print this help information
     -V, --version             Print version information
-    --name <NAME>             Set pet name when creating or adopting a companion
+    --name <NAME>             Set companion name when creating or adopting
+    --call-me <TITLE>         Set how your companion addresses you (e.g., Aqsan, Boss, Keeper)
     --species <SPECIES>       cat | pup | bun | pengu | dragon | wyrm | fox | phoenix | uni | slime
     --theme <THEME>           pink | matcha | blue | lavender | gold
-    --adopt                   Adopt a new companion into your Sanctuary via CLI
+    --adopt                   Adopt a new companion into your Sanctuary (blocked if active died unburied)
     --switch <INDEX|NAME>     Switch active companion by 1-based index or name
     --json-path <PATH>        Custom path for JSON save file
     --db-path <PATH>          Custom path for SQLite save database
-    --status                  Print active companion status, thoughts, and 32x20 pixel sprite
-    --roster                  List all companions in your Sanctuary
+    --status                  Print active companion status, 4 senses, and 40x22 pixel sprite
+    --roster                  List all companions and Memorial Hall records in your Sanctuary
+    --vigil                   Perform one step (1..3) of the Burial Vigil Rite for a fallen companion
     --warm                    Warm & incubate your egg (+20% warmth)
     --feed                    Feed a meal (+1 Hungry Heart, +1g weight)
     --snack                   Feed a sweet snack (+1 Happy Heart, +2g weight)
     --play                    Play a game (+18 Happy, -2g weight)
     --pet                     Praise / cuddle your companion
-    --talk                    Have a heart-to-heart chat & see what your pet is thinking!
+    --talk                    Have a heart-to-heart chat with your companion
     --train                   Run a training session (+Discipline, -2g weight)
-    --sleep                   Toggle sleep mode
+    --sleep                   Toggle sleep mode (curls onto the woven sleeping mat)
     --light                   Toggle the room light switch ON/OFF
     --scold                   Discipline (scold) when misbehaving
-    --clean                   Flush mess, brush teeth & take a bath
-    --heal                    Give herbal medicine (cures sickness & toothache)
+    --clean                   Flush mess, brush teeth & take a warm bath
+    --heal                    Give herbal medicine, or use your 1-time Sacred Phoenix Tear
     --reset                   Delete existing save files and start fresh",
         env!("CARGO_PKG_VERSION")
     );
@@ -74,9 +76,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().skip(1).collect();
 
     let mut custom_name: Option<String> = None;
+    let mut custom_caretaker: Option<String> = None;
     let mut custom_species: Option<PetSpecies> = None;
     let mut custom_theme: Option<ShellTheme> = None;
     let mut adopt_flag = false;
+    let mut vigil_flag = false;
     let mut switch_query: Option<String> = None;
     let mut json_path: Option<PathBuf> = None;
     let mut db_path: Option<PathBuf> = None;
@@ -93,13 +97,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 return Ok(());
             }
             "-V" | "--version" => {
-                println!("mochigotchi {}", env!("CARGO_PKG_VERSION"));
+                println!("komo {}", env!("CARGO_PKG_VERSION"));
                 return Ok(());
             }
             "--name" => {
                 i += 1;
                 if i < args.len() {
                     custom_name = Some(args[i].clone());
+                }
+            }
+            "--call-me" | "--caretaker" => {
+                i += 1;
+                if i < args.len() {
+                    custom_caretaker = Some(args[i].clone());
                 }
             }
             "--species" => {
@@ -115,6 +125,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             "--adopt" => adopt_flag = true,
+            "--vigil" => vigil_flag = true,
             "--switch" => {
                 i += 1;
                 if i < args.len() {
@@ -184,13 +195,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ));
     }
 
+    if let Some(ref title) = custom_caretaker {
+        sanctuary.set_caretaker_title_all(title);
+    }
+
     if adopt_flag && !first_time {
+        if let Err(err) = sanctuary.can_adopt_new() {
+            eprintln!("{err}");
+            return Ok(());
+        }
         let species = custom_species.unwrap_or(PetSpecies::MochiCat);
         let theme = custom_theme.unwrap_or(ShellTheme::StrawberryPink);
         let name = custom_name
             .clone()
             .unwrap_or_else(|| species.default_name().to_string());
-        let new_pet = Pet::new_custom(&name, species, theme);
+        let mut new_pet = Pet::new_custom(&name, species, theme);
+        if let Some(ref title) = custom_caretaker {
+            new_pet.set_caretaker_title(title);
+        }
         sanctuary.add_pet(new_pet);
         println!(
             "🥚 Adopted {} ({}) into your Sanctuary! (Total companions: {})",
@@ -223,8 +245,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    if !cli_actions.is_empty() || status_only || roster_only || adopt_flag || switch_query.is_some()
+    if !cli_actions.is_empty()
+        || status_only
+        || roster_only
+        || adopt_flag
+        || vigil_flag
+        || custom_caretaker.is_some()
+        || switch_query.is_some()
     {
+        if vigil_flag {
+            let msg = sanctuary.active_pet_mut().hold_vigil_step();
+            let active_clone = sanctuary.active_pet().clone();
+            sanctuary.record_memorial_if_buried(&active_clone);
+            println!("{msg}");
+        }
         for action in cli_actions {
             let feedback = sanctuary.active_pet_mut().perform_action(action);
             println!("{feedback}");
@@ -233,8 +267,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         if roster_only {
             println!(
-                "🏰 Mochigotchi Sanctuary (Lv.{}) — {} companions:",
+                "🌿 KOMO Sanctuary (Lv.{} • Keeper: '{}' • Karma: {:+}) — {} companions:",
                 sanctuary.sanctuary_level,
+                sanctuary.caretaker_title,
+                sanctuary.caretaker_karma,
                 sanctuary.pets.len()
             );
             for (idx, p) in sanctuary.pets.iter().enumerate() {
@@ -244,6 +280,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     "•"
                 };
                 println!("  {} #{}: {}", marker, idx + 1, p.status_summary());
+            }
+            if !sanctuary.memorials.is_empty() {
+                println!("\n🪦 Sanctuary Memorial Hall ({}):", sanctuary.memorials.len());
+                for m in &sanctuary.memorials {
+                    println!(
+                        "  • {} ({} • {}) — Cause: {} | \"{}\"",
+                        m.pet_name,
+                        m.species.display_name(),
+                        m.stage.badge(),
+                        m.cause_of_death,
+                        m.epitaph
+                    );
+                }
             }
             return Ok(());
         }

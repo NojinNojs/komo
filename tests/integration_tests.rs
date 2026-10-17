@@ -11,10 +11,11 @@ use std::path::PathBuf;
 use chrono::{Duration, Utc};
 use crossterm::event::KeyCode;
 use mochigotchi::{
-    draw_ui, format_hearts, get_sprite_frames, load_pet, load_sanctuary, render_animated_sprite,
-    save_exists, save_pet, save_sanctuary, speech_bubble, synthesize_wav, thought_bubble, App,
-    AppScreen, AttentionCall, CareRank, EvolutionStage, FoodChoice, GameMode, ItemKind, LcdIcon,
-    MiniGame, OnboardingStep, Pet, PetAction, PetMood, PetSpecies, Sanctuary, ShellTheme,
+    build_grid_with_gaze, compute_posture_and_gaze, draw_ui, format_hearts, get_sprite_frames,
+    load_pet, load_sanctuary, render_animated_sprite, save_exists, save_pet, save_sanctuary,
+    sense_environment, speech_bubble, synthesize_wav, thought_bubble, App, AppScreen,
+    AttentionCall, CareRank, EvolutionStage, FoodChoice, GameMode, ItemKind, LcdIcon, MiniGame,
+    OnboardingStep, Pet, PetAction, PetGaze, PetMood, PetSpecies, Sanctuary, ShellTheme,
     SoundEffect, StoragePaths, CANVAS_H, CANVAS_W,
 };
 use ratatui::{backend::TestBackend, Terminal};
@@ -73,38 +74,60 @@ fn realistic_starvation_sickness_death_and_phoenix_revival_work() {
     // Normal actions are blocked while PassedOut
     let blocked_feed = pet.feed();
     assert!(blocked_feed.contains("passed out"));
-    assert!(speech_bubble(&pet, 0).contains("Phoenix Revival"));
+    assert!(speech_bubble(&pet, 0).contains("Phoenix"));
 
-    // Press [H] (`heal()`) for Phoenix Tear Revival!
+    // 1st Phoenix Tear Revival works (1× per lifetime) and adds +3 Care Mistakes!
     let revive_msg = pet.heal();
     assert!(revive_msg.contains("PHOENIX REVIVAL"));
     assert!(pet.is_alive);
+    assert_eq!(pet.revival_count, 1);
     assert_eq!(pet.health, 80);
     assert_eq!(pet.mood, PetMood::Loved);
+
+    // If the pet dies a SECOND time, Phoenix Tear cannot revive them again — must hold 3-step Vigil!
+    pet.health = 0;
+    pet.is_alive = false;
+    pet.mood = PetMood::PassedOut;
+    let second_revive = pet.heal();
+    assert!(second_revive.contains("one-time Phoenix Revival"));
+    assert!(!pet.is_alive);
+
+    // Complete 3-step Burial Vigil Rite (`[B]`)
+    assert!(pet.hold_vigil_step().contains("Step 1/3"));
+    assert!(!pet.buried);
+    assert!(pet.hold_vigil_step().contains("Step 2/3"));
+    assert!(!pet.buried);
+    assert!(pet.hold_vigil_step().contains("Vigil Complete (3/3)"));
+    assert!(pet.buried);
 }
 
 #[test]
 fn direct_first_person_pet_feedback_on_spam_feeding_scolding_and_patting() {
     let mut pet = Pet::new_custom("Ignis", PetSpecies::IgnisDragon, ShellTheme::SunsetGold);
+    pet.set_caretaker_title("Aqsan");
     pet.stage = EvolutionStage::Adult;
     pet.hunger = 100;
 
     // 1st feed when already full (4/4 hearts)
     let _ = pet.feed();
     assert_eq!(pet.mood, PetMood::Overstuffed);
-    assert!(speech_bubble(&pet, 0).contains("kenyang"));
+    assert!(speech_bubble(&pet, 0).contains("completely full"));
+    assert!(speech_bubble(&pet, 0).contains("Aqsan"));
 
-    // 2nd spam feed when full -> pet complains about exploding tummy!
+    // 2nd spam feed when full -> pet complains about stomach cramping and loses health/bond!
+    let health_before = pet.health;
     let _ = pet.feed();
     assert_eq!(pet.mood, PetMood::Overstuffed);
-    assert!(speech_bubble(&pet, 0).contains("UEKKK"));
+    assert!(speech_bubble(&pet, 0).contains("UGH!"));
+    assert!(pet.health < health_before);
 
-    // Unfair scold spam -> pet gets sad then Angry!
+    // Unfair scold spam -> pet gets sad then Angry and turns away!
     let _ = pet.discipline_scold();
     assert_eq!(pet.mood, PetMood::Lonely);
     let _ = pet.discipline_scold();
     assert_eq!(pet.mood, PetMood::Angry);
-    assert!(speech_bubble(&pet, 0).contains("HMPH"));
+    assert!(speech_bubble(&pet, 0).contains("HMPH!"));
+    assert_eq!(compute_posture_and_gaze(&pet, 0, 4).1, PetGaze::Right);
 
     // Patting spam -> pet giggles that it's ticklish!
     pet.happiness = 70;
@@ -112,7 +135,39 @@ fn direct_first_person_pet_feedback_on_spam_feeding_scolding_and_patting() {
     assert_eq!(pet.mood, PetMood::Loved);
     let _ = pet.pet_love();
     assert_eq!(pet.mood, PetMood::Playful);
-    assert!(speech_bubble(&pet, 0).contains("geli"));
+    assert!(speech_bubble(&pet, 0).contains("tickles"));
+
+    // Verify 3-way gaze (Left, Center, Right) produces distinct grids
+    let g_left = build_grid_with_gaze(
+        PetSpecies::MochiCat,
+        EvolutionStage::Adult,
+        PetMood::Happy,
+        0,
+        0,
+        PetGaze::Left,
+    );
+    let g_center = build_grid_with_gaze(
+        PetSpecies::MochiCat,
+        EvolutionStage::Adult,
+        PetMood::Happy,
+        0,
+        0,
+        PetGaze::Center,
+    );
+    let g_right = build_grid_with_gaze(
+        PetSpecies::MochiCat,
+        EvolutionStage::Adult,
+        PetMood::Happy,
+        0,
+        0,
+        PetGaze::Right,
+    );
+    assert_ne!(g_left, g_center);
+    assert_ne!(g_center, g_right);
+
+    // Verify sensory snapshot includes custom caretaker title
+    let snap = sense_environment(&pet, 0, LcdIcon::Food, 4, 1);
+    assert!(snap.sight.contains("Aqsan"));
 }
 
 #[test]
@@ -175,7 +230,7 @@ fn interactive_pet_dialogue_and_inner_thoughts_boost_bond_and_coins() {
     let mut pet = Pet::new_custom("Ignis", PetSpecies::IgnisDragon, ShellTheme::SunsetGold);
     pet.stage = EvolutionStage::Adult;
 
-    assert!(thought_bubble(&pet, 0).contains("💭"));
+    assert!(thought_bubble(&pet, 0).contains("👁") || thought_bubble(&pet, 0).contains("💭"));
     assert!(speech_bubble(&pet, 0).contains("💬"));
 
     let prompt = pet.dialogue_prompt(0);

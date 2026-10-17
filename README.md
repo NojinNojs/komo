@@ -1,97 +1,77 @@
-# 🍡 Mochigotchi v1.0.0 — Minimalist Retro Handheld V-Pet & 24×16 TrueColor Pixel Art Edition
+# 🌿 KOMO — Pocket Soul & Living Terminal Companion
 
-[![CI](https://github.com/NojinNojs/mochigotchi/actions/workflows/ci.yml/badge.svg)](https://github.com/NojinNojs/mochigotchi/actions/workflows/ci.yml)
+[![CI](https://github.com/NojinNojs/komo/actions/workflows/ci.yml/badge.svg)](https://github.com/NojinNojs/komo/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
-> **Your Cozy Pocket-Pet Sanctuary in the Terminal.**  
-> Play from anywhere in your terminal with `mochigotchi`, `mochi`, or `tamagotchi`! Features a **24×16 TrueColor Half-Block Pixel Art Engine (`▀`, `▄`, `█`)**, a **Minimalist Step-by-Step Retro Handheld LCD Interface**, and reverse-engineered authentic **Bandai Tamagotchi** mechanics (7-Icon Bezel, Hungry/Happy Hearts, Meal vs. Sweet Snack Weight & Toothache system, Room Light switch, Discipline Scold/Praise, Care Mistakes & Care Ranks).
+**KOMO** (*Komorebi Pocket Soul*) is a terminal virtual companion built with `ratatui` and `crossterm`. Your companion lives inside a centered retro handheld LCD frame, perceives its environment through four senses (`Sight`, `Hearing`, `Feeling`, `Speech`), looks left, right, and directly at you, addresses you by your chosen name, and enforces binding consequences if neglected.
+
+See [**GUIDE.md**](./GUIDE.md) for the complete Keeper's Handbook.
 
 ---
 
-## ✨ Highlights (EN)
+## Core Features
 
-1. **24×16 TrueColor Half-Block Pixel Art Engine (`▀`, `▄`, `█`)**:
-   - Every companion is rendered as a genuine **24×16 pixel bitmap** using Unicode half-blocks (`▀` upper half, `▄` lower half, `█` full block) where two vertical pixels pack into one terminal cell (`1:1` square pixel ratio).
-   - Hand-crafted pixel silhouettes across all **5 evolution stages** (`Egg` -> `Baby` -> `Teen` -> `Adult` -> `Starlight Elder`) and **6 moods** (`Idle`, `Eating`, `Sleeping`, `Happy`, `Sick`, `Training`), with dedicated eye-shine/pupil channels (`E`/`K`) so white fur, snow bellies, and clouds never flicker on blink.
+1. **40×22 TrueColor Pixel Art with 3-Way Gaze & Full-Body Poses**:
+   - **Three Gaze Directions (`Left ◀`, `Center ●`, `Right ▶`)**: Instead of only flipping left and right, your companion turns to look straight at you (`Center ●`) with two front-facing eyes when you type, speak with it, or when it pauses in the center of the room.
+   - **Full-Body Posture & Expressions**:
+     - **Sleeping Pose**: Lowers and curls onto a woven pixel sleeping mat on the habitat floor with slow breathing and rising `z Z` particles.
+     - **Hungry / Starving Slouch**: Drooping ears, watery eyes (`A`), and stomach-rumble waves (`G`) when Hungry Hearts drop low.
+     - **Full & Satisfied**: Contented curved eyes, rosy cheeks (`P`), and a rounded belly after eating.
+     - **Fever & Toothache**: Half-lidded eyes, flushed fever cheeks (`R`), and cold sweat drops.
 
-2. **Minimalist, Step-by-Step Retro Handheld LCD UI**:
-   - Centered **74×25 Retro Handheld V-Pet Frame** (`BorderType::Double` casing + `BorderType::Rounded` inner LCD, minimum viewport `68 × 22`).
-   - **Step-by-Step Onboarding**: `Step 1 of 3` (Select Companion with live pixel preview) -> `Enter` -> switches screen to `Step 2 of 3` (Select Shell Color) -> `Enter` -> switches screen to `Step 3 of 3` (Name & Hatch).
-   - **Focused Single-Screen Habitat**: The main LCD screen stays clean and uncluttered; opening the **4-Page Status Meter (`[I]`)**, **Pantry (`[M]`)**, **Sanctuary Roster (`[L]`)**, **Arcade (`[G]`)**, or **Keys Guide (`[?]`)** transitions step-by-step inside the LCD screen.
+2. **Four Living Senses & Window Diorama**:
+   - `👁 Sight`: Watches which bezel icon you highlight, tracks the room lamp, and observes the weather outside the sanctuary window (`DAY`, `BREEZE`, `RAIN`, `NIGHT`).
+   - `👂 Hearing`: Reacts to your keyboard rhythm—perks an ear at steady typing, startles at rapid button-mashing, and listens to rain or crickets when quiet.
+   - `🫳 Feeling`: Reports internal state (stomach cramps, warmth, molar pain, fatigue, and attachment to you).
+   - `💬 Speech`: Grounded, natural English dialogue without clichés or AI-slop.
 
-3. **Reverse-Engineered Authentic Bandai Tamagotchi Mechanics**:
-   - **7 Interactive LCD Bezel Icons**: `🍙Food`, `💡Light`, `🎮Game`, `💉Meds`, `🚽Bath`, `📏Meter`, `📢Scold` (navigate with Button A `←`/`→`, confirm with Button B `Enter`, cancel with Button C `Esc`).
-   - **Meals vs. Sweet Snacks, Weight (`g`) & Toothache (`🦷`)**: Meals fill Hungry Hearts (`♥♥♥♥ 4/4`) and add `+1..2g` weight; Sweet Snacks fill Happy Hearts and add `+2..3g` weight, but **3 sweet snacks in a row** trigger a **Toothache (`🦷`)** requiring **Medicine (`💉 [H]`)**! Play (`[P]`) or Train (`[E]`) to burn `-2g` weight.
-   - **Room Light Switch (`💡 [K]`), Discipline (`📢 [D]` / `[T]`), Care Mistakes & Care Ranks**: Turn the light OFF (`[K]`) when your pet sleeps (`[S]`), scold (`[D]`) mischievous attention calls, praise (`[T]`) crying calls, and earn a **Tamagotchi Care Rank** (`👑 S-Rank Perfect Keeper` .. `🩹 C-Rank Rascal`)!
-   - **10 Collectible Companions & Fair Sanctuary Standby Care**: Collect 4 *Cozy Classics* (`🐱 Neko Mochi`, `🐶 Boba Pup`, `🐰 Cloud Bun`, `🐧 Star Pengu`) and 6 *Mythical & Fantasy* companions (`🐉 Ignis Drake`, `🐲 Azure Wyrm`, `🦊 Kitsune Nine`, `🦅 Sol Phoenix`, `🦄 Astra Unicorn`, `👑 Royal Jelly`). Inactive companions in your Sanctuary rest in standby care so they never accumulate unfair care mistakes.
+3. **Custom Caretaker Name (`[O]` / `--call-me`)**:
+   - Choose what your companion calls you during Onboarding (`Step 3 of 3` via `Tab`), in-game by pressing `[O]`, or from the CLI via `komo --call-me Aqsan`.
 
----
-
-## 🇮🇩 Fitur Unggulan (Bahasa Indonesia)
-
-1. **Mesin Pixel Art 24×16 TrueColor (`▀`, `▄`, `█`)**:
-   - Menggantikan ASCII garis miring dengan **bitmap piksel 24×16** berbasis *Unicode half-block* (`▀`, `▄`, `█`) yang presisi 1:1 di semua font terminal (Ghostty, Kitty, WezTerm, Alacritty).
-2. **UI Retro Handheld Minimalis & Murni Step-by-Step**:
-   - Satu layar satu fokus: mulai dari pemilihan pet (`Step 1/3` -> `Step 2/3` -> `Step 3/3`) hingga layar Habitat dan **4 Halaman Status Meter (`[I]`)** semuanya berganti halaman secara bersih tanpa menumpuk banyak kotak sekaligus.
-3. **Mekanik Asli Bandai Tamagotchi & Multi-Pet Sanctuary**:
-   - Lengkap dengan sistem **Meal vs. Sweet Snack**, **Berat Badan (`g`)**, **Sakit Gigi (`🦷`)**, **Saklar Lampu Kamar (`[K]`)**, **Discipline (`[D]` Scold / `[T]` Praise)**, **Care Rank (`S/A/B/C`)**, **Welcome-Back Offline Report**, serta penyimpanan ganda atomik (JSON + SQLite) di `~/.local/share/mochigotchi/`.
+4. **Real, Binding Consequences & The Memorial Hall**:
+   - **Action Abuse Penalties**: Force-feeding a full companion (`4/4 ♥`) causes stomach cramps (`-Health`, `-Bond`, `+1 Care Mistake`). Scolding (`[D]`) when not misbehaving damages trust and makes your companion turn away from you. Three sweet snacks in a row cause a **Toothache** requiring Medicine (`[H]`).
+   - **One-Time Phoenix Tear (`[H]`)**: A fallen companion can only be revived **once in its entire lifetime** (`revival_count: 0 -> 1`), costing up to `50 coins` and adding `+3 Care Mistakes`. A second death is permanent.
+   - **Mandatory 3-Step Burial Vigil (`[B]`)**: You cannot adopt a new companion (`[N]`) while a fallen companion lies unburied. You must complete the 3-step Burial Vigil Rite (`[B]`) to lay them to rest in the permanent **Sanctuary Memorial Hall** and accept the `-15 Caretaker Karma` penalty.
 
 ---
 
-## ⌨️ Controls / Tombol Kontrol
+## Controls
 
 | Key | Action |
-|---|---|
-| `←` / `→` (Button A) | Select icon on the 7-Icon Tamagotchi LCD Bezel |
-| `Enter` / `B` (Button B) | Open / confirm highlighted LCD Bezel Icon |
-| `Esc` (Button C) | Return to main LCD Habitat / close subscreen |
-| `W` / `Space` | Warm egg (`+20%`, 3m cooldown) or cuddle hatched companion |
-| `F` | Quick-feed Meal (`+1 Hungry ♥`, `+1g weight`, resets sweet streak) |
-| `M` | Open the **Pantry Screen** (5 Meals & Sweet Snacks) |
-| `K` | Toggle **Room Light ON / OFF** (`💡Light` / `🌙Dark`) |
-| `P` | Play Left/Right Game (`+Happy`, `-2g weight`, `+5 coins`) |
-| `D` | **Discipline / Scold** (`+25% Discipline` during a spoiled call) |
-| `T` | **Praise / Headpat** (`+15% Discipline` when crying, or `+Happy`) |
-| `E` | Training session (`-2g weight`, `+8% Discipline`, `+22 XP`, 4m cooldown) |
-| `S` | Tuck into bed / Wake up |
-| `C` | Flush toilet (`🚽`), brush teeth & warm bubble bath |
-| `H` | Give **Medicine (`💉`)** — cures sickness & toothache (`🦷`) |
-| `I` | Open **4-Page Tamagotchi Status Meter** (`←`/`→` or `Space` to flip pages) |
-| `G` | Play the **Snack Catcher** mini-game arcade |
-| `N` | Adopt an additional companion into your Sanctuary |
-| `L` | Open **Sanctuary Roster** to browse & switch companions |
-| `[` / `]` | Cycle active companion directly from the habitat |
-| `Tab` | Cycle LCD shell colorway |
-| `R` | Rename active companion |
-| `?` | Open in-game Tamagotchi Hardware & Keys Guide |
-| `Q` / `Esc` | Auto-save (JSON + SQLite) & quit |
+| :--- | :--- |
+| `←` / `→` then `Enter` | Select and open an icon on the 8-icon LCD Bezel |
+| `W` / `Space` | Warm unhatched egg (`+20%`) or cuddle hatched companion |
+| `F` / `M` | Feed favorite meal (`F`) or open the 5-item Pantry (`M`) |
+| `Y` | Open Heart-to-Heart Dialogue screen (`1` / `2` to reply) |
+| `P` / `G` | Play Left/Right match (`P`) or open the 3-in-1 Retro Arcade (`G`) |
+| `E` | Run a discipline & strength training drill |
+| `S` / `K` | Toggle Sleep on the woven mat (`S`) / Toggle Room Lamp (`K`) |
+| `C` | Wash habitat floor, brush teeth, and take a warm bath |
+| `D` / `T` | Scold spoiled call (`D`) / Praise & comfort crying call (`T`) |
+| `H` / `B` | Herbal Medicine or 1-time Phoenix Tear (`H`) / 3-step Burial Vigil (`B`) |
+| `O` / `R` | Set what your companion calls you (`O`) / Rename companion (`R`) |
+| `I` / `L` / `N` | 4-page Status Meter (`I`) / Sanctuary Roster (`L`) / Adopt (`N`) |
+| `U` / `Tab` / `?` | Toggle 8-bit audio (`U`) / Cycle shell color (`Tab`) / Help (`?`) |
 
 ---
 
-## 🚀 Installation & CLI Usage
+## Installation & CLI Usage
 
 ```bash
 cargo build --release
-cp target/release/mochigotchi ~/.local/bin/mochigotchi
-ln -sf ~/.local/bin/mochigotchi ~/.local/bin/mochi
-ln -sf ~/.local/bin/mochigotchi ~/.local/bin/tamagotchi
+cp target/release/mochigotchi ~/.local/bin/komo
 ```
 
-### Terminal Commands
-
 ```bash
-mochigotchi                           # Launch interactive Retro Handheld TUI
-mochi                                 # Short alias
-tamagotchi                            # Classic alias
-mochigotchi --version                 # Print version (1.0.0)
-mochigotchi --status                  # Print active companion summary & pixel art
-mochigotchi --roster                  # List all companions in your Sanctuary
-mochigotchi --adopt --species dragon --theme gold --name Ignis
-mochigotchi --switch 2                # Switch active companion by index or name
+komo                                  # Launch interactive handheld TUI
+komo --call-me Aqsan                  # Set how your companion addresses you
+komo --status                         # Print live vitals, 4 senses, and 40x22 sprite
+komo --roster                         # List Sanctuary companions & Memorial Hall
+komo --vigil                          # Advance 1 step of the Burial Vigil Rite
 ```
 
 ---
 
-## 📄 License
+## License
 
 Released under the [MIT License](./LICENSE).

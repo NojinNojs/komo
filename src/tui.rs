@@ -32,10 +32,11 @@ use crate::pet::{
     format_duration_human, format_hearts, AttentionCall, EvolutionStage, FoodChoice, LcdIcon,
     OfflineReport, Pet, PetSpecies, Sanctuary, ShellTheme,
 };
+use crate::senses::sense_environment;
 use crate::sound::{SoundEffect, SoundEngine};
 use crate::sprites::{
     mood_color, render_colored_preview, render_colored_sprite, sky_scene, speech_bubble,
-    species_palette, stage_color, theme_color, thought_bubble,
+    species_palette, stage_color, theme_color,
 };
 use crate::storage::{save_sanctuary, StoragePaths};
 
@@ -106,11 +107,16 @@ pub struct App {
     pub show_help: bool,
     pub offline_report: Option<OfflineReport>,
     pub onboarding_name_input: String,
+    pub onboarding_caretaker_input: String,
+    pub onboarding_edit_caretaker: bool,
     pub adopting_new: bool,
     pub tick_count: usize,
+    pub recent_key_ticks: u8,
+    pub key_burst: u8,
     pub should_quit: bool,
     pub minigame: Option<MiniGame>,
     pub rename_buffer: Option<String>,
+    pub caretaker_buffer: Option<String>,
     pub last_storage_status: String,
 }
 
@@ -125,6 +131,7 @@ impl App {
         start_onboarding: bool,
     ) -> Self {
         let pet = sanctuary.active_pet().clone();
+        let caretaker_default = pet.caretaker_label().to_string();
         let selected_species_idx = PetSpecies::all()
             .iter()
             .position(|s| *s == pet.species)
@@ -159,11 +166,16 @@ impl App {
             show_help: false,
             offline_report: None,
             onboarding_name_input: String::new(),
+            onboarding_caretaker_input: caretaker_default,
+            onboarding_edit_caretaker: false,
             adopting_new: false,
             tick_count: 0,
+            recent_key_ticks: 0,
+            key_burst: 0,
             should_quit: false,
             minigame: None,
             rename_buffer: None,
+            caretaker_buffer: None,
             last_storage_status: "💾 saved".to_string(),
         }
     }
@@ -173,10 +185,13 @@ impl App {
             Self::new_with_sanctuary(Sanctuary::new_with_pet(Pet::new("Mochi")), paths, true);
         app.preview_stage_idx = 0;
         app.onboarding_name_input = "Mochi".to_string();
+        app.onboarding_caretaker_input = "Keeper".to_string();
+        app.onboarding_edit_caretaker = false;
         app
     }
 
     pub fn save_now(&mut self) {
+        self.sanctuary.record_memorial_if_buried(&self.pet);
         self.sanctuary.sync_active(&self.pet);
         match save_sanctuary(&self.sanctuary, &self.paths) {
             Ok(()) => self.last_storage_status = "💾 saved".to_string(),
@@ -239,6 +254,19 @@ impl App {
     }
 
     fn start_adopting(&mut self) {
+        self.sanctuary.record_memorial_if_buried(&self.pet);
+        self.sanctuary.sync_active(&self.pet);
+        if let Err(reason) = self.sanctuary.can_adopt_new() {
+            self.sound.play(SoundEffect::ErrorBuzz);
+            self.pet.log_action(reason.clone());
+            self.pet.set_pet_reaction(
+                crate::pet::PetAction::Heal,
+                format!("💬 \"{reason}\""),
+                "💭 (Accountability: A fallen companion must be revived [H] or laid to rest [B] before adopting anew.)".to_string(),
+                Some(crate::pet::PetMood::PassedOut),
+            );
+            return;
+        }
         self.adopting_new = true;
         self.pantry_open = false;
         self.talk_open = false;
@@ -251,6 +279,8 @@ impl App {
         self.preview_stage_idx = 0;
         self.preview_auto_morph = true;
         self.onboarding_name_input = PetSpecies::all()[0].default_name().to_string();
+        self.onboarding_caretaker_input = self.pet.caretaker_label().to_string();
+        self.onboarding_edit_caretaker = false;
         self.sound.play(SoundEffect::BeepConfirm);
     }
 
@@ -345,7 +375,11 @@ impl App {
     }
 
     pub fn handle_key(&mut self, code: KeyCode) {
+        self.recent_key_ticks = 8;
+        self.key_burst = self.key_burst.saturating_add(1).min(12);
+
         if self.rename_buffer.is_none()
+            && self.caretaker_buffer.is_none()
             && !(self.screen == AppScreen::Onboarding
                 && self.onboarding_step == OnboardingStep::EnterName)
             && matches!(code, KeyCode::Char('u') | KeyCode::Char('U'))
@@ -405,6 +439,11 @@ impl App {
 
         if self.rename_buffer.is_some() {
             self.handle_rename_key(code);
+            return;
+        }
+
+        if self.caretaker_buffer.is_some() {
+            self.handle_caretaker_key(code);
             return;
         }
 
@@ -516,6 +555,28 @@ impl App {
         }
     }
 
+    fn handle_caretaker_key(&mut self, code: KeyCode) {
+        let mut buffer = self.caretaker_buffer.take().unwrap_or_default();
+        match code {
+            KeyCode::Enter => {
+                self.pet.set_caretaker_title(&buffer);
+                self.sanctuary.set_caretaker_title_all(&buffer);
+                self.sound.play(SoundEffect::BeepConfirm);
+                self.save_now();
+            }
+            KeyCode::Esc => {}
+            KeyCode::Backspace => {
+                buffer.pop();
+                self.caretaker_buffer = Some(buffer);
+            }
+            KeyCode::Char(c) if buffer.chars().count() < 18 => {
+                buffer.push(c);
+                self.caretaker_buffer = Some(buffer);
+            }
+            _ => self.caretaker_buffer = Some(buffer),
+        }
+    }
+
     fn handle_onboarding_key(&mut self, code: KeyCode) {
         let species_count = PetSpecies::all().len();
         let theme_count = ShellTheme::all().len();
@@ -590,15 +651,29 @@ impl App {
             },
             OnboardingStep::EnterName => match code {
                 KeyCode::Enter => self.finish_adoption(),
+                KeyCode::Tab | KeyCode::Up | KeyCode::Down => {
+                    self.sound.play(SoundEffect::BeepMove);
+                    self.onboarding_edit_caretaker = !self.onboarding_edit_caretaker;
+                }
                 KeyCode::Backspace => {
-                    self.onboarding_name_input.pop();
+                    if self.onboarding_edit_caretaker {
+                        self.onboarding_caretaker_input.pop();
+                    } else {
+                        self.onboarding_name_input.pop();
+                    }
                 }
                 KeyCode::Esc | KeyCode::BackTab => {
                     self.sound.play(SoundEffect::BeepMove);
                     self.onboarding_step = OnboardingStep::SelectTheme;
                 }
-                KeyCode::Char(c) if self.onboarding_name_input.chars().count() < 18 => {
-                    self.onboarding_name_input.push(c);
+                KeyCode::Char(c) => {
+                    if self.onboarding_edit_caretaker {
+                        if self.onboarding_caretaker_input.chars().count() < 18 {
+                            self.onboarding_caretaker_input.push(c);
+                        }
+                    } else if self.onboarding_name_input.chars().count() < 18 {
+                        self.onboarding_name_input.push(c);
+                    }
                 }
                 _ => {}
             },
@@ -609,15 +684,22 @@ impl App {
         let species = PetSpecies::all()[self.selected_species_idx];
         let theme = ShellTheme::all()[self.selected_theme_idx];
         let name = self.onboarding_name_input.trim().to_string();
-        let new_pet = Pet::new_custom(&name, species, theme);
+        let caretaker = self.onboarding_caretaker_input.trim().to_string();
+        let mut new_pet = Pet::new_custom(&name, species, theme);
+        if !caretaker.is_empty() {
+            new_pet.caretaker_title = caretaker.clone();
+        }
 
         if self.adopting_new {
             self.sanctuary.add_pet(new_pet.clone());
+            if !caretaker.is_empty() {
+                self.sanctuary.set_caretaker_title_all(&caretaker);
+            }
         } else {
             self.sanctuary = Sanctuary::new_with_pet(new_pet.clone());
         }
 
-        self.pet = new_pet;
+        self.pet = self.sanctuary.active_pet().clone();
         self.roster_selected_idx = self.sanctuary.active_index;
         self.adopting_new = false;
         self.screen = AppScreen::Habitat;
@@ -748,8 +830,18 @@ impl App {
                 self.sound.play(SoundEffect::BeepMove);
                 self.selected_icon_idx = (self.selected_icon_idx + icon_count + 1) % icon_count;
             }
-            KeyCode::Enter | KeyCode::Char('b') | KeyCode::Char('B') => {
+            KeyCode::Enter => {
                 self.activate_selected_lcd_icon();
+            }
+            KeyCode::Char('b') | KeyCode::Char('B') => {
+                if !self.pet.is_alive {
+                    let msg = self.pet.hold_vigil_step();
+                    self.sanctuary.record_memorial_if_buried(&self.pet);
+                    self.play_feedback_for_message(&msg, false);
+                    self.save_now();
+                } else {
+                    self.activate_selected_lcd_icon();
+                }
             }
             KeyCode::Char('?') => {
                 self.sound.play(SoundEffect::BeepConfirm);
@@ -849,6 +941,9 @@ impl App {
             KeyCode::Char('r') | KeyCode::Char('R') => {
                 self.rename_buffer = Some(self.pet.name.clone());
             }
+            KeyCode::Char('o') | KeyCode::Char('O') => {
+                self.caretaker_buffer = Some(self.pet.caretaker_label().to_string());
+            }
             KeyCode::Tab => {
                 self.sound.play(SoundEffect::BeepMove);
                 self.pet.theme = self.pet.theme.next();
@@ -860,6 +955,12 @@ impl App {
 
     pub fn on_tick(&mut self) {
         self.tick_count = self.tick_count.wrapping_add(1);
+        if self.recent_key_ticks > 0 {
+            self.recent_key_ticks -= 1;
+            if self.recent_key_ticks == 0 {
+                self.key_burst = 0;
+            }
+        }
 
         if self.screen == AppScreen::Onboarding
             && self.onboarding_step == OnboardingStep::SelectSpecies
@@ -1304,26 +1405,53 @@ fn draw_onboarding_step_screen(f: &mut Frame, device: Rect, app: &App) {
                 zones[1],
             );
 
+            let name_style = if !app.onboarding_edit_caretaker {
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::LightYellow)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::White)
+            };
+            let caretaker_style = if app.onboarding_edit_caretaker {
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::LightCyan)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::White)
+            };
             let bottom_lines = vec![
-                Line::from(Span::styled(
-                    "Enter a name for your new companion:",
-                    Style::default().fg(Color::White),
-                )),
+                Line::from(vec![
+                    Span::styled("Companion Name: ", Style::default().fg(Color::Gray)),
+                    Span::styled(
+                        format!(
+                            " [ {}{} ] ",
+                            app.onboarding_name_input,
+                            if !app.onboarding_edit_caretaker { "▏" } else { "" }
+                        ),
+                        name_style,
+                    ),
+                ]),
+                Line::from(vec![
+                    Span::styled("Call You As:    ", Style::default().fg(Color::Gray)),
+                    Span::styled(
+                        format!(
+                            " [ {}{} ] ",
+                            app.onboarding_caretaker_input,
+                            if app.onboarding_edit_caretaker { "▏" } else { "" }
+                        ),
+                        caretaker_style,
+                    ),
+                ]),
                 Line::from(""),
                 Line::from(Span::styled(
-                    format!("   [  {}▏  ]   ", app.onboarding_name_input),
-                    Style::default()
-                        .fg(Color::Black)
-                        .bg(Color::LightYellow)
-                        .add_modifier(Modifier::BOLD),
-                )),
-                Line::from(""),
-                Line::from(Span::styled(
-                    "[Enter] Adopt & Start   [Backspace] Edit   [Esc] Back",
+                    "[Tab] Switch Field   [Enter] Adopt & Start   [Backspace] Edit   [Esc] Back",
                     Style::default()
                         .fg(Color::LightGreen)
                         .add_modifier(Modifier::BOLD),
                 )),
+                Line::from(""),
             ];
             f.render_widget(
                 Paragraph::new(Text::from(bottom_lines)).alignment(Alignment::Center),
@@ -1342,9 +1470,10 @@ fn draw_habitat_screen(f: &mut Frame, device: Rect, app: &App) {
     let selected_icon = LcdIcon::selectable()[app.selected_icon_idx % LcdIcon::selectable().len()];
 
     let shell_title = format!(
-        "🍡 MOCHIGOTCHI • {} ({}) • {}",
+        "🌿 KOMO • {} ({}) • KEEPER: {} • {}",
         pet.name.to_uppercase(),
         pet.species.display_name(),
+        pet.caretaker_label().to_uppercase(),
         app.sound.status_badge()
     );
     let shell = outer_shell_block(&shell_title, pet.theme);
@@ -1367,7 +1496,10 @@ fn draw_habitat_screen(f: &mut Frame, device: Rect, app: &App) {
 
     let (sky, _) = sky_scene(app.tick_count);
     let lcd_title = if !pet.is_alive {
-        format!("👻 SPIRIT MEMORIAL  •  {}  •  PRESS [H] TO REVIVE", pet.name)
+        format!(
+            "🕯 MEMORIAL VIGIL ({}/3)  •  {}  •  [B] VIGIL / [H] REVIVE",
+            pet.vigil_steps_completed, pet.name
+        )
     } else if pet.stage == EvolutionStage::Egg {
         format!(
             "{}  •  🥚 EGG ({}% WARM)  •  {}",
@@ -1399,7 +1531,24 @@ fn draw_habitat_screen(f: &mut Frame, device: Rect, app: &App) {
         ])
         .split(lcd_inner);
 
-    // Zone 1: Thought/Activity Bubble (`💭`) + First-Person Speech Bubble (`💬`) + Spacer
+    // Zone 1: Live Sensory Perception (`👁 Sight / 👂 Hearing / 🫳 Feeling`) + Speech (`💬`)
+    let snap = sense_environment(
+        pet,
+        app.tick_count,
+        selected_icon,
+        app.recent_key_ticks,
+        app.key_burst,
+    );
+    let sensory_line = if let Some(ref thought) = pet.last_pet_thought {
+        thought.clone()
+    } else {
+        match (app.tick_count / 28) % 3 {
+            0 => format!("👁 Sight ({}) • {}", snap.gaze.label(), snap.sight),
+            1 => format!("👂 Hearing • {}", snap.hearing),
+            _ => format!("🫳 Feeling • {}", snap.feeling),
+        }
+    };
+
     let speech_line = if !pet.light_on && pet.is_alive && pet.last_pet_speech.is_none() {
         Line::from(Span::styled(
             "🌙 [ ROOM LIGHT OFF — NIGHT MODE ]",
@@ -1416,7 +1565,7 @@ fn draw_habitat_screen(f: &mut Frame, device: Rect, app: &App) {
 
     let bubble_lines = vec![
         Line::from(Span::styled(
-            thought_bubble(pet, app.tick_count),
+            sensory_line,
             Style::default().fg(Color::LightCyan),
         )),
         speech_line,
@@ -1490,9 +1639,19 @@ fn draw_habitat_screen(f: &mut Frame, device: Rect, app: &App) {
     let footer_lines = if let Some(buf) = app.rename_buffer.as_ref() {
         vec![
             Line::from(Span::styled(
-                format!("🔖 Rename: [ {buf}▏ ]  (Enter = Save, Esc = Cancel)"),
+                format!("🔖 Rename Companion: [ {buf}▏ ]  (Enter = Save, Esc = Cancel)"),
                 Style::default()
                     .fg(Color::LightYellow)
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::from(""),
+        ]
+    } else if let Some(buf) = app.caretaker_buffer.as_ref() {
+        vec![
+            Line::from(Span::styled(
+                format!("🔖 Call You As: [ {buf}▏ ]  (Enter = Save, Esc = Cancel)"),
+                Style::default()
+                    .fg(Color::LightCyan)
                     .add_modifier(Modifier::BOLD),
             )),
             Line::from(""),
@@ -1504,7 +1663,7 @@ fn draw_habitat_screen(f: &mut Frame, device: Rect, app: &App) {
                 Style::default().fg(Color::LightGreen),
             )),
             Line::from(Span::styled(
-                "[W] Warm  [Y] Talk  [I] Meter  [L] Pets  [N] Adopt  [U] Sound  [?] Keys",
+                "[W] Warm  [Y] Talk  [O] Call-Me  [I] Meter  [L] Pets  [U] Sound  [?] Keys",
                 Style::default().fg(Color::DarkGray),
             )),
         ]
@@ -1515,7 +1674,7 @@ fn draw_habitat_screen(f: &mut Frame, device: Rect, app: &App) {
                 Style::default().fg(Color::LightGreen),
             )),
             Line::from(Span::styled(
-                "[←/→+Enter] Bezel  [F] Meal  [Y] Talk  [G] Arcade  [I] Meter  [U] Sound  [?] Keys",
+                "[←/→+Enter] Bezel  [F] Meal  [Y] Talk  [O] Call-Me  [G] Arcade  [I] Meter  [?] Keys",
                 Style::default().fg(Color::DarkGray),
             )),
         ]
@@ -1693,9 +1852,10 @@ fn draw_meter_screen(f: &mut Frame, device: Rect, app: &App) {
                 )));
                 lines.push(Line::from(""));
                 lines.push(Line::from(format!(
-                    " • Companion: {} ({})",
+                    " • Companion: {} ({})   •   Calls You: '{}'",
                     pet.name,
-                    pet.species.display_name()
+                    pet.species.display_name(),
+                    pet.caretaker_label()
                 )));
                 lines.push(Line::from(format!(
                     " • Emotion:   {}   •   Stage: {} (Lv.{} • {} XP)",
@@ -1830,17 +1990,22 @@ fn draw_meter_screen(f: &mut Frame, device: Rect, app: &App) {
             }
             _ => {
                 lines.push(Line::from(Span::styled(
-                    "PAGE 4/4  •  EVOLUTION GOAL & CARE DIARY",
+                    "PAGE 4/4  •  EVOLUTION GOAL, MEMORIALS & CARE DIARY",
                     Style::default()
                         .fg(Color::LightMagenta)
                         .add_modifier(Modifier::BOLD),
                 )));
-                lines.push(Line::from(""));
                 lines.push(Line::from(Span::styled(
                     pet.next_evolution_requirements(),
                     Style::default().fg(Color::LightYellow),
                 )));
-                lines.push(Line::from(""));
+                lines.push(Line::from(format!(
+                    "Keeper: '{}'  •  Karma: {:+}  •  Memorials: {}  •  Revivals Used: {}/1",
+                    pet.caretaker_label(),
+                    app.sanctuary.caretaker_karma,
+                    app.sanctuary.memorials.len(),
+                    pet.revival_count
+                )));
                 lines.push(Line::from(Span::styled(
                     "Recent Care Diary:",
                     Style::default().fg(Color::White),
@@ -2002,8 +2167,8 @@ fn draw_help_screen(f: &mut Frame, device: Rect, app: &App) {
                 .add_modifier(Modifier::BOLD),
         )),
         Line::from(" • [S] Sleep + [K] Light OFF • [C] Bath • [D] Scold"),
-        Line::from(" • [H] Medicine / Phoenix Tear Revival • [U] Sound"),
-        Line::from(" • [L] Sanctuary Pets • [N] Adopt • [R] Rename"),
+        Line::from(" • [H] Medicine / Phoenix Tear (1× max) • [B] 3-Step Vigil"),
+        Line::from(" • [O] Custom Caretaker Name • [R] Rename Pet • [L] Roster"),
         Line::from(""),
         Line::from(Span::styled(
             "[Esc / Enter / ?] Return to Habitat",
