@@ -1,6 +1,7 @@
 /target/
 save.json
 rustagotchi.db
+mochigotchi.db
 *.db-journal
 *.db-wal
 *.db-shm

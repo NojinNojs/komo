@@ -1,209 +1,139 @@
-# 🦀 Rustagotchi — Terminal Virtual Pet for Developers
+# 🍓 Mochigotchi (`mochigotchi`)
 
-```text
-  ____            _                   _       _     _ 
- |  _ \ _   _ ___| |_ __ _  __ _  ___| |_ ___| |__ (_)
- | |_) | | | / __| __/ _` |/ _` |/ _ \ __/ __| '_ \| |
- |  _ <| |_| \__ \ || (_| | (_| | (_) | || (__| | | | |
- |_| \_\\__,_|___/\__\__,_|\__, |\___/ \__\___|_| |_|_|
-                           |___/                       
-```
-
-> **[English](#english) | [Bahasa Indonesia](#bahasa-indonesia)**
+> **EN:** A full-featured, kawaii virtual pet & Tamagotchi LCD simulator for your terminal, built in Rust with `ratatui` and `crossterm`.  
+> **ID:** Simulator hewan peliharaan virtual bergaya Tamagotchi LCD kawaii yang lengkap di terminal Anda, dibangun dengan Rust menggunakan `ratatui` dan `crossterm`.
 
 ---
 
-<a name="english"></a>
-## 🌐 English
+## ✨ Key Features / Fitur Utama
 
-**Rustagotchi** is a retro-futuristic terminal virtual pet (Tamagotchi) built in pure Rust with **Ratatui** and **Crossterm**. Designed as a coding companion for developers, your pet lives inside your terminal, evolves as you write code, gains XP and coins whenever you make `git commit`s, plays an interactive terminal mini-game, and persists its state automatically across both **SQLite** and **JSON**.
+### 🇬🇧 English
+- **4 Adorable Species:** Choose between **🐱 Neko Mochi**, **🐶 Boba Pup**, **🐰 Cloud Bun**, and **🐧 Star Pengu**, each with unique multi-frame ASCII sprites, default names, and favorite snacks.
+- **5 Pastel LCD Shell Themes:** Customize your virtual Tamagotchi casing with **🍓 Strawberry Pink**, **🍵 Matcha Green**, **☁️ Sky Blue**, **💜 Lavender Dream**, or **✨ Sunset Gold** (cycle live anytime with `Tab`).
+- **5 Evolution Stages & Interactive Egg Incubation:**
+  - `Egg` (0 XP) → `Baby` (50 XP) → `Teen` (150 XP) → `Adult` (350 XP) → `Starlight Elder` (700 XP).
+  - Newly adopted pets start inside an **unhatched Egg (`🥚`)** and must be warmed (`[W] Warm Egg`) 4 times to hatch before eating, playing, or training!
+- **Authentic Anti-Spam Care Mechanics:**
+  - Full pets (`hunger >= 95`) refuse extra meals.
+  - Max happiness pets (`happiness >= 98`) enjoy cuddles without infinite XP farming.
+  - Feeding every 2 meals produces poop (`💩`) that lowers cleanliness until scrubbed (`[C] Clean`).
+  - Tired, hungry, sleeping, or sick pets refuse strenuous play/training until rested or healed.
+- **Built-in Snack & Star Catcher Mini-Game (`[G]`):** Move your basket (`\===/`) left and right to catch falling Taiyaki (`🐟`), Strawberries (`🍓`), and Shooting Stars (`⭐`) for bonus Coins, XP, and combo multipliers while dodging Bombs (`💣`)!
+- **Responsive 3-Tier TUI Layout:** Adapts automatically to **Compact** (`< 78 cols`), **Standard** (`78..109 cols`), and **Wide Deluxe** (`>= 110 cols`) terminals.
+- **Dual Persistence & Real-Time Offline Decay:** Automatically saves state to both human-readable **JSON** and **SQLite** databases, calculating offline stat decay and sleep recovery when you return.
 
-### ✨ Terminal Dashboard Preview
+### 🇮🇩 Bahasa Indonesia
+- **4 Spesies Menggemaskan:** Pilih antara **🐱 Neko Mochi**, **🐶 Boba Pup**, **🐰 Cloud Bun**, dan **🐧 Star Pengu**, masing-masing dengan animasi sprite ASCII multi-frame, nama bawaan, dan camilan favorit.
+- **5 Tema Casing LCD Pastel:** Sesuaikan tampilan perangkat Tamagotchi Anda dengan **🍓 Strawberry Pink**, **🍵 Matcha Green**, **☁️ Sky Blue**, **💜 Lavender Dream**, atau **✨ Sunset Gold** (ganti kapan saja dengan tombol `Tab`).
+- **5 Tahap Evolusi & Inkubasi Telur Interaktif:**
+  - `Egg` (0 XP) → `Baby` (50 XP) → `Teen` (150 XP) → `Adult` (350 XP) → `Starlight Elder` (700 XP).
+  - Peliharaan baru dimulai dari **Telur (`🥚`)** yang harus dihangatkan (`[W] Warm Egg`) 4 kali hingga menetas sebelum bisa diberi makan, diajak bermain, atau berlatih.
+- **Mekanisme Perawatan Anti-Spam Otentik:**
+  - Peliharaan yang kenyang (`hunger >= 95`) menolak makanan tambahan.
+  - Setiap 2 kali makan menghasilkan kotoran (`💩`) yang menurunkan kebersihan kamar hingga dibersihkan (`[C] Clean`).
+  - Peliharaan yang lelah, lapar, tidur, atau sakit menolak bermain/berlatih hingga pulih.
+- **Mini-Game Snack & Star Catcher (`[G]`):** Gerakkan keranjang (`\===/`) ke kiri dan kanan untuk menangkap Taiyaki (`🐟`), Stroberi (`🍓`), dan Bintang Jatuh (`⭐`) demi Koin & XP ekstra sambil menghindari Bom (`💣`)!
+- **Tampilan TUI Responsif 3 Tingkat:** Menyesuaikan ukuran terminal secara otomatis untuk mode **Compact**, **Standard**, dan **Wide Deluxe**.
+- **Penyimpanan Ganda (JSON + SQLite) & Perhitungan Waktu Offline:** Menyimpan progres secara otomatis ke file JSON dan database SQLite, serta menghitung perubahan status selama Anda menutup aplikasi.
 
-```text
-┌─ 🦀 Rustagotchi: Ferris [Stage: Teen | Lv.4 | Coins: 65 | Commits: 7] ───────────────┐
-│┌─ Pet Habitat ───────────────────────────┐┌─ Vital Signs & XP ──────────────────────┐│
-││        ✨  🦀  ✨                       ││ Hunger      [████████████████░░░░]  80% ││
-││       /=========\                       ││ Happiness   [██████████████████░░]  90% ││
-││      |  ^     ^  |   " git commit       ││ Energy      [██████████████░░░░░░]  70% ││
-││      |   \___/   |     tastes great! "  ││ Health      [████████████████████] 100% ││
-││     /|  [RUST]   |\                     ││ Cleanliness [██████████████████░░]  95% ││
-││      |___________|                      ││ Stage XP    [████████████░░░░░░░░]  60% ││
-││       /         \                       ││ Mood: Happy  | Age: 2h 15m              ││
-│└─────────────────────────────────────────┘└─────────────────────────────────────────┘│
-│┌─ Activity Log & Controls ──────────────────────────────────────────────────────────┐│
-││ • Fed commit `a1b2c3d feat: add sqlite persistence` (+40 XP, +20 Coins!)           ││
-││ • Played Bug Catcher mini-game! Score: 85 (+25 Coins, +35 XP)                      ││
-││ [F]eed [P]lay [S]leep [C]lean [K]Code [H]eal [G]itSync [M]iniGame [R]ename [Q]uit  ││
-│└────────────────────────────────────────────────────────────────────────────────────┘│
-└──────────────────────────────────────────────────────────────────────────────────────┘
-```
+---
 
-### 🚀 Key Features
-
-- **5 Evolution Stages (`Egg → Baby → Teen → Adult → CyberElder`)**:
-  Unlock multi-frame animated ASCII sprites, new speech bubbles, and stat bonuses as your pet levels up:
-  - `Egg` (`0 XP`) → `Baby` (`50 XP`) → `Teen` (`150 XP`) → `Adult` (`350 XP`) → `CyberElder` (`700+ XP`).
-- **Real-Time & Offline Time-Decay Engine**:
-  Uses `chrono` timestamps (`last_updated`) to calculate exact elapsed offline seconds on launch. Hunger, happiness, cleanliness, and energy decay naturally over time; sleeping pets recover energy offline; severe neglect (`hunger <= 15` or `cleanliness <= 15`) triggers sickness (`PetMood::Sick`).
-- **Git Commit XP Hooks (`post-commit` & `--sync-git`)**:
-  Reward your pet automatically every time you commit code! Built-in commit hash/message deduplication (`seen_commits`) ensures each commit is rewarded once (`+40 XP`, `+20 Coins`, `+15 Hunger`, `+15 Happiness`).
-- **Interactive Terminal Mini-Game (*Bug & Crate Catcher*)**:
-  Play right inside the TUI! Move left/right to catch falling `Crate`s (`📦`) and `Coffee` (`☕`) for bonus XP and coins while dodging `Bug`s (`🐛`) and `Panic`s (`💥`).
-- **Dual Persistence (`SQLite` + `JSON`)**:
-  Every state change is saved to both `rustagotchi.db` (via bundled `rusqlite`) and `save.json` (via `serde_json`). Loads from SQLite primary storage with seamless JSON fallback.
-
-### 🏗️ Architecture & Module Diagram
-
-```text
-                    ┌───────────────────────────┐
-                    │       src/main.rs         │
-                    │  CLI Flags & Entrypoint   │
-                    └─────────────┬─────────────┘
-                                  │
-                    ┌─────────────▼─────────────┐
-                    │        src/lib.rs         │
-                    └─┬───────┬───┴───┬───────┬─┘
-        ┌─────────────┘       │       │       └─────────────┐
-        ▼                     ▼       ▼                     ▼
-┌───────────────┐   ┌───────────────┐ ┌───────────────┐   ┌───────────────┐
-│   src/pet.rs  │   │src/sprites.rs │ │src/minigame.rs│   │src/git_hook.rs│
-│State, Decay & │   │ASCII Frames & │ │Bug & Crate    │   │post-commit &  │
-│Evolution Math │   │Mood Particles │ │Catcher Engine │   │git log Sync   │
-└───────┬───────┘   └───────┬───────┘ └───────┬───────┘   └───────┬───────┘
-        │                   │                 │                   │
-        └───────────┬───────┴────────┬────────┴───────────────────┘
-                    ▼                ▼
-            ┌───────────────┐┌───────────────┐
-            │src/storage.rs ││  src/tui.rs   │
-            │SQLite + JSON  ││Ratatui Layout │
-            │Dual Storage   ││& Event Loop   │
-            └───────────────┘└───────────────┘
-```
-
-### 💻 CLI Usage & Flags
-
-Run `rustagotchi` with no arguments to launch the interactive TUI dashboard, or pass headless CLI flags for quick terminal actions and Git hooks:
+## 🚀 Installation & Quick Start / Instalasi & Cara Menjalankan
 
 ```bash
-# Launch interactive Ratatui dashboard
+# Clone & enter repository
+git clone <repository-url>
+cd rustagotchi
+
+# Launch interactive Tamagotchi LCD TUI (default)
 cargo run
-
-# Inspect pet status summary in stdout
-cargo run -- --status
-
-# Perform quick care actions from your shell
-cargo run -- --feed
-cargo run -- --play
-cargo run -- --sleep
-cargo run -- --clean
-cargo run -- --code
-cargo run -- --heal
-
-# Reward pet for a specific commit (used by .git/hooks/post-commit)
-cargo run -- --git-commit "a1b2c3d feat: implement new module"
-
-# Scan recent git commits in the current repository and reward unseen ones
-cargo run -- --sync-git
-
-# Install automatic .git/hooks/post-commit hook in current repo
-cargo run -- --install-hook
-
-# Set or rename pet and customize storage paths
-cargo run -- --name "Ferris" --json-path save.json --db-path rustagotchi.db
 ```
 
-### ⌨️ Interactive TUI Keybindings
+First-time players are greeted by the **Interactive Adoption & Shell Customization Wizard** to select their species, shell theme, and pet name.
 
-| Key | Action | Description |
+---
+
+## 💻 CLI Subcommands / Perintah CLI
+
+You can also care for your pet directly from your shell or scripts:
+
+```bash
+# Launch interactive TUI with a custom name (if no save exists)
+cargo run -- --name "Boba"
+
+# Check pet status summary in terminal
+cargo run -- status
+
+# Warm the unhatched egg (or cuddle after hatching)
+cargo run -- warm
+
+# Care actions
+cargo run -- feed     # Feed favorite snack
+cargo run -- play     # Play together
+cargo run -- pet      # Give gentle headpats & love
+cargo run -- train    # Train for high XP
+cargo run -- sleep    # Toggle sleep / wake up
+cargo run -- clean    # Scrub poop & restore room cleanliness
+cargo run -- heal     # Give herbal medicine when sick
+
+# Reset and adopt a fresh pet
+cargo run -- reset --name "Mochi"
+```
+
+---
+
+## 🎮 Keyboard Controls / Kontrol Keyboard (TUI)
+
+### Habitat Screen / Layar Utama
+
+| Key / Tombol | Action / Aksi | Description / Keterangan |
 | :--- | :--- | :--- |
-| `f` | **Feed** | Feed your pet (`+25 Hunger`, `+5 Happiness`, `+10 XP`) |
-| `p` | **Play** | Play together (`+25 Happiness`, `+15 XP`, `+5 Coins`) |
-| `s` | **Sleep** | Toggle sleep mode (recovers energy over time) |
-| `c` | **Clean** | Clean habitat (`Cleanliness = 100`, `+10 Happiness`, `+10 XP`) |
-| `k` | **Code Session** | Pair-program (`+25 XP`, `+15 Coins`, `Coding` mood) |
-| `h` | **Heal** | Cure sickness and restore health to `100%` |
-| `g` | **Git Sync** | Scan recent `git log` commits and reward unseen commits |
-| `m` | **Mini-Game** | Launch interactive *Bug & Crate Catcher* mini-game |
-| `r` | **Rename** | Enter inline rename prompt (`Enter` to confirm, `Esc` to cancel) |
-| `←` / `→` or `a` / `d` | **Move** | Move player left/right inside the Mini-Game |
-| `q` / `Esc` | **Quit** | Save state to SQLite + JSON and exit cleanly |
+| `←` / `→` or `h` / `l` | Navigate Menu | Move selection across the 8 LCD care buttons |
+| `Enter` / `Space` | Activate Button | Perform the highlighted care action |
+| `w` / `0` | **Warm Egg** | Warm the egg (`+25%` incubation) or cuddle once hatched |
+| `f` / `1` | **Feed** | Feed species' favorite snack (`+Hunger`, `+XP`, `+Coins`) |
+| `p` / `2` | **Play** | Play joyful games (`+Happiness`, `+Bond`, `+XP`, `+Coins`) |
+| `v` / `3` | **Pet Love** | Gentle headpats (`+Happiness`, `+Bond`, `+XP`) |
+| `t` / `4` | **Train** | Practice skills (`+XP`, `+Coins`, `-Energy`) |
+| `s` / `5` | **Sleep** | Toggle bedtime mode to restore Energy |
+| `c` / `6` | **Clean** | Clean up poop (`💩`) and restore 100% Cleanliness |
+| `h` / `7` | **Heal** | Cure sickness and restore Health |
+| `g` | **Mini-Game** | Launch the **Snack & Star Catcher** arcade mini-game |
+| `Tab` | **Cycle Theme** | Switch between the 5 pastel LCD shell themes |
+| `n` | **New Adoption** | Open the Adoption Wizard to adopt a new pet |
+| `q` / `Esc` | **Save & Quit** | Save to JSON + SQLite and exit cleanly |
 
-### 🛠️ Build, Run & Test
+### Mini-Game Screen (`Snack & Star Catcher`)
 
-```bash
-# Build and launch interactive TUI
-cargo run
+| Key / Tombol | Action / Aksi |
+| :--- | :--- |
+| `←` / `a` / `h` | Move basket left (`\===/`) |
+| `→` / `d` / `l` | Move basket right (`\===/`) |
+| `Enter` / `Esc` / `q` | Finish or exit mini-game & return to Habitat |
 
-# Run full unit + integration test suite
-cargo test
+---
 
-# Run linter checks
-cargo clippy --all-targets
+## 🏗️ Architecture / Arsitektur Kode
+
+```text
+src/
+├── lib.rs        # Crate module exports
+├── main.rs       # Clap CLI parser & entrypoint
+├── pet.rs        # Core domain model: Pet, Species, ShellTheme, EvolutionStage, Care guards
+├── sprites.rs    # Multi-frame ASCII art sprites, theme palettes, dynamic speech bubbles
+├── minigame.rs   # Snack & Star Catcher arcade engine
+├── storage.rs    # Dual JSON + SQLite persistence & offline decay synchronization
+└── tui.rs        # Responsive 3-tier Ratatui LCD UI & Onboarding Wizard
+tests/
+└── integration_tests.rs  # Comprehensive integration & headless TUI test suite
 ```
 
 ---
 
-<a name="bahasa-indonesia"></a>
-## 🇮🇩 Bahasa Indonesia
+## 🧪 Testing / Pengujian
 
-**Rustagotchi** adalah aplikasi hewan peliharaan virtual terminal (*Tamagotchi*) bergaya retro-futuristik yang dibangun menggunakan **Rust**, **Ratatui**, dan **Crossterm**. Dirancang khusus sebagai teman *ngoding* bagi para developer, hewan peliharaan Anda hidup di dalam terminal, berevolusi seiring Anda menulis kode, mendapatkan XP dan koin setiap kali Anda melakukan `git commit`, memiliki mini-game interaktif di terminal, serta menyimpan datanya secara otomatis ke **SQLite** dan **JSON**.
-
-### 🌟 Fitur Utama
-
-- **5 Tahap Evolusi (`Egg → Baby → Teen → Adult → CyberElder`)**:
-  Buka animasi sprite ASCII multi-frame, balon percakapan baru, dan bonus atribut seiring naiknya level peliharaan Anda:
-  - `Egg` (`0 XP`) → `Baby` (`50 XP`) → `Teen` (`150 XP`) → `Adult` (`350 XP`) → `CyberElder` (`700+ XP`).
-- **Mesin Kalkulasi Waktu Nyata & Offline (*Offline Time-Decay*)**:
-  Menggunakan stempel waktu `chrono` (`last_updated`) untuk menghitung selisih detik secara akurat saat aplikasi dibuka kembali. Rasa kenyang (*hunger*), kebahagiaan (*happiness*), kebersihan (*cleanliness*), dan energi berkurang secara alami seiring waktu; tidur memulihkan energi; kelalaian ekstrem (`hunger <= 15` atau `cleanliness <= 15`) menyebabkan peliharaan jatuh sakit (`PetMood::Sick`).
-- **Integrasi Git Commit Hook (`post-commit` & `--sync-git`)**:
-  Berikan hadiah XP dan koin secara otomatis setiap kali Anda melakukan `git commit`! Dilengkapi fitur deduplikasi (`seen_commits`) sehingga setiap commit hanya diklaim satu kali (`+40 XP`, `+20 Koin`, `+15 Hunger`, `+15 Happiness`).
-- **Mini-Game Terminal Interaktif (*Bug & Crate Catcher*)**:
-  Bermain langsung di dalam TUI! Bergerak ke kiri/kanan untuk menangkap `Crate` (`📦`) dan `Coffee` (`☕`) demi XP serta koin tambahan sambil menghindari `Bug` (`🐛`) dan `Panic` (`💥`).
-- **Penyimpanan Ganda (*Dual Persistence*: `SQLite` + `JSON`)**:
-  Setiap perubahan status disimpan secara simultan ke database `rustagotchi.db` (`rusqlite`) dan file `save.json` (`serde_json`). Memuat data utama dari SQLite dengan cadangan otomatis dari JSON.
-
-### 💻 Penggunaan CLI & Opsi
-
-Jalankan `rustagotchi` tanpa argumen untuk membuka antarmuka TUI interaktif, atau gunakan opsi CLI untuk aksi cepat maupun integrasi Git hook:
+Run the full unit and integration test suite:
 
 ```bash
-# Menjalankan dashboard TUI interaktif
-cargo run
-
-# Menampilkan ringkasan status peliharaan di terminal
-cargo run -- --status
-
-# Melakukan aksi perawatan cepat melalui CLI
-cargo run -- --feed
-cargo run -- --play
-cargo run -- --sleep
-cargo run -- --clean
-cargo run -- --code
-cargo run -- --heal
-
-# Memberi hadiah XP dari git commit (digunakan oleh .git/hooks/post-commit)
-cargo run -- --git-commit "a1b2c3d feat: tambah fitur baru"
-
-# Memindai riwayat git log terbaru dan memberi hadiah untuk commit baru
-cargo run -- --sync-git
-
-# Memasang script otomatis .git/hooks/post-commit pada repositori saat ini
-cargo run -- --install-hook
-
-# Mengubah nama peliharaan atau mengatur lokasi file penyimpanan
-cargo run -- --name "Ferris" --json-path save.json --db-path rustagotchi.db
-```
-
-### 🛠️ Cara Kompilasi, Menjalankan & Pengujian
-
-```bash
-# Kompilasi dan jalankan TUI interaktif
-cargo run
-
-# Jalankan seluruh pengujian (unit test + integration test)
 cargo test
-
-# Periksa kualitas kode dengan Clippy
-cargo clippy --all-targets
 ```

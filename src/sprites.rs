@@ -1,263 +1,392 @@
-use crate::pet::{EvolutionStage, Pet, PetMood};
+use crate::pet::{EvolutionStage, Pet, PetMood, PetSpecies, ShellTheme};
 use ratatui::style::Color;
 
-const EGG_IDLE: &[&str] = &[
-    "      .---.      \n     /     \\     \n    |  o o  |    \n    |   .   |    \n     \\_____/     ",
-    "      .---.      \n     /     \\     \n    |  - -  |    \n    |   .   |    \n     \\_____/     ",
+const EGG_IDLE_FRAMES: &[&str] = &[
+    "    .---.    \n   / o o \\   \n  |  ~~~  |  \n   \\_____/   \n  [=======]  ",
+    "    .---.    \n   / ^ ^ \\   \n  |  ~~~  |  \n   \\_____/   \n  [=======]  ",
 ];
 
-const EGG_EATING: &[&str] = &[
-    "      .---.      \n     / * * \\     \n    |  ^ ^  |    \n    |   O   |    \n     \\_____/     ",
-    "      .---.      \n     /     \\     \n    |  > <  |    \n    |   w   |    \n     \\_____/     ",
+const EGG_HAPPY_FRAMES: &[&str] = &[
+    "  * .---. *  \n   / ^o^ \\   \n  |  ~~~  |  \n   \\_____/   \n  [=======]  ",
+    "  ~ .---. ~  \n   / *o* \\   \n  |  ~~~  |  \n   \\_____/   \n  [=======]  ",
 ];
 
-const EGG_SLEEPING: &[&str] = &[
-    "      .---.      \n     /     \\     \n    |  - -  | z  \n    |   .   |    \n     \\_____/     ",
-    "      .---.   Z  \n     /     \\ z   \n    |  u u  |    \n    |   .   |    \n     \\_____/     ",
+const EGG_SLEEPING_FRAMES: &[&str] = &[
+    "    .---. zZ \n   / - - \\   \n  |  ~~~  |  \n   \\_____/   \n  [=======]  ",
+    "    .---.  Z \n   / - - \\z  \n  |  ~~~  |  \n   \\_____/   \n  [=======]  ",
 ];
 
-const EGG_HAPPY: &[&str] = &[
-    "     \\.---./     \n     /     \\     \n    |  ^ ^  |    \n    |   v   |    \n     \\_____/     ",
-    "      .---.      \n    '/     \\'    \n    |  * *  |    \n    |   v   |    \n     \\_____/     ",
+// MochiCat Sprites
+const CAT_BABY_IDLE: &[&str] = &[
+    "   /\\_/\\   \n  ( o.o )  \n   > ^ <   ",
+    "   /\\_/\\   \n  ( -.- )  \n   > ^ <   ",
+];
+const CAT_BABY_EATING: &[&str] = &[
+    "   /\\_/\\   \n  ( ^O^ )🐟\n   > ^ <   ",
+    "   /\\_/\\   \n  ( ^w^ )~ \n   > ^ <   ",
+];
+const CAT_BABY_SLEEPING: &[&str] = &[
+    "   /\\_/\\ zZ\n  ( -.- )  \n   (   )   ",
+    "   /\\_/\\  Z\n  ( -w- )z \n   (   )   ",
+];
+const CAT_BABY_HAPPY: &[&str] = &[
+    " * /\\_/\\ * \n  ( ^ω^ )  \n  /> ♥ <\\  ",
+    " ~ /\\_/\\ ~ \n  ( >ω< )  \n  \\> ♥ </  ",
+];
+const CAT_BABY_SICK: &[&str] = &[
+    "   /\\_/\\   \n  ( x_x )💧\n   > ~ <   ",
+    "   /\\_/\\   \n  ( @_@ )💧\n   > ~ <   ",
+];
+const CAT_BABY_TRAINING: &[&str] = &[
+    "   /\\_/\\ ! \n  ( >_> )💨\n  />   <\\  ",
+    " ! /\\_/\\   \n 💨( <_< )  \n  />   <\\  ",
 ];
 
-const EGG_SICK: &[&str] = &[
-    "      .---.      \n     / ~ ~ \\     \n    |  x x  |    \n    |   ~   |    \n     \\_____/     ",
-    "      .---.      \n     /     \\     \n    |  @ @  |    \n    |   ^   |    \n     \\_____/     ",
+const CAT_TEEN_IDLE: &[&str] = &[
+    "   /\\___/\\   \n  (  o.o  )  \n  (  =^=  )  \n   (\")_(\")   ",
+    "   /\\___/\\   \n  (  o.o  )  \n  (  =^=  )~ \n   (\")_(\")   ",
+];
+const CAT_TEEN_EATING: &[&str] = &[
+    "   /\\___/\\   \n  (  ^O^  )🐟\n  (  =^=  )  \n   (\")_(\")   ",
+    "   /\\___/\\   \n  (  ^w^  )✨\n  (  =^=  )  \n   (\")_(\")   ",
+];
+const CAT_TEEN_SLEEPING: &[&str] = &[
+    "   /\\___/\\ zZ\n  (  -.-  )  \n  (  =^=  )  \n   (\")_(\")   ",
+    "   /\\___/\\  Z\n  (  -w-  )z \n  (  =^=  )  \n   (\")_(\")   ",
+];
+const CAT_TEEN_HAPPY: &[&str] = &[
+    " * /\\___/\\ * \n  (  ^ω^  )  \n ~(  ♥^♥  )~ \n   (\")_(\")   ",
+    " ~ /\\___/\\ ~ \n  (  >ω<  )  \n *(  ♥^♥  )* \n   (\")_(\")   ",
+];
+const CAT_TEEN_SICK: &[&str] = &[
+    "   /\\___/\\   \n  (  T_T  )💧\n  (  =~=  )  \n   (\")_(\")   ",
+    "   /\\___/\\   \n  (  x_x  )💧\n  (  =~=  )  \n   (\")_(\")   ",
+];
+const CAT_TEEN_TRAINING: &[&str] = &[
+    "   /\\___/\\ ! \n  (  •̀_•́  )ง \n  (  =^=  )  \n   (\")_(\")   ",
+    " ! /\\___/\\   \n ง(  •̀_•́  )  \n  (  =^=  )💨\n   (\")_(\")   ",
 ];
 
-const EGG_CODING: &[&str] = &[
-    "      .---.      \n     / 0 1 \\     \n    |  o o  |    \n    |  [=]  |    \n     \\_____/     ",
-    "      .---.      \n     / 1 0 \\     \n    |  O O  |    \n    |  [_]  |    \n     \\_____/     ",
+const CAT_ADULT_IDLE: &[&str] = &[
+    "    /\\_____/\\    \n   /  o   o  \\   \n  ( ==  ^  == )  \n   )         (   \n  (           )  \n ( (  )   (  ) ) \n(__(__)___(__)__)",
+    "    /\\_____/\\    \n   /  -   -  \\   \n  ( ==  ^  == )  \n   )         ( ~ \n  (           )  \n ( (  )   (  ) ) \n(__(__)___(__)__)",
+];
+const CAT_ADULT_HAPPY: &[&str] = &[
+    "  * /\\_____/\\ *  \n   /  ^   ^  \\   \n  ( ==  ω  == )  \n   )   ♥♥♥   (   \n  (           )  \n ( (  )   (  ) ) \n(__(__)___(__)__)",
+    "  ~ /\\_____/\\ ~  \n   /  >   <  \\   \n  ( ==  ω  == )  \n   )   ♥♥♥   ( ~ \n  (           )  \n ( (  )   (  ) ) \n(__(__)___(__)__)",
 ];
 
-const BABY_IDLE: &[&str] = &[
-    "     (\\___/)     \n    (  o.o  )    \n   c(  \"  \" )o   \n     \"- - -\"     ",
-    "     (\\___/)     \n    (  o.o  )    \n   o(  \"  \" )c   \n     \"- - -\"     ",
+const CAT_ELDER_IDLE: &[&str] = &[
+    "  ✨ /\\_____/\\ ✨ \n   /  *   *  \\   \n  ( ==  ω  == )  \n   )  ~★~★~  (   \n  (   (___)   )  ",
+    "  ★  /\\_____/\\  ★ \n   /  ^   ^  \\   \n  ( ==  ω  == )  \n   )  ★~★~★  (   \n  (   (___)   )  ",
 ];
 
-const BABY_EATING: &[&str] = &[
-    "     (\\___/)     \n    (  ^O^  ) *  \n   c(  \"  \" )o   \n     \"- - -\"     ",
-    "     (\\___/)     \n    (  >w<  ) ~  \n   o(  \"  \" )c   \n     \"- - -\"     ",
+// BobaPup Sprites
+const PUP_BABY_IDLE: &[&str] = &[
+    "  / \\__/ \\ \n (  •ᴥ•  ) \n  /     \\  ",
+    "  / \\__/ \\ \n (  •ᴥ•  )~ \n  /     \\  ",
+];
+const PUP_BABY_HAPPY: &[&str] = &[
+    " * /\\__/\\ *\n (  ^ᴥ^  ) \n  /  ♥  \\~ ",
+    " ~ /\\__/\\ ~\n (  >ᴥ<  ) \n ~/  ♥  \\  ",
+];
+const PUP_BABY_EATING: &[&str] = &[
+    "  / \\__/ \\ \n (  ^ᴥ^  )🦴\n  /     \\  ",
+    "  / \\__/ \\ \n (  •ᴥ•  )✨\n  /     \\  ",
+];
+const PUP_BABY_SLEEPING: &[&str] = &[
+    "  / \\__/ \\zZ\n (  -ᴥ-  ) \n  (_____)  ",
+    "  / \\__/ \\ Z\n (  -ᴥ-  )z\n  (_____)  ",
+];
+const PUP_BABY_SICK: &[&str] = &[
+    "  / \\__/ \\ \n (  xᴥx  )💧\n  /  ~  \\  ",
+    "  / \\__/ \\ \n (  TᴥT  )💧\n  /  ~  \\  ",
+];
+const PUP_BABY_TRAINING: &[&str] = &[
+    "  / \\__/ \\ !\n (  •̀ᴥ•́  )💨\n  /     \\  ",
+    "! / \\__/ \\ \n💨(  •̀ᴥ•́  ) \n  /     \\  ",
 ];
 
-const BABY_SLEEPING: &[&str] = &[
-    "     (\\___/)  z  \n    (  -.-  )    \n   c(  \"  \" )c   \n     \"- - -\"     ",
-    "     (\\___/) zZ  \n    (  u.u  )    \n   c(  \"  \" )c   \n     \"- - -\"     ",
+// CloudBun Sprites
+const BUN_BABY_IDLE: &[&str] = &[
+    "   (\\_/)   \n  ( •.• )  \n  / >☁< \\  ",
+    "   (\\_/)   \n  ( -.- )  \n  / >☁< \\  ",
+];
+const BUN_BABY_HAPPY: &[&str] = &[
+    " * (\\_/) * \n  ( ^.^ )  \n  / >♥< \\  ",
+    " ~ (\\_/) ~ \n  ( >.< )  \n  / >♥< \\  ",
+];
+const BUN_BABY_EATING: &[&str] = &[
+    "   (\\_/)   \n  ( ^O^ )🥕\n  / > < \\  ",
+    "   (\\_/)   \n  ( ^w^ )✨\n  / > < \\  ",
+];
+const BUN_BABY_SLEEPING: &[&str] = &[
+    "   (\\_/) zZ\n  ( -.- )  \n  (_____)  ",
+    "   (\\_/)  Z\n  ( -w- )z \n  (_____)  ",
+];
+const BUN_BABY_SICK: &[&str] = &[
+    "   (\\_/)   \n  ( x.x )💧\n  / >~< \\  ",
+    "   (\\_/)   \n  ( T.T )💧\n  / >~< \\  ",
+];
+const BUN_BABY_TRAINING: &[&str] = &[
+    "   (\\_/) ! \n  ( •̀.•́ )💨\n  / > < \\  ",
+    " ! (\\_/)   \n 💨( •̀.•́ )  \n  / > < \\  ",
 ];
 
-const BABY_HAPPY: &[&str] = &[
-    "    \\(\\___/)/    \n    (  ^v^  )    \n   c(  \"  \" )o   \n     \"- - -\"     ",
-    "     (\\___/)     \n   \\(  *v*  )/   \n   o(  \"  \" )c   \n     \"- - -\"     ",
+// StarPengu Sprites
+const PENGU_BABY_IDLE: &[&str] = &[
+    "    .--.    \n   |o_o |   \n   |:_/ |   \n  //   \\ \\  \n (|     | ) ",
+    "    .--.    \n   |-_- |   \n   |:_/ |   \n  //   \\ \\  \n (|     | ) ",
+];
+const PENGU_BABY_HAPPY: &[&str] = &[
+    "  * .--. *  \n   |^v^ |   \n  /|:_/ |\\  \n   | ♥ |    \n  /     \\   ",
+    "  ~ .--. ~  \n   |>v< |   \n  \\|:_/ |/  \n   | ♥ |    \n  /     \\   ",
+];
+const PENGU_BABY_EATING: &[&str] = &[
+    "    .--.    \n   |^O^ |🫐 \n   |:_/ |   \n  //   \\ \\  ",
+    "    .--.    \n   |^v^ |✨ \n   |:_/ |   \n  //   \\ \\  ",
+];
+const PENGU_BABY_SLEEPING: &[&str] = &[
+    "    .--. zZ \n   |-_- |   \n   |:_/ |   \n  (______)  ",
+    "    .--.  Z \n   |-_- |z  \n   |:_/ |   \n  (______)  ",
+];
+const PENGU_BABY_SICK: &[&str] = &[
+    "    .--.    \n   |x_x |💧 \n   |:_/ |   \n  (______)  ",
+    "    .--.    \n   |T_T |💧 \n   |:_/ |   \n  (______)  ",
+];
+const PENGU_BABY_TRAINING: &[&str] = &[
+    "    .--. !  \n   |•̀v•́ |💨 \n  /|:_/ |\\  \n  /     \\   ",
+    " !  .--.    \n 💨|•̀v•́ |   \n  \\|:_/ |/  \n  /     \\   ",
 ];
 
-const BABY_SICK: &[&str] = &[
-    "     (\\___/)     \n    (  x_x  ) ~  \n   c(  \"  \" )c   \n     \"- - -\"     ",
-    "     (\\___/)     \n    (  @_@  ) !  \n   c(  \"  \" )c   \n     \"- - -\"     ",
-];
+pub fn get_sprite_frames(
+    species: PetSpecies,
+    stage: EvolutionStage,
+    state: PetMood,
+) -> &'static [&'static str] {
+    if stage == EvolutionStage::Egg {
+        return match state {
+            PetMood::Sleeping => EGG_SLEEPING_FRAMES,
+            PetMood::Happy | PetMood::Eating | PetMood::Training => EGG_HAPPY_FRAMES,
+            _ => EGG_IDLE_FRAMES,
+        };
+    }
 
-const BABY_CODING: &[&str] = &[
-    "     (\\___/)     \n    (  o_o  )    \n   c( [===] )o   \n     \"- - -\"     ",
-    "     (\\___/)     \n    (  O_O  )    \n   o( [###] )c   \n     \"- - -\"     ",
-];
-
-const TEEN_IDLE: &[&str] = &[
-    "   (\\/)   (\\/)   \n    \\  .---.  /  \n     |( o o )|   \n    /| `---' |\\  \n   /  \"     \"  \\ ",
-    "   (\\/)   (\\/)   \n    \\  .---.  /  \n     |( o - )|   \n    /| `---' |\\  \n   \\  \"     \"  / ",
-];
-
-const TEEN_EATING: &[&str] = &[
-    "   (\\/) * (\\/)   \n    \\  .---.  /  \n     |( ^O^ )|   \n    /| `---' |\\  \n   /  \"     \"  \\ ",
-    "   (\\/) ~ (\\/)   \n    \\  .---.  /  \n     |( >w< )|   \n    /| `---' |\\  \n   \\  \"     \"  / ",
-];
-
-const TEEN_SLEEPING: &[&str] = &[
-    "   (--)   (--) z \n    \\  .---.  /  \n     |( - - )|   \n    /| `---' |\\  \n   /  \"     \"  \\ ",
-    "   (--)   (--) Z \n    \\  .---.  /  \n     |( u u )|   \n    /| `---' |\\  \n   /  \"     \"  \\ ",
-];
-
-const TEEN_HAPPY: &[&str] = &[
-    "  \\(\\/)   (\\/)/  \n    \\  .---.  /  \n     |( ^v^ )|   \n    /| `---' |\\  \n   /  \"     \"  \\ ",
-    "   (\\/)   (\\/)   \n   \\ \\ .---. / / \n     |( *v* )|   \n    /| `---' |\\  \n   \\  \"     \"  / ",
-];
-
-const TEEN_SICK: &[&str] = &[
-    "   (\\/)   (\\/)   \n    \\  .---.  /  \n     |( x_x )| ~ \n    /| `---' |\\  \n   /  \"     \"  \\ ",
-    "   (\\/)   (\\/)   \n    \\  .---.  /  \n     |( @_@ )| ! \n    /| `---' |\\  \n   /  \"     \"  \\ ",
-];
-
-const TEEN_CODING: &[&str] = &[
-    "   (\\/)   (\\/)   \n    \\  .---.  /  \n     |([o_o])|   \n    /|_[===]_|\\  \n   /  \"     \"  \\ ",
-    "   (\\/)   (\\/)   \n    \\  .---.  /  \n     |([O_O])|   \n    /|_[###]_|\\  \n   \\  \"     \"  / ",
-];
-
-const ADULT_IDLE: &[&str] = &[
-    "    _~^~^~_    \n\\) /  o o  \\ (/\n  '_   -   _'  \n  / '-----' \\  ",
-    "    _~^~^~_    \n(/ /  o o  \\ \\)\n  '_   v   _'  \n  \\ '-----' /  ",
-];
-
-const ADULT_EATING: &[&str] = &[
-    "    _~^~^~_    \n\\) /  ^ O  \\ (/\n  '_  [=]  _'  \n  / '-----' \\  ",
-    "    _~^~^~_    \n(/ /  > w  \\ \\)\n  '_   ~   _'  \n  \\ '-----' /  ",
-];
-
-const ADULT_SLEEPING: &[&str] = &[
-    "    _~^~^~_  z \n-) /  - -  \\ (-\n  '_   .   _'  \n  / '-----' \\  ",
-    "    _~^~^~_  Z \n-) /  u u  \\ (-\n  '_   o   _'  \n  / '-----' \\  ",
-];
-
-const ADULT_HAPPY: &[&str] = &[
-    "  \\ _~^~^~_ /  \n\\) /  ^ ^  \\ (/\n  '_   v   _'  \n  / '-----' \\  ",
-    "    _~^~^~_    \n\\) /  * *  \\ (/\n  '_  \\_/  _'  \n  \\ '-----' /  ",
-];
-
-const ADULT_SICK: &[&str] = &[
-    "    _~^~^~_  ~ \n\\) /  x x  \\ (/\n  '_   ~   _'  \n  / '-----' \\  ",
-    "    _~^~^~_  ! \n(/ /  @ @  \\ \\)\n  '_   ^   _'  \n  / '-----' \\  ",
-];
-
-const ADULT_CODING: &[&str] = &[
-    "    _~^~^~_    \n\\) / [o_o] \\ (/\n  '_ [===] _'  \n  / '-----' \\  ",
-    "    _~^~^~_    \n(/ / [O_O] \\ \\)\n  '_ [###] _'  \n  \\ '-----' /  ",
-];
-
-const ELDER_IDLE: &[&str] = &[
-    "    _[===]_    \n\\] / [o_o] \\ [/\n  '==  v  =='  \n  // '---' \\\\  ",
-    "    _[===]_    \n[/ / [o_O] \\ \\]\n  '==  -  =='  \n  \\\\ '---' //  ",
-];
-
-const ELDER_EATING: &[&str] = &[
-    "    _[===]_    \n\\] / [^O^] \\ [/\n  '== [+] =='  \n  // '---' \\\\  ",
-    "    _[===]_    \n[/ / [>w<] \\ \\]\n  '== [*] =='  \n  \\\\ '---' //  ",
-];
-
-const ELDER_SLEEPING: &[&str] = &[
-    "    _[===]_  z \n-] / [-_-] \\ [-\n  '==  .  =='  \n  // '---' \\\\  ",
-    "    _[===]_  Z \n-] / [u_u] \\ [-\n  '==  _  =='  \n  // '---' \\\\  ",
-];
-
-const ELDER_HAPPY: &[&str] = &[
-    "  \\ _[===]_ /  \n\\] / [^*^] \\ [/\n  '== \\_/ =='  \n  // '---' \\\\  ",
-    "    _[===]_    \n\\] / [*v*] \\ [/\n  '== \\o/ =='  \n  \\\\ '---' //  ",
-];
-
-const ELDER_SICK: &[&str] = &[
-    "    _[===]_  ~ \n\\] / [x_x] \\ [/\n  '== ERR =='  \n  // '---' \\\\  ",
-    "    _[===]_  ! \n[/ / [@_@] \\ \\]\n  '== NAN =='  \n  // '---' \\\\  ",
-];
-
-const ELDER_CODING: &[&str] = &[
-    "    _[===]_    \n\\] / [0_1] \\ [/\n  '==[RUST]==' \n  // '---' \\\\  ",
-    "    _[===]_    \n[/ / [1_0] \\ \\]\n  '==[CARGO]=='\n  \\\\ '---' //  ",
-];
-
-pub fn get_sprite_frames(stage: EvolutionStage, state: PetMood) -> &'static [&'static str] {
-    match (stage, state) {
-        (EvolutionStage::Egg, PetMood::Idle) => EGG_IDLE,
-        (EvolutionStage::Egg, PetMood::Eating) => EGG_EATING,
-        (EvolutionStage::Egg, PetMood::Sleeping) => EGG_SLEEPING,
-        (EvolutionStage::Egg, PetMood::Happy) => EGG_HAPPY,
-        (EvolutionStage::Egg, PetMood::Sick) => EGG_SICK,
-        (EvolutionStage::Egg, PetMood::Coding) => EGG_CODING,
-
-        (EvolutionStage::Baby, PetMood::Idle) => BABY_IDLE,
-        (EvolutionStage::Baby, PetMood::Eating) => BABY_EATING,
-        (EvolutionStage::Baby, PetMood::Sleeping) => BABY_SLEEPING,
-        (EvolutionStage::Baby, PetMood::Happy) => BABY_HAPPY,
-        (EvolutionStage::Baby, PetMood::Sick) => BABY_SICK,
-        (EvolutionStage::Baby, PetMood::Coding) => BABY_CODING,
-
-        (EvolutionStage::Teen, PetMood::Idle) => TEEN_IDLE,
-        (EvolutionStage::Teen, PetMood::Eating) => TEEN_EATING,
-        (EvolutionStage::Teen, PetMood::Sleeping) => TEEN_SLEEPING,
-        (EvolutionStage::Teen, PetMood::Happy) => TEEN_HAPPY,
-        (EvolutionStage::Teen, PetMood::Sick) => TEEN_SICK,
-        (EvolutionStage::Teen, PetMood::Coding) => TEEN_CODING,
-
-        (EvolutionStage::Adult, PetMood::Idle) => ADULT_IDLE,
-        (EvolutionStage::Adult, PetMood::Eating) => ADULT_EATING,
-        (EvolutionStage::Adult, PetMood::Sleeping) => ADULT_SLEEPING,
-        (EvolutionStage::Adult, PetMood::Happy) => ADULT_HAPPY,
-        (EvolutionStage::Adult, PetMood::Sick) => ADULT_SICK,
-        (EvolutionStage::Adult, PetMood::Coding) => ADULT_CODING,
-
-        (EvolutionStage::CyberElder, PetMood::Idle) => ELDER_IDLE,
-        (EvolutionStage::CyberElder, PetMood::Eating) => ELDER_EATING,
-        (EvolutionStage::CyberElder, PetMood::Sleeping) => ELDER_SLEEPING,
-        (EvolutionStage::CyberElder, PetMood::Happy) => ELDER_HAPPY,
-        (EvolutionStage::CyberElder, PetMood::Sick) => ELDER_SICK,
-        (EvolutionStage::CyberElder, PetMood::Coding) => ELDER_CODING,
+    match species {
+        PetSpecies::MochiCat => match (stage, state) {
+            (EvolutionStage::CyberElder, _) => CAT_ELDER_IDLE,
+            (EvolutionStage::Adult, PetMood::Happy) => CAT_ADULT_HAPPY,
+            (EvolutionStage::Adult, PetMood::Idle) => CAT_ADULT_IDLE,
+            (EvolutionStage::Teen, PetMood::Idle) => CAT_TEEN_IDLE,
+            (EvolutionStage::Teen | EvolutionStage::Adult, PetMood::Eating) => CAT_TEEN_EATING,
+            (EvolutionStage::Teen | EvolutionStage::Adult, PetMood::Sleeping) => CAT_TEEN_SLEEPING,
+            (EvolutionStage::Teen, PetMood::Happy) => CAT_TEEN_HAPPY,
+            (EvolutionStage::Teen | EvolutionStage::Adult, PetMood::Sick) => CAT_TEEN_SICK,
+            (EvolutionStage::Teen | EvolutionStage::Adult, PetMood::Training) => CAT_TEEN_TRAINING,
+            (_, PetMood::Idle) => CAT_BABY_IDLE,
+            (_, PetMood::Eating) => CAT_BABY_EATING,
+            (_, PetMood::Sleeping) => CAT_BABY_SLEEPING,
+            (_, PetMood::Happy) => CAT_BABY_HAPPY,
+            (_, PetMood::Sick) => CAT_BABY_SICK,
+            (_, PetMood::Training) => CAT_BABY_TRAINING,
+        },
+        PetSpecies::BobaPup => match state {
+            PetMood::Idle => PUP_BABY_IDLE,
+            PetMood::Eating => PUP_BABY_EATING,
+            PetMood::Sleeping => PUP_BABY_SLEEPING,
+            PetMood::Happy => PUP_BABY_HAPPY,
+            PetMood::Sick => PUP_BABY_SICK,
+            PetMood::Training => PUP_BABY_TRAINING,
+        },
+        PetSpecies::CloudBun => match state {
+            PetMood::Idle => BUN_BABY_IDLE,
+            PetMood::Eating => BUN_BABY_EATING,
+            PetMood::Sleeping => BUN_BABY_SLEEPING,
+            PetMood::Happy => BUN_BABY_HAPPY,
+            PetMood::Sick => BUN_BABY_SICK,
+            PetMood::Training => BUN_BABY_TRAINING,
+        },
+        PetSpecies::StarPengu => match state {
+            PetMood::Idle => PENGU_BABY_IDLE,
+            PetMood::Eating => PENGU_BABY_EATING,
+            PetMood::Sleeping => PENGU_BABY_SLEEPING,
+            PetMood::Happy => PENGU_BABY_HAPPY,
+            PetMood::Sick => PENGU_BABY_SICK,
+            PetMood::Training => PENGU_BABY_TRAINING,
+        },
     }
 }
 
 pub fn get_mood_particles(state: PetMood, tick: usize) -> &'static str {
-    let idx = tick % 4;
-    match state {
-        PetMood::Idle => ["  .  *  .  ", "  *  .  *  ", "  .  o  .  ", "  o  .  o  "][idx],
-        PetMood::Eating => [" [nom nom] ", " * crunch * ", " [yum yum] ", " ~ tasty! ~ "][idx],
-        PetMood::Sleeping => ["   zZz...  ", "  zZzZ...  ", "   Zzz...  ", "  ...zZz   "][idx],
-        PetMood::Happy => ["  \\(^o^)/  ", "  * <3 *   ", "  ~(^-^)~  ", "  * \\o/ *  "][idx],
-        PetMood::Sick => ["  @ _ @ ~  ", "  ~ ugh ~  ", "  x _ x !  ", "  ~ fever ~"][idx],
-        PetMood::Coding => [" fn main() ", " cargo run ", " git push! ", " 0101_RUST "][idx],
+    match (state, tick % 2) {
+        (PetMood::Happy, 0) => "✨  💖  ✨  🌸  ✨",
+        (PetMood::Happy, _) => "🌸  ✨  💖  ✨  🌸",
+        (PetMood::Eating, 0) => "🍴  😋  🎵  🍰  🍴",
+        (PetMood::Eating, _) => "🎵  🍰  🍴  😋  🎵",
+        (PetMood::Sleeping, 0) => "🌙   z   Z   zZ  ⭐",
+        (PetMood::Sleeping, _) => "⭐   Z   zZ  z   🌙",
+        (PetMood::Sick, 0) => "💧  🤒  💊  🌧️  💧",
+        (PetMood::Sick, _) => "🌧️  💊  💧  🤒  🌧️",
+        (PetMood::Training, 0) => "🔥  ⚡  💪  ⭐  🔥",
+        (PetMood::Training, _) => "⭐  💪  🔥  ⚡  ⭐",
+        (PetMood::Idle, 0) => "☁️   ~   ✨   ~  ☁️",
+        (PetMood::Idle, _) => "✨   ~   ☁️   ~  ✨",
     }
 }
 
-pub fn render_animated_sprite(stage: EvolutionStage, state: PetMood, tick: usize) -> Vec<String> {
-    let frames = get_sprite_frames(stage, state);
-    let selected = frames[tick % frames.len()];
-    let mut lines = vec![get_mood_particles(state, tick).to_string()];
-    lines.extend(selected.lines().map(String::from));
+pub fn render_animated_sprite(pet: &Pet, tick: usize) -> Vec<String> {
+    let frames = get_sprite_frames(pet.species, pet.stage, pet.mood);
+    let frame = frames[tick % frames.len()];
+    let mut lines = Vec::new();
+
+    lines.push(format!("   {}   ", get_mood_particles(pet.mood, tick)));
+    lines.push(String::new());
+    for line in frame.lines() {
+        lines.push(line.to_string());
+    }
+
+    if pet.poop_count > 0 {
+        let messes = "💩 ".repeat(pet.poop_count.min(5) as usize);
+        lines.push(format!("  {} (needs cleaning!)", messes.trim()));
+    }
+
     lines
 }
 
 pub fn speech_bubble(pet: &Pet, tick: usize) -> String {
-    if pet.is_sick || pet.mood == PetMood::Sick {
-        return "💬 \"I don't feel so good... press [h] to heal me!\"".to_string();
+    if pet.stage == EvolutionStage::Egg {
+        return if pet.incubation >= 75 {
+            "💬 \"*crack* *wiggle* Ready to hatch soon!\"".to_string()
+        } else {
+            "💬 \"*warmth* Press [1/F] to warm the egg!\"".to_string()
+        };
     }
+
     if pet.is_sleeping || pet.mood == PetMood::Sleeping {
-        return "💬 \"zZz... dreaming of zero-cost abstractions...\"".to_string();
+        return "💬 \"Zzz... dreaming of sweet snacks... 🌙\"".to_string();
     }
-    if pet.hunger <= 30 {
-        return "💬 \"My stomach is rumbling for some crates! [f]\"".to_string();
+
+    if pet.is_sick || pet.mood == PetMood::Sick {
+        return "💬 \"Ugh... my tummy hurts... need medicine [6]! 💊\"".to_string();
     }
-    if pet.happiness <= 30 {
-        return "💬 \"I'm feeling lonely... let's play or pet me! [p/g]\"".to_string();
+
+    if pet.poop_count > 0 {
+        return "💬 \"Eep! My room is messy... please clean [5]! 🧹\"".to_string();
     }
-    match pet.mood {
-        PetMood::Eating => "💬 \"Mmm, delicious memory-safe snacks!\"".to_string(),
-        PetMood::Coding => "💬 \"Borrow checker approves this commit! 🚀\"".to_string(),
-        PetMood::Happy => "💬 \"Life is great when the code compiles!\"".to_string(),
-        PetMood::Idle => {
-            let idle_lines = [
-                "💬 \"Ready to write some blazingly fast Rust!\"",
-                "💬 \"Make a git commit to feed me XP!\"",
-                "💬 \"Press [g] to catch falling crates and bugs!\"",
-            ];
-            idle_lines[tick % idle_lines.len()].to_string()
-        }
-        PetMood::Sick | PetMood::Sleeping => {
-            "( resting quietly... )".to_string()
-        }
+
+    if pet.hunger >= 65 {
+        return format!(
+            "💬 \"I'm super hungry! Could I have {}? [1]\"",
+            pet.species.favorite_snack()
+        );
+    }
+
+    if pet.energy <= 25 {
+        return "💬 \"*yawn* So sleepy... time for a nap [4]? 💤\"".to_string();
+    }
+
+    let chatter = [
+        format!(
+            "💬 \"Yay! {} loves spending time with you! 💖\"",
+            pet.name
+        ),
+        format!(
+            "💬 \"Mmm, thinking about {}~ ✨\"",
+            pet.species.favorite_snack()
+        ),
+        "💬 \"Let's play the Snack Catcher mini-game [G]! 🎮\"".to_string(),
+        "💬 \"Pat-pats [3] make our bond grow stronger! 🌸\"".to_string(),
+    ];
+
+    chatter[(tick / 3) % chatter.len()].clone()
+}
+
+pub fn theme_color(theme: ShellTheme) -> Color {
+    match theme {
+        ShellTheme::StrawberryPink => Color::LightMagenta,
+        ShellTheme::MatchaGreen => Color::LightGreen,
+        ShellTheme::SkyBlue => Color::LightCyan,
+        ShellTheme::LavenderDream => Color::Magenta,
+        ShellTheme::SunsetGold => Color::Yellow,
     }
 }
 
 pub fn stage_color(stage: EvolutionStage) -> Color {
     match stage {
         EvolutionStage::Egg => Color::White,
-        EvolutionStage::Baby => Color::LightYellow,
-        EvolutionStage::Teen => Color::LightRed,
-        EvolutionStage::Adult => Color::Red,
-        EvolutionStage::CyberElder => Color::Cyan,
+        EvolutionStage::Baby => Color::LightGreen,
+        EvolutionStage::Teen => Color::LightCyan,
+        EvolutionStage::Adult => Color::LightMagenta,
+        EvolutionStage::CyberElder => Color::Yellow,
     }
 }
 
 pub fn mood_color(state: PetMood) -> Color {
     match state {
-        PetMood::Idle => Color::Gray,
-        PetMood::Eating => Color::Yellow,
+        PetMood::Idle => Color::Cyan,
+        PetMood::Eating => Color::Green,
         PetMood::Sleeping => Color::Blue,
-        PetMood::Happy => Color::Green,
-        PetMood::Sick => Color::Magenta,
-        PetMood::Coding => Color::LightCyan,
+        PetMood::Happy => Color::LightMagenta,
+        PetMood::Sick => Color::LightRed,
+        PetMood::Training => Color::Yellow,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_all_species_stages_and_moods_have_multi_frame_sprites() {
+        for &species in PetSpecies::all() {
+            for &stage in EvolutionStage::all() {
+                for &mood in PetMood::all() {
+                    let frames = get_sprite_frames(species, stage, mood);
+                    assert!(
+                        frames.len() >= 2,
+                        "Expected at least 2 frames for {:?}/{:?}/{:?}",
+                        species,
+                        stage,
+                        mood
+                    );
+                    for frame in frames {
+                        assert!(!frame.trim().is_empty());
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_render_animated_sprite_and_speech_bubble() {
+        let mut pet = Pet::new("Mochi");
+        let lines_t0 = render_animated_sprite(&pet, 0);
+        let lines_t1 = render_animated_sprite(&pet, 1);
+        assert!(!lines_t0.is_empty());
+        assert_ne!(lines_t0, lines_t1);
+
+        let egg_speech = speech_bubble(&pet, 0);
+        assert!(egg_speech.contains("warm") || egg_speech.contains("hatch"));
+
+        pet.stage = EvolutionStage::Baby;
+        pet.poop_count = 2;
+        let dirty_lines = render_animated_sprite(&pet, 0);
+        assert!(dirty_lines.iter().any(|l| l.contains("💩")));
+        assert!(speech_bubble(&pet, 0).contains("clean"));
+    }
+
+    #[test]
+    fn test_colors_and_particles() {
+        for &theme in ShellTheme::all() {
+            let _ = theme_color(theme);
+        }
+        for &stage in EvolutionStage::all() {
+            let _ = stage_color(stage);
+        }
+        for &mood in PetMood::all() {
+            let _ = mood_color(mood);
+            assert!(!get_mood_particles(mood, 0).is_empty());
+            assert_ne!(get_mood_particles(mood, 0), get_mood_particles(mood, 1));
+        }
     }
 }

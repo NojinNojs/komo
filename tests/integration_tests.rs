@@ -1,322 +1,458 @@
 use chrono::{Duration, Utc};
-use rustagotchi::{
-    generate_post_commit_hook_script, get_mood_particles, get_sprite_frames,
-    install_post_commit_hook, load_dual, load_json, load_or_create, load_sqlite, mood_color,
-    render_animated_sprite, save_dual, save_json, save_sqlite, speech_bubble, stage_color,
-    EvolutionStage, ItemKind, MiniGame, Pet, PetMood, StoragePaths,
+use crossterm::event::KeyCode;
+use mochigotchi::minigame::{ItemKind, MiniGame};
+use mochigotchi::pet::{
+    EvolutionStage, Pet, PetAction, PetMood, PetSpecies, PetState, ShellTheme,
 };
-use std::fs;
-use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
-
-fn unique_temp_dir(prefix: &str) -> PathBuf {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system clock should be after UNIX_EPOCH")
-        .as_nanos();
-    let dir = std::env::temp_dir().join(format!("rustagotchi_{}_{}_{}", prefix, std::process::id(), nanos));
-    fs::create_dir_all(&dir).expect("should create temp dir");
-    dir
-}
+use mochigotchi::sprites::{
+    get_mood_particles, get_sprite_frames, mood_color, render_animated_sprite, speech_bubble,
+    stage_color, theme_color,
+};
+use mochigotchi::storage::{
+    has_existing_save, load_dual, load_json, load_or_create, load_sqlite, save_dual, save_json,
+    save_sqlite, StoragePaths,
+};
+use mochigotchi::tui::{draw_ui, App, AppScreen, OnboardingStep};
+use ratatui::{backend::TestBackend, Terminal};
+use tempfile::tempdir;
 
 #[test]
-fn test_evolution_stage_progression() {
-    assert_eq!(EvolutionStage::all().len(), 5);
-    assert_eq!(EvolutionStage::from_xp(0), EvolutionStage::Egg);
-    assert_eq!(EvolutionStage::from_xp(49), EvolutionStage::Egg);
-    assert_eq!(EvolutionStage::from_xp(50), EvolutionStage::Baby);
-    assert_eq!(EvolutionStage::from_xp(149), EvolutionStage::Baby);
-    assert_eq!(EvolutionStage::from_xp(150), EvolutionStage::Teen);
-    assert_eq!(EvolutionStage::from_xp(349), EvolutionStage::Teen);
-    assert_eq!(EvolutionStage::from_xp(350), EvolutionStage::Adult);
-    assert_eq!(EvolutionStage::from_xp(699), EvolutionStage::Adult);
-    assert_eq!(EvolutionStage::from_xp(700), EvolutionStage::CyberElder);
-    assert_eq!(EvolutionStage::from_xp(5000), EvolutionStage::CyberElder);
-
-    assert_eq!(EvolutionStage::Egg.next_stage(), Some(EvolutionStage::Baby));
-    assert_eq!(EvolutionStage::Baby.next_stage(), Some(EvolutionStage::Teen));
-    assert_eq!(EvolutionStage::Teen.next_stage(), Some(EvolutionStage::Adult));
-    assert_eq!(
-        EvolutionStage::Adult.next_stage(),
-        Some(EvolutionStage::CyberElder)
-    );
-    assert_eq!(EvolutionStage::CyberElder.next_stage(), None);
-
-    let mut pet = Pet::new("Ferris");
+fn test_egg_initialization_and_guards() {
+    let mut pet = Pet::new("Mochi");
+    assert_eq!(pet.name, "Mochi");
     assert_eq!(pet.stage, EvolutionStage::Egg);
+    assert_eq!(pet.incubation, 0);
+    assert_eq!(pet.hunger, 65);
+    assert_eq!(pet.xp, 0);
     assert_eq!(pet.level, 1);
-    assert!((pet.xp_progress_ratio() - 0.0).abs() < f64::EPSILON);
+    assert_eq!(pet.coins, 0);
 
-    // 25 XP -> still Egg
-    assert!(!pet.add_xp(25));
-    assert_eq!(pet.stage, EvolutionStage::Egg);
-    assert!(pet.xp_progress_ratio() > 0.0 && pet.xp_progress_ratio() < 1.0);
+    // Unhatched Egg guards: care actions should not alter stats, XP, or coins
+    let msg_feed = pet.feed();
+    assert!(!msg_feed.is_empty());
+    assert_eq!(pet.hunger, 65);
+    assert_eq!(pet.xp, 0);
+    assert_eq!(pet.coins, 0);
 
-    // +25 XP (total 50) -> evolves to Baby
-    assert!(pet.add_xp(25));
-    assert_eq!(pet.stage, EvolutionStage::Baby);
-    assert_eq!(pet.level, 2);
+    let msg_play = pet.play();
+    assert!(!msg_play.is_empty());
+    assert_eq!(pet.xp, 0);
+    assert_eq!(pet.coins, 0);
 
-    // +100 XP (total 150) -> evolves to Teen
-    assert!(pet.add_xp(100));
-    assert_eq!(pet.stage, EvolutionStage::Teen);
+    let msg_pet = pet.pet_love();
+    assert!(!msg_pet.is_empty());
+    assert_eq!(pet.xp, 0);
 
-    // +200 XP (total 350) -> evolves to Adult
-    assert!(pet.add_xp(200));
-    assert_eq!(pet.stage, EvolutionStage::Adult);
+    let msg_train = pet.train();
+    assert!(!msg_train.is_empty());
+    assert_eq!(pet.xp, 0);
 
-    // +350 XP (total 700) -> evolves to CyberElder
-    assert!(pet.add_xp(350));
-    assert_eq!(pet.stage, EvolutionStage::CyberElder);
-    assert!((pet.xp_progress_ratio() - 1.0).abs() < f64::EPSILON);
-}
-
-#[test]
-fn test_offline_decay_normal_sleeping_and_sickness() {
-    // 1. Normal decay over 1 hour while awake
-    let mut pet = Pet::new("Ferris");
-    let start = pet.last_updated;
-    let initial_hunger = pet.hunger;
-    let initial_happiness = pet.happiness;
-    let initial_cleanliness = pet.cleanliness;
-    let initial_energy = pet.energy;
-
-    let elapsed = pet.apply_offline_decay(start + Duration::hours(1));
-    assert_eq!(elapsed, 3600);
-    assert!(pet.age_seconds >= 3600);
-    assert!(pet.hunger < initial_hunger);
-    assert!(pet.happiness < initial_happiness);
-    assert!(pet.cleanliness < initial_cleanliness);
-    assert!(pet.energy < initial_energy);
-
-    // 2. Sleeping energy recovery during offline decay
-    let mut sleeping_pet = Pet::new("Snoozer");
-    sleeping_pet.energy = 30;
-    sleeping_pet.is_sleeping = true;
-    sleeping_pet.mood = PetMood::Sleeping;
-    let sleep_start = sleeping_pet.last_updated;
-
-    let sleep_elapsed = sleeping_pet.apply_offline_decay(sleep_start + Duration::hours(1));
-    assert_eq!(sleep_elapsed, 3600);
-    assert!(sleeping_pet.energy > 30);
-
-    // 3. Critical sickness trigger when hunger or cleanliness drops <= 15
-    let mut neglected_pet = Pet::new("Neglected");
-    neglected_pet.hunger = 18;
-    neglected_pet.cleanliness = 18;
-    let neglect_start = neglected_pet.last_updated;
-
-    neglected_pet.apply_offline_decay(neglect_start + Duration::hours(2));
-    assert!(neglected_pet.hunger <= 15 || neglected_pet.cleanliness <= 15);
-    assert!(neglected_pet.is_sick);
-    assert!(neglected_pet.health < 100);
-}
-
-#[test]
-fn test_pet_actions_and_git_commit_deduplication() {
-    let mut pet = Pet::new("BorrowChecker");
-    pet.hunger = 60;
-    pet.happiness = 60;
-    pet.cleanliness = 60;
-    pet.energy = 70;
-
-    // Feed
-    let feed_msg = pet.feed();
-    assert!(!feed_msg.is_empty());
-    assert!(pet.hunger > 60);
-
-    // Play
-    let xp_before_play = pet.xp;
-    let coins_before_play = pet.coins;
-    let play_msg = pet.play();
-    assert!(!play_msg.is_empty());
-    assert!(pet.xp > xp_before_play);
-    assert!(pet.coins > coins_before_play);
-
-    // Toggle sleep on and off
-    let sleep_on_msg = pet.toggle_sleep();
-    assert!(!sleep_on_msg.is_empty());
-    assert!(pet.is_sleeping);
-    assert_eq!(pet.mood, PetMood::Sleeping);
-
-    let sleep_off_msg = pet.toggle_sleep();
-    assert!(!sleep_off_msg.is_empty());
+    let msg_sleep = pet.toggle_sleep();
+    assert!(!msg_sleep.is_empty());
     assert!(!pet.is_sleeping);
 
-    // Clean
-    let clean_msg = pet.clean();
-    assert!(!clean_msg.is_empty());
-    assert_eq!(pet.cleanliness, 100);
+    let msg_clean = pet.clean();
+    assert!(!msg_clean.is_empty());
+    assert_eq!(pet.xp, 0);
 
-    // Code session
-    let xp_before_code = pet.xp;
-    let code_msg = pet.code_session();
-    assert!(!code_msg.is_empty());
-    assert!(pet.xp >= xp_before_code + 25);
-    assert_eq!(pet.mood, PetMood::Coding);
-
-    // Heal
-    pet.is_sick = true;
-    pet.health = 50;
-    let heal_msg = pet.heal();
-    assert!(!heal_msg.is_empty());
-    assert!(!pet.is_sick);
-    assert_eq!(pet.health, 100);
-
-    // Git commit reward & deduplication
-    let xp_before_commit = pet.xp;
-    let coins_before_commit = pet.coins;
-    assert!(!pet.reward_git_commit("   "));
-    assert!(pet.reward_git_commit("a1b2c3d feat: implement borrow checker pet"));
-    assert_eq!(pet.commits_fed, 1);
-    assert!(pet.xp >= xp_before_commit + 40);
-    assert!(pet.coins >= coins_before_commit + 20);
-
-    // Feeding the exact same commit again must be rejected
-    assert!(!pet.reward_git_commit("a1b2c3d feat: implement borrow checker pet"));
-    assert_eq!(pet.commits_fed, 1);
-
-    // Status summary and rename
-    pet.rename("CrabMaster");
-    assert_eq!(pet.name, "CrabMaster");
-    let summary = pet.status_summary();
-    assert!(summary.contains("CrabMaster"));
+    let msg_heal = pet.heal();
+    assert!(!msg_heal.is_empty());
+    assert_eq!(pet.xp, 0);
 }
 
 #[test]
-fn test_sprites_and_animation_cycling() {
-    let pet = Pet::new("SpriteTester");
+fn test_egg_warming_and_hatching() {
+    let mut pet = Pet::new_custom("Boba", PetSpecies::BobaPup, ShellTheme::MatchaGreen);
+    assert_eq!(pet.stage, EvolutionStage::Egg);
+    assert_eq!(pet.incubation, 0);
 
-    for &stage in EvolutionStage::all() {
-        let _sc = stage_color(stage);
+    for step in 1..=3 {
+        let msg = pet.warm_egg();
+        assert!(!msg.is_empty());
+        assert_eq!(pet.incubation, step * 25);
+        assert_eq!(pet.stage, EvolutionStage::Egg);
+    }
+
+    // 4th warm hatches Egg -> Baby
+    let hatch_msg = pet.warm_egg();
+    assert!(!hatch_msg.is_empty());
+    assert_eq!(pet.incubation, 100);
+    assert_eq!(pet.stage, EvolutionStage::Baby);
+    assert!(pet.xp >= 50);
+    assert!(pet.level >= 2);
+    assert_eq!(pet.mood, PetMood::Happy);
+
+    // Calling warm_egg() after hatching delegates to pet_love()
+    pet.happiness = 70;
+    let xp_before = pet.xp;
+    let love_msg = pet.warm_egg();
+    assert!(!love_msg.is_empty());
+    assert!(pet.happiness > 70);
+    assert!(pet.xp > xp_before);
+}
+
+#[test]
+fn test_anti_spam_care_guards() {
+    let mut pet = Pet::new("Cloudy");
+    for _ in 0..4 {
+        pet.warm_egg();
+    }
+    assert_eq!(pet.stage, EvolutionStage::Baby);
+
+    // 1. Full stomach guard (hunger >= 95)
+    pet.hunger = 95;
+    let xp_before = pet.xp;
+    let _ = pet.feed();
+    assert_eq!(pet.xp, xp_before);
+
+    // 2. Max happiness guard (happiness >= 98)
+    pet.happiness = 98;
+    let xp_before = pet.xp;
+    let _ = pet.pet_love();
+    assert_eq!(pet.happiness, 100);
+    assert_eq!(pet.xp, xp_before);
+
+    // 3. Clean room guard (cleanliness == 100 && poop_count == 0)
+    pet.cleanliness = 100;
+    pet.poop_count = 0;
+    let xp_before = pet.xp;
+    let _ = pet.clean();
+    assert_eq!(pet.xp, xp_before);
+
+    // 4. Healthy pet guard (!is_sick && health >= 95)
+    pet.is_sick = false;
+    pet.health = 95;
+    let xp_before = pet.xp;
+    let _ = pet.heal();
+    assert_eq!(pet.xp, xp_before);
+
+    // 5. Low energy / sleeping / sick guards for play() and train()
+    pet.energy = 10;
+    pet.hunger = 80;
+    let xp_before = pet.xp;
+    let _ = pet.play();
+    let _ = pet.train();
+    assert_eq!(pet.xp, xp_before);
+
+    pet.energy = 80;
+    pet.is_sleeping = true;
+    let _ = pet.play();
+    let _ = pet.train();
+    assert_eq!(pet.xp, xp_before);
+
+    pet.is_sleeping = false;
+    pet.is_sick = true;
+    let _ = pet.play();
+    let _ = pet.train();
+    assert_eq!(pet.xp, xp_before);
+}
+
+#[test]
+fn test_feeding_poop_cycle_and_cleaning() {
+    let mut pet = Pet::new("Mochi");
+    for _ in 0..4 {
+        pet.warm_egg();
+    }
+
+    pet.hunger = 30;
+    pet.poop_count = 0;
+    pet.meals_since_poop = 0;
+    pet.cleanliness = 100;
+
+    pet.feed();
+    assert_eq!(pet.poop_count, 0);
+
+    pet.hunger = 40;
+    pet.feed();
+    assert!(pet.poop_count >= 1);
+    assert!(pet.cleanliness < 100);
+
+    let xp_before = pet.xp;
+    pet.clean();
+    assert_eq!(pet.poop_count, 0);
+    assert_eq!(pet.cleanliness, 100);
+    assert!(pet.xp > xp_before);
+}
+
+#[test]
+fn test_xp_and_evolution_stages() {
+    assert_eq!(EvolutionStage::all().len(), 5);
+    assert_eq!(EvolutionStage::from_xp(0), EvolutionStage::Egg);
+    assert_eq!(EvolutionStage::from_xp(50), EvolutionStage::Baby);
+    assert_eq!(EvolutionStage::from_xp(150), EvolutionStage::Teen);
+    assert_eq!(EvolutionStage::from_xp(350), EvolutionStage::Adult);
+    assert_eq!(EvolutionStage::from_xp(700), EvolutionStage::CyberElder);
+
+    for stage in EvolutionStage::all() {
         assert!(!stage.name().is_empty());
-        let _bonus = stage.max_stat_bonus();
+        assert_eq!(stage.name(), stage.display_name());
+        let _ = stage.min_xp();
+        let _ = stage.max_stat_bonus();
+        let _ = stage.next_stage();
+    }
 
-        for &mood in PetMood::all() {
-            let _mc = mood_color(mood);
-            assert!(!mood.label().is_empty());
+    let mut pet = Pet::new("Pebble");
+    assert_eq!(pet.stage, EvolutionStage::Egg);
 
-            let frames = get_sprite_frames(stage, mood);
-            assert!(
-                frames.len() >= 2,
-                "Expected at least 2 sprite frames for {:?} / {:?}",
-                stage,
-                mood
-            );
+    pet.add_xp(50);
+    assert_eq!(pet.stage, EvolutionStage::Baby);
+    assert!(pet.xp_progress_ratio() >= 0.0 && pet.xp_progress_ratio() <= 1.0);
 
-            for tick in 0..4 {
-                let rendered = render_animated_sprite(stage, mood, tick);
-                assert!(!rendered.is_empty());
-                let particles = get_mood_particles(mood, tick);
-                assert!(!particles.is_empty());
+    pet.add_xp(100);
+    assert_eq!(pet.stage, EvolutionStage::Teen);
+
+    pet.add_xp(200);
+    assert_eq!(pet.stage, EvolutionStage::Adult);
+
+    pet.add_xp(400);
+    assert_eq!(pet.stage, EvolutionStage::CyberElder);
+    assert_eq!(pet.stage.next_stage(), None);
+    assert_eq!(pet.xp_progress_ratio(), 1.0);
+}
+
+#[test]
+fn test_species_themes_moods_and_actions() {
+    assert_eq!(PetSpecies::all().len(), 4);
+    for species in PetSpecies::all() {
+        assert!(!species.display_name().is_empty());
+        assert!(!species.description().is_empty());
+        assert!(!species.default_name().is_empty());
+        assert!(!species.favorite_snack().is_empty());
+    }
+
+    assert_eq!(ShellTheme::all().len(), 5);
+    for theme in ShellTheme::all() {
+        assert!(!theme.display_name().is_empty());
+    }
+
+    assert_eq!(PetMood::all().len(), 6);
+    for mood in PetMood::all() {
+        let state: PetState = *mood;
+        assert!(!state.label().is_empty());
+    }
+
+    let mut pet = Pet::new("Tester");
+    pet.rename("Starry");
+    assert_eq!(pet.name, "Starry");
+
+    // Warm via perform_action
+    for _ in 0..4 {
+        let _ = pet.perform_action(PetAction::WarmEgg);
+    }
+    assert_eq!(pet.stage, EvolutionStage::Baby);
+
+    pet.hunger = 50;
+    let _ = pet.perform_action(PetAction::Feed);
+    let _ = pet.perform_action(PetAction::Play);
+    pet.happiness = 70;
+    let _ = pet.perform_action(PetAction::PetLove);
+    let _ = pet.perform_action(PetAction::Train);
+    let _ = pet.perform_action(PetAction::ToggleSleep);
+    assert!(pet.is_sleeping);
+    let _ = pet.perform_action(PetAction::ToggleSleep);
+    assert!(!pet.is_sleeping);
+
+    pet.poop_count = 1;
+    pet.cleanliness = 70;
+    let _ = pet.perform_action(PetAction::Clean);
+    assert_eq!(pet.poop_count, 0);
+
+    pet.is_sick = true;
+    pet.health = 50;
+    let _ = pet.perform_action(PetAction::Heal);
+    assert!(!pet.is_sick);
+
+    assert!(!pet.status_summary().is_empty());
+}
+
+#[test]
+fn test_offline_decay_and_tick_decay() {
+    // Unhatched Egg does not decay stats
+    let mut egg = Pet::new("Eggy");
+    egg.tick_decay();
+    assert_eq!(egg.hunger, 65);
+
+    let future = Utc::now() + Duration::hours(2);
+    let elapsed = egg.apply_offline_decay(future);
+    assert!(elapsed >= 7190);
+    assert_eq!(egg.hunger, 65);
+
+    // Hatched pet decays over time
+    let mut pet = Pet::new("Mochi");
+    for _ in 0..4 {
+        pet.warm_egg();
+    }
+    pet.hunger = 80;
+    pet.happiness = 80;
+    pet.energy = 80;
+    pet.tick_decay();
+    assert!(pet.hunger < 80);
+
+    let future2 = Utc::now() + Duration::hours(3);
+    let _ = pet.apply_offline_decay(future2);
+    assert!(pet.hunger < 75);
+}
+
+#[test]
+fn test_dual_storage_roundtrip() {
+    let dir = tempdir().expect("tempdir");
+    let json_path = dir.path().join("pet.json");
+    let sqlite_path = dir.path().join("pet.db");
+    let paths = StoragePaths::new(json_path.clone(), sqlite_path.clone());
+
+    assert!(!has_existing_save(&paths));
+
+    let fresh = load_or_create(&paths, "DefaultMochi");
+    assert_eq!(fresh.name, "DefaultMochi");
+
+    let mut pet = Pet::new_custom("Boba", PetSpecies::BobaPup, ShellTheme::LavenderDream);
+    for _ in 0..4 {
+        pet.warm_egg();
+    }
+    pet.coins = 42;
+
+    save_dual(&pet, &paths).expect("save_dual should succeed");
+    assert!(has_existing_save(&paths));
+
+    let from_json = load_json(&json_path).expect("load_json");
+    assert_eq!(from_json.name, "Boba");
+    assert_eq!(from_json.species, PetSpecies::BobaPup);
+    assert_eq!(from_json.theme, ShellTheme::LavenderDream);
+    assert_eq!(from_json.coins, 42);
+
+    let from_sql = load_sqlite(&sqlite_path).expect("load_sqlite");
+    assert_eq!(from_sql.name, "Boba");
+    assert_eq!(from_sql.coins, 42);
+
+    save_json(&pet, &json_path).expect("save_json");
+    save_sqlite(&pet, &sqlite_path).expect("save_sqlite");
+
+    let loaded = load_dual(&paths).expect("load_dual");
+    assert_eq!(loaded.name, "Boba");
+    assert_eq!(loaded.stage, EvolutionStage::Baby);
+}
+
+#[test]
+fn test_sprites_and_speech_bubbles() {
+    for species in PetSpecies::all() {
+        for stage in EvolutionStage::all() {
+            let _ = stage_color(*stage);
+            for mood in PetMood::all() {
+                let _ = mood_color(*mood);
+                let _ = get_mood_particles(*mood, 0);
+                let frames = get_sprite_frames(*species, *stage, *mood);
+                assert!(!frames.is_empty());
             }
         }
     }
 
-    for tick in 0..6 {
-        let bubble = speech_bubble(&pet, tick);
-        assert!(!bubble.is_empty());
+    for theme in ShellTheme::all() {
+        let _ = theme_color(*theme);
+    }
+
+    let pet = Pet::new("Mochi");
+    for tick in 0..8 {
+        assert!(!speech_bubble(&pet, tick).is_empty());
+        assert!(!render_animated_sprite(&pet, tick).is_empty());
     }
 }
 
 #[test]
-fn test_minigame_state_transitions_and_rewards() {
-    let mut game = MiniGame::new(24, 10);
-    assert!(game.active);
+fn test_minigame_mechanics_and_rewards() {
+    let mut game = MiniGame::new(40, 16, 20);
     assert!(!game.is_finished());
 
-    let start_x = game.player_x;
+    let initial_x = game.player_x;
     game.move_left();
-    assert!(game.player_x <= start_x);
+    assert!(game.player_x <= initial_x);
     game.move_right();
-    assert!(game.player_x >= start_x);
+    game.move_right();
 
-    // Clamp left boundary
-    for _ in 0..50 {
-        game.move_left();
+    for kind in [ItemKind::Snack, ItemKind::Star, ItemKind::Hazard] {
+        assert!(!kind.symbol().is_empty());
+        assert!(!kind.label().is_empty());
+        let _ = kind.is_reward();
     }
-    assert_eq!(game.player_x, 0);
 
-    // Clamp right boundary
-    for _ in 0..100 {
-        game.move_right();
-    }
-    assert!(game.player_x < game.width);
+    game.spawn_item(game.player_x, ItemKind::Snack);
+    assert!(!game.render_lines().is_empty());
 
-    // Spawn beneficial item right above player and step
-    let target_x = game.player_x;
-    game.spawn_item(target_x, ItemKind::Crate);
-    assert!(!game.items.is_empty());
-
-    let lines = game.render_lines();
-    assert!(!lines.is_empty());
-
-    for _ in 0..15 {
+    for _ in 0..20 {
         game.step();
     }
+    assert!(game.is_finished());
+    assert_eq!(game.ticks_remaining, 0);
 
-    let mut pet = Pet::new("GamerFerris");
-    let initial_coins = pet.coins;
-    let initial_xp = pet.xp;
-    let reward_summary = pet.apply_minigame_reward(120, 30, 45);
-    assert!(!reward_summary.is_empty());
-    assert_eq!(pet.coins, initial_coins + 30);
-    assert_eq!(pet.xp, initial_xp + 45);
+    let mut pet = Pet::new("Mochi");
+    for _ in 0..4 {
+        pet.warm_egg();
+    }
+    let xp_before = pet.xp;
+    let coins_before = pet.coins;
+    let reward_msg = pet.apply_minigame_reward(120, 18, 35);
+    assert!(!reward_msg.is_empty());
+    assert_eq!(pet.coins, coins_before + 18);
+    assert!(pet.xp >= xp_before + 35);
 }
 
 #[test]
-fn test_dual_persistence_and_git_hook_installation() {
-    let temp_dir = unique_temp_dir("persistence");
-    let json_path = temp_dir.join("pet_save.json");
-    let sqlite_path = temp_dir.join("pet_save.db");
-    let _paths = StoragePaths::new(&json_path, &sqlite_path);
+fn test_tui_onboarding_and_responsive_rendering() {
+    let dir = tempdir().expect("tempdir");
+    let paths = StoragePaths::new(dir.path().join("pet.json"), dir.path().join("pet.db"));
 
-    let mut original = Pet::new("PersistCrab");
-    original.add_xp(160);
-    original.reward_git_commit("commit-001 initial");
-    original.coins = 77;
-    original.last_updated = Utc::now();
+    // 1. Onboarding wizard flow
+    let mut app = App::new_onboarding(paths.clone());
+    assert_eq!(app.screen, AppScreen::Onboarding);
+    assert_eq!(app.onboarding_step, OnboardingStep::SelectSpecies);
 
-    // 1. JSON save/load roundtrip
-    save_json(&original, &json_path).expect("save_json should succeed");
-    let from_json = load_json(&json_path).expect("load_json should succeed");
-    assert_eq!(from_json.name, "PersistCrab");
-    assert_eq!(from_json.stage, EvolutionStage::Teen);
-    assert_eq!(from_json.coins, 77);
-    assert_eq!(from_json.commits_fed, 1);
+    let backend = TestBackend::new(90, 28);
+    let mut terminal = Terminal::new(backend).expect("terminal");
+    terminal
+        .draw(|f| draw_ui(f, &app))
+        .expect("draw onboarding species");
 
-    // 2. SQLite save/load roundtrip
-    save_sqlite(&original, &sqlite_path).expect("save_sqlite should succeed");
-    let from_sqlite = load_sqlite(&sqlite_path).expect("load_sqlite should succeed");
-    assert_eq!(from_sqlite.name, "PersistCrab");
-    assert_eq!(from_sqlite.stage, EvolutionStage::Teen);
-    assert_eq!(from_sqlite.coins, 77);
-    assert_eq!(from_sqlite.commits_fed, 1);
+    app.handle_key(KeyCode::Right);
+    app.handle_key(KeyCode::Enter);
+    assert_eq!(app.onboarding_step, OnboardingStep::SelectTheme);
+    terminal
+        .draw(|f| draw_ui(f, &app))
+        .expect("draw onboarding theme");
 
-    // 3. Dual save/load & load_or_create
-    let dual_json = temp_dir.join("dual.json");
-    let dual_db = temp_dir.join("dual.db");
-    let dual_paths = StoragePaths::new(&dual_json, &dual_db);
+    app.handle_key(KeyCode::Right);
+    app.handle_key(KeyCode::Enter);
+    assert_eq!(app.onboarding_step, OnboardingStep::EnterName);
+    terminal
+        .draw(|f| draw_ui(f, &app))
+        .expect("draw onboarding name");
 
-    let created = load_or_create(&dual_paths, "NewbornCrab");
-    assert_eq!(created.name, "NewbornCrab");
+    app.handle_key(KeyCode::Backspace);
+    app.handle_key(KeyCode::Char('K'));
+    app.handle_key(KeyCode::Enter);
+    assert_eq!(app.screen, AppScreen::Habitat);
 
-    save_dual(&original, &dual_paths).expect("save_dual should succeed");
-    let loaded_dual = load_dual(&dual_paths).expect("load_dual should succeed");
-    assert_eq!(loaded_dual.name, "PersistCrab");
-    assert_eq!(loaded_dual.xp, original.xp);
+    // 2. Habitat rendering across Compact (60x22), Standard (90x28), and Wide Deluxe (120x34)
+    for (w, h) in [(60, 22), (90, 28), (120, 34)] {
+        let b = TestBackend::new(w, h);
+        let mut term = Terminal::new(b).expect("term");
+        term.draw(|f| draw_ui(f, &app)).expect("draw habitat");
+    }
 
-    // 4. Git post-commit hook generation & installation
-    let script = generate_post_commit_hook_script(Some("/usr/local/bin/rustagotchi"));
-    assert!(script.contains("--git-commit"));
+    // 3. Hatch pet via keyboard 'w' and enter MiniGame via 'g'
+    for _ in 0..4 {
+        app.handle_key(KeyCode::Char('w'));
+    }
+    assert_eq!(app.pet.stage, EvolutionStage::Baby);
 
-    let fake_repo = temp_dir.join("repo");
-    fs::create_dir_all(fake_repo.join(".git").join("hooks")).expect("create .git/hooks");
-    let hook_path = install_post_commit_hook(&fake_repo, Some("rustagotchi"))
-        .expect("install_post_commit_hook should succeed");
-    assert!(hook_path.exists());
-    let hook_contents = fs::read_to_string(&hook_path).expect("read installed hook");
-    assert!(hook_contents.contains("--git-commit"));
+    app.on_tick();
+    app.handle_key(KeyCode::Char('g'));
+    assert_eq!(app.screen, AppScreen::MiniGame);
 
-    let _ = fs::remove_dir_all(&temp_dir);
+    terminal
+        .draw(|f| draw_ui(f, &app))
+        .expect("draw minigame");
+
+    app.handle_key(KeyCode::Left);
+    app.handle_key(KeyCode::Right);
+    app.handle_key(KeyCode::Esc);
+    assert_eq!(app.screen, AppScreen::Habitat);
 }

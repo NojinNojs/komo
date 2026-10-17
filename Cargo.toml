@@ -1,9 +1,9 @@
 [package]
-name = "rustagotchi"
-version = "0.1.0"
+name = "mochigotchi"
+version = "0.2.0"
 edition = "2021"
-description = "Terminal Virtual Pet (Tamagotchi) in Rust with Git Commit XP Hooks, SQLite/JSON Persistence, and Ratatui Dashboard"
-authors = ["Rustagotchi Contributors"]
+description = "Mochigotchi — Your Cozy Pocket Pet in the Terminal (Universal Tamagotchi Simulator with Ratatui & SQLite/JSON Persistence)"
+authors = ["Mochigotchi Contributors"]
 license = "MIT"
 
 [dependencies]
@@ -14,3 +14,6 @@ serde_json = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
 rand = "0.8"
 rusqlite = { version = "0.31", features = ["bundled"] }
+
+[dev-dependencies]
+tempfile = "3"

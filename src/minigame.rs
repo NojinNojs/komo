@@ -2,24 +2,30 @@ use rand::Rng;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ItemKind {
-    Bug,
-    Crate,
-    Coffee,
-    Panic,
+    Snack,
+    Star,
+    Hazard,
 }
 
 impl ItemKind {
     pub fn symbol(&self) -> &'static str {
         match self {
-            ItemKind::Crate => "[C]",
-            ItemKind::Coffee => "[☕]",
-            ItemKind::Bug => "[B]",
-            ItemKind::Panic => "[!]",
+            ItemKind::Snack => "[O]",
+            ItemKind::Star => "[*]",
+            ItemKind::Hazard => "[X]",
+        }
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            ItemKind::Snack => "🍙 Snack",
+            ItemKind::Star => "⭐ Star",
+            ItemKind::Hazard => "⚡ Storm",
         }
     }
 
     pub fn is_reward(&self) -> bool {
-        matches!(self, ItemKind::Crate | ItemKind::Coffee)
+        matches!(self, ItemKind::Snack | ItemKind::Star)
     }
 }
 
@@ -35,47 +41,54 @@ pub struct MiniGame {
     pub width: u16,
     pub height: u16,
     pub player_x: u16,
+    pub basket_width: u16,
+    pub items: Vec<FallingItem>,
     pub score: u32,
     pub coins_earned: u32,
     pub xp_earned: u32,
+    pub caught_snacks: u32,
+    pub caught_stars: u32,
+    pub hits_taken: u32,
     pub ticks_remaining: u32,
-    pub active: bool,
-    pub items: Vec<FallingItem>,
-    pub status_msg: String,
 }
 
 impl MiniGame {
-    pub fn new(width: u16, height: u16) -> Self {
-        let w = width.max(5);
-        let h = height.max(3);
+    pub fn new(width: u16, height: u16, duration_ticks: u32) -> Self {
+        let w = width.max(6);
+        let h = height.max(4);
         Self {
             width: w,
             height: h,
             player_x: w / 2,
+            basket_width: 6,
+            items: Vec::new(),
             score: 0,
             coins_earned: 0,
             xp_earned: 0,
-            ticks_remaining: 120,
-            active: true,
-            items: Vec::new(),
-            status_msg: "Catch [C] Crates & [☕] Coffee! Dodge [B] Bugs & [!] Panics!".to_string(),
+            caught_snacks: 0,
+            caught_stars: 0,
+            hits_taken: 0,
+            ticks_remaining: duration_ticks,
         }
     }
 
     pub fn move_left(&mut self) {
-        if !self.active {
+        if self.is_finished() {
             return;
         }
-        self.player_x = self.player_x.saturating_sub(1);
+        self.player_x = self.player_x.saturating_sub(2);
     }
 
     pub fn move_right(&mut self) {
-        if !self.active {
+        if self.is_finished() {
             return;
         }
-        if self.player_x + 1 < self.width {
-            self.player_x += 1;
-        }
+        let max_x = self.width.saturating_sub(1);
+        self.player_x = (self.player_x + 2).min(max_x);
+    }
+
+    pub fn is_finished(&self) -> bool {
+        self.ticks_remaining == 0
     }
 
     pub fn spawn_item(&mut self, x: u16, kind: ItemKind) {
@@ -88,42 +101,35 @@ impl MiniGame {
     }
 
     pub fn step(&mut self) {
-        if !self.active || self.ticks_remaining == 0 {
-            self.active = false;
+        if self.is_finished() {
             return;
         }
 
         let bottom_row = self.height.saturating_sub(1);
         let player_x = self.player_x;
+        let catch_radius = (self.basket_width / 2).max(2);
 
         let mut remaining_items = Vec::with_capacity(self.items.len());
         for mut item in self.items.drain(..) {
             item.y = item.y.saturating_add(1);
             if item.y >= bottom_row {
-                let dist = item.x.abs_diff(player_x);
-                if dist <= 1 {
+                if item.x.abs_diff(player_x) <= catch_radius {
                     match item.kind {
-                        ItemKind::Crate => {
+                        ItemKind::Snack => {
                             self.score = self.score.saturating_add(15);
                             self.coins_earned = self.coins_earned.saturating_add(3);
                             self.xp_earned = self.xp_earned.saturating_add(8);
-                            self.status_msg =
-                                "Caught a crate [C]! +15 score, +3 coins, +8 XP".to_string();
+                            self.caught_snacks = self.caught_snacks.saturating_add(1);
                         }
-                        ItemKind::Coffee => {
-                            self.score = self.score.saturating_add(20);
+                        ItemKind::Star => {
+                            self.score = self.score.saturating_add(25);
                             self.coins_earned = self.coins_earned.saturating_add(5);
-                            self.xp_earned = self.xp_earned.saturating_add(10);
-                            self.status_msg =
-                                "Caught coffee [☕]! +20 score, +5 coins, +10 XP".to_string();
+                            self.xp_earned = self.xp_earned.saturating_add(12);
+                            self.caught_stars = self.caught_stars.saturating_add(1);
                         }
-                        ItemKind::Bug => {
-                            self.score = self.score.saturating_sub(10);
-                            self.status_msg = "Hit a bug [B]! -10 score".to_string();
-                        }
-                        ItemKind::Panic => {
-                            self.score = self.score.saturating_sub(20);
-                            self.status_msg = "Hit a panic [!]! -20 score".to_string();
+                        ItemKind::Hazard => {
+                            self.score = self.score.saturating_sub(15);
+                            self.hits_taken = self.hits_taken.saturating_add(1);
                         }
                     }
                 }
@@ -134,33 +140,20 @@ impl MiniGame {
         self.items = remaining_items;
 
         let mut rng = rand::thread_rng();
-        if rng.gen_range(0..100) < 45 {
-            let spawn_x = rng.gen_range(0..self.width);
+        if rng.gen_range(0..100) < 48 {
+            let spawn_x = rng.gen_range(1..self.width.saturating_sub(1).max(2));
             let roll = rng.gen_range(0..100);
-            let kind = if roll < 35 {
-                ItemKind::Crate
-            } else if roll < 55 {
-                ItemKind::Coffee
-            } else if roll < 80 {
-                ItemKind::Bug
+            let kind = if roll < 50 {
+                ItemKind::Snack
+            } else if roll < 78 {
+                ItemKind::Star
             } else {
-                ItemKind::Panic
+                ItemKind::Hazard
             };
             self.spawn_item(spawn_x, kind);
         }
 
         self.ticks_remaining = self.ticks_remaining.saturating_sub(1);
-        if self.ticks_remaining == 0 {
-            self.active = false;
-            self.status_msg = format!(
-                "Game Over! Final Score: {} (+{} coins, +{} XP)",
-                self.score, self.coins_earned, self.xp_earned
-            );
-        }
-    }
-
-    pub fn is_finished(&self) -> bool {
-        !self.active || self.ticks_remaining == 0
     }
 
     pub fn render_lines(&self) -> Vec<String> {
@@ -172,23 +165,30 @@ impl MiniGame {
         for y in 0..h {
             if y == bottom {
                 let mut row = vec![' '; w];
-                let catcher = ['[', '=', '=', '=', ']'];
+                let basket = ['\\', '=', '=', '=', '=', '/'];
                 let center = self.player_x as isize;
-                for (i, ch) in catcher.iter().enumerate() {
-                    let pos = center - 2 + i as isize;
+                for (i, ch) in basket.iter().enumerate() {
+                    let pos = center - 3 + i as isize;
                     if pos >= 0 && (pos as usize) < w {
                         row[pos as usize] = *ch;
                     }
                 }
                 lines.push(row.into_iter().collect());
             } else {
-                let mut cells: Vec<&str> = vec![" "; w];
+                let mut row = vec![' '; w];
                 for item in &self.items {
-                    if item.y as usize == y && (item.x as usize) < w {
-                        cells[item.x as usize] = item.kind.symbol();
+                    if item.y as usize == y {
+                        let sym = item.kind.symbol();
+                        let start = (item.x as isize) - 1;
+                        for (i, ch) in sym.chars().enumerate() {
+                            let pos = start + i as isize;
+                            if pos >= 0 && (pos as usize) < w {
+                                row[pos as usize] = ch;
+                            }
+                        }
                     }
                 }
-                lines.push(cells.concat());
+                lines.push(row.into_iter().collect());
             }
         }
 
@@ -202,8 +202,8 @@ mod tests {
 
     #[test]
     fn test_minigame_movement_and_bounds() {
-        let mut game = MiniGame::new(10, 6);
-        assert_eq!(game.player_x, 5);
+        let mut game = MiniGame::new(12, 6, 50);
+        assert_eq!(game.player_x, 6);
         for _ in 0..20 {
             game.move_left();
         }
@@ -211,63 +211,57 @@ mod tests {
         for _ in 0..20 {
             game.move_right();
         }
-        assert_eq!(game.player_x, 9);
+        assert_eq!(game.player_x, 11);
     }
 
     #[test]
-    fn test_minigame_catch_rewards_and_hazards() {
-        let mut game = MiniGame::new(20, 4);
+    fn test_minigame_catch_snacks_stars_and_hazards() {
+        let mut game = MiniGame::new(20, 4, 50);
         let px = game.player_x;
 
-        game.spawn_item(px, ItemKind::Crate);
+        game.spawn_item(px, ItemKind::Snack);
         for _ in 0..3 {
-            game.items.retain(|i| i.x == px && i.kind == ItemKind::Crate);
+            game.items.retain(|i| i.x == px && i.kind == ItemKind::Snack);
             game.step();
         }
         assert_eq!(game.score, 15);
         assert_eq!(game.coins_earned, 3);
         assert_eq!(game.xp_earned, 8);
+        assert_eq!(game.caught_snacks, 1);
 
         game.items.clear();
-        game.spawn_item(px, ItemKind::Coffee);
+        game.spawn_item(px, ItemKind::Star);
         for _ in 0..3 {
-            game.items.retain(|i| i.x == px && i.kind == ItemKind::Coffee);
+            game.items.retain(|i| i.x == px && i.kind == ItemKind::Star);
             game.step();
         }
-        assert_eq!(game.score, 35);
+        assert_eq!(game.score, 40);
         assert_eq!(game.coins_earned, 8);
-        assert_eq!(game.xp_earned, 18);
+        assert_eq!(game.xp_earned, 20);
+        assert_eq!(game.caught_stars, 1);
 
         game.items.clear();
-        game.spawn_item(px, ItemKind::Bug);
+        game.spawn_item(px, ItemKind::Hazard);
         for _ in 0..3 {
-            game.items.retain(|i| i.x == px && i.kind == ItemKind::Bug);
+            game.items.retain(|i| i.x == px && i.kind == ItemKind::Hazard);
             game.step();
         }
         assert_eq!(game.score, 25);
-
-        game.items.clear();
-        game.spawn_item(px, ItemKind::Panic);
-        for _ in 0..3 {
-            game.items.retain(|i| i.x == px && i.kind == ItemKind::Panic);
-            game.step();
-        }
-        assert_eq!(game.score, 5);
+        assert_eq!(game.hits_taken, 1);
     }
 
     #[test]
     fn test_minigame_render_and_completion() {
-        let mut game = MiniGame::new(16, 6);
-        game.spawn_item(4, ItemKind::Crate);
+        let mut game = MiniGame::new(20, 6, 5);
+        game.spawn_item(8, ItemKind::Snack);
         game.items[0].y = 1;
         let lines = game.render_lines();
         assert_eq!(lines.len(), 6);
-        assert!(lines[1].contains("[C]"));
-        assert!(lines[5].contains("[===]"));
+        assert!(lines[1].contains("[O]"));
+        assert!(lines[5].contains("\\====/"));
 
         game.ticks_remaining = 1;
         game.step();
         assert!(game.is_finished());
-        assert!(!game.active);
     }
 }
