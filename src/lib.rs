@@ -1,8 +1,9 @@
 //! # Mochigotchi
 //!
 //! A cozy, collectible pocket-pet simulator for your terminal.
-//! Ten species, a multi-pet Sanctuary, realistic incubation and care
-//! cooldowns, and dual JSON + SQLite saves.
+//! Ten species, TrueColor multi-line ASCII sprites, a multi-pet Sanctuary,
+//! realistic multi-hour/day progression, offline welcome-back reports, food
+//! pantry, and dual JSON + SQLite saves.
 
 pub mod minigame;
 pub mod pet;
@@ -12,16 +13,18 @@ pub mod tui;
 
 pub use minigame::{FallingItem, ItemKind, MiniGame};
 pub use pet::{
-    EvolutionStage, Pet, PetAction, PetMood, PetSpecies, PetState, Sanctuary, ShellTheme,
-    PET_COOLDOWN_SECS, TRAIN_COOLDOWN_SECS, WARM_COOLDOWN_SECS,
+    format_duration_human, EvolutionStage, FoodChoice, OfflineReport, Pet, PetAction, PetMood,
+    PetSpecies, PetState, Sanctuary, ShellTheme, FEED_COOLDOWN_SECS, PET_COOLDOWN_SECS,
+    PLAY_COOLDOWN_SECS, TRAIN_COOLDOWN_SECS, WARM_COOLDOWN_SECS,
 };
 pub use sprites::{
     get_mood_particles, get_sprite_frames, mood_color, mood_dialogue, render_animated_sprite,
-    render_species_preview, sky_scene, speech_bubble, stage_color, theme_color,
+    render_colored_preview, render_colored_sprite, render_species_preview, sky_scene,
+    speech_bubble, species_palette, stage_color, theme_color,
 };
 pub use storage::{
     has_existing_save, load_dual, load_json, load_or_create, load_sanctuary, load_sqlite,
     save_dual, save_json, save_sanctuary, save_sqlite, StoragePaths, DEFAULT_JSON_PATH,
     DEFAULT_SQLITE_PATH,
 };
-pub use tui::{draw_ui, run_tui, App, AppScreen, LayoutTier, OnboardingStep};
+pub use tui::{draw_ui, run_tui, run_tui_with_report, App, AppScreen, LayoutTier, OnboardingStep};

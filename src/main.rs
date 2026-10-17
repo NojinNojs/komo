@@ -1,8 +1,9 @@
 //! Command-line entry point for **Mochigotchi**.
 //!
-//! Running it with no arguments drops you straight into the LCD habitat.
-//! Flags let you script care actions, inspect a companion, or adopt a
-//! specific species without the wizard.
+//! Running it with no arguments drops you straight into the LCD habitat (with
+//! a Welcome Back report if you were away for 2+ minutes). Flags let you script
+//! care actions, inspect a companion, or adopt a specific species without the
+//! wizard.
 
 use std::env;
 use std::error::Error;
@@ -15,7 +16,7 @@ use mochigotchi::sprites::{render_animated_sprite, speech_bubble};
 use mochigotchi::storage::{has_existing_save, load_sanctuary, save_sanctuary, StoragePaths};
 
 fn print_help() {
-    println!("🍡 Mochigotchi v0.3.0 — Multi-Pet Sanctuary & Mythical Fantasy Edition");
+    println!("🍡 Mochigotchi v0.4.0 — Sanctuary, TrueColor Sprites & Real-Time Life Edition");
     println!();
     println!("USAGE:");
     println!("  mochigotchi [OPTIONS]");
@@ -29,19 +30,19 @@ fn print_help() {
     println!("  --name <NAME>         Name your companion");
     println!("  --status              Print the active companion, then exit");
     println!("  --roster              Print every companion in the Sanctuary, then exit");
-    println!("  --warm                Warm the egg (+20% incubation, 12s cooldown)");
+    println!("  --warm                Warm the egg (+20% incubation, 3m cooldown)");
     println!("  --feed                Feed the active companion");
     println!("  --play                Play together");
     println!("  --pet                 Give headpats");
-    println!("  --train               Run a training session (15s cooldown)");
+    println!("  --train               Run a training session (4m cooldown)");
     println!("  --sleep               Toggle sleep");
     println!("  --clean               Tidy the habitat");
     println!("  --heal                Give medicine");
     println!("  --reset               Delete existing saves and start over");
     println!();
     println!("KEYBOARD (in-game):");
-    println!("  [W] warm/cuddle  [F] feed  [P] play  [E] train  [S] sleep");
-    println!("  [C] clean  [H] heal  [G] arcade  [L] Sanctuary roster  [N] adopt");
+    println!("  [W] warm/cuddle  [F] quick feed  [M] pantry menu  [P] play  [E] train  [S] sleep");
+    println!("  [C] clean  [H] heal  [G] arcade  [L] Sanctuary roster  [N] adopt  [?] help");
     println!("  [[ / ]] switch companion  [Tab] shell color  [R] rename  [Q] quit");
 }
 
@@ -196,7 +197,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
-    sanctuary.apply_offline_decay_all(Utc::now());
+    let (_elapsed, offline_report) = sanctuary.apply_offline_decay_all_with_report(Utc::now());
 
     if !cli.actions.is_empty() {
         for action in &cli.actions {
@@ -248,5 +249,5 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     let start_onboarding = !had_save && !customised && cli.actions.is_empty();
-    mochigotchi::tui::run_tui(sanctuary, cli.paths, start_onboarding)
+    mochigotchi::tui::run_tui_with_report(sanctuary, cli.paths, start_onboarding, offline_report)
 }

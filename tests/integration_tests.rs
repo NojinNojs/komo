@@ -1,16 +1,17 @@
 //! End-to-end integration tests for **Mochigotchi**: lifecycle rules,
-//! realistic cooldowns, the multi-pet Sanctuary, persistence, and the TUI.
+//! realistic multi-hour/day cooldowns, offline welcome-back reports, food
+//! pantry, TrueColor sprites, the multi-pet Sanctuary, persistence, and TUI.
 
 use chrono::{Duration, Utc};
 use crossterm::event::KeyCode;
 use mochigotchi::minigame::{ItemKind, MiniGame};
 use mochigotchi::pet::{
-    EvolutionStage, Pet, PetAction, PetMood, PetSpecies, Sanctuary, ShellTheme,
+    EvolutionStage, FoodChoice, Pet, PetAction, PetMood, PetSpecies, Sanctuary, ShellTheme,
     PET_COOLDOWN_SECS, TRAIN_COOLDOWN_SECS, WARM_COOLDOWN_SECS,
 };
 use mochigotchi::sprites::{
-    get_mood_particles, get_sprite_frames, render_animated_sprite, render_species_preview,
-    speech_bubble, theme_color,
+    get_mood_particles, get_sprite_frames, render_animated_sprite, render_colored_preview,
+    render_colored_sprite, render_species_preview, speech_bubble, theme_color,
 };
 use mochigotchi::storage::{
     has_existing_save, load_dual, load_sanctuary, save_dual, save_sanctuary, StoragePaths,
@@ -25,7 +26,7 @@ fn temp_paths() -> (TempDir, StoragePaths) {
     (dir, paths)
 }
 
-// ── 1. Species catalogue ───────────────────────────────────────────────────
+// ── 1. Species catalogue & TrueColor sprites ──────────────────────────────
 
 #[test]
 fn all_ten_species_are_described_and_animated() {
@@ -48,6 +49,9 @@ fn all_ten_species_are_described_and_animated() {
         let preview = render_species_preview(*species);
         assert!(!preview.is_empty(), "{species:?} preview");
 
+        let colored_preview = render_colored_preview(*species, EvolutionStage::Adult, 0);
+        assert!(!colored_preview.is_empty());
+
         for stage in EvolutionStage::all() {
             for mood in PetMood::all() {
                 let frames = get_sprite_frames(*species, *stage, *mood);
@@ -57,7 +61,6 @@ fn all_ten_species_are_described_and_animated() {
         }
     }
 
-    // Dragons are part of the roster.
     assert!(all.iter().any(|s| s.display_name().contains("Ignis Drake")));
     assert!(all.iter().any(|s| s.display_name().contains("Azure Wyrm")));
 }
@@ -89,7 +92,6 @@ fn unhatched_egg_refuses_every_care_action() {
         assert_eq!(clone.mood, PetMood::Idle);
     }
 
-    // Warming is the only legal action, and it is rate-limited.
     let first = pet.warm_egg();
     assert!(first.contains("Incubation at 20%"), "{first}");
     assert_eq!(pet.incubation, 20);
@@ -129,43 +131,39 @@ fn passive_incubation_never_hatches_the_egg_by_itself() {
     assert_eq!(pet.incubation, 99, "passive warmth tops out at 99%");
     assert_eq!(pet.hunger, 65, "an egg never starves");
 
-    // Coming back after a long break also stops at 99%.
     let mut pet = Pet::new("Mochi");
     let now = Utc::now() + Duration::hours(3);
-    let elapsed = pet.apply_offline_decay(now);
+    let (elapsed, report) = pet.apply_offline_decay_with_report(now);
     assert!(elapsed >= 10_000);
+    assert!(report.is_some());
     assert_eq!(pet.incubation, 99);
     assert_eq!(pet.hunger, 65);
 
-    // One single warm (after the cooldown) is the final push.
     pet.clear_cooldowns();
     let msg = pet.warm_egg();
     assert!(msg.contains("CRACK"), "{msg}");
     assert_eq!(pet.stage, EvolutionStage::Baby);
 }
 
-// ── 3. Anti-spam care guards ──────────────────────────────────────────────
+// ── 3. Anti-spam care guards & Pantry choices ─────────────────────────────
 
 #[test]
 fn care_actions_cannot_be_spammed_for_free_xp() {
     let mut pet = Pet::new("Mochi");
     pet.stage = EvolutionStage::Baby;
 
-    // Full stomach refuses food.
     pet.hunger = 98;
     let before = pet.xp;
     let msg = pet.feed();
     assert!(msg.contains("completely full"), "{msg}");
     assert_eq!(pet.xp, before);
 
-    // Maxed happiness refuses endless headpats.
     pet.happiness = 100;
     pet.clear_cooldowns();
     let msg = pet.pet_love();
     assert!(msg.contains("maxed out"), "{msg}");
     assert_eq!(pet.xp, before);
 
-    // Back-to-back cuddles respect the cooldown.
     pet.happiness = 50;
     pet.clear_cooldowns();
     let first = pet.pet_love();
@@ -176,7 +174,6 @@ fn care_actions_cannot_be_spammed_for_free_xp() {
     assert!(pet_rest > 0);
     assert!(pet_rest <= PET_COOLDOWN_SECS as u64);
 
-    // Training respects its cooldown too.
     pet.energy = 100;
     pet.hunger = 100;
     pet.clear_cooldowns();
@@ -188,7 +185,6 @@ fn care_actions_cannot_be_spammed_for_free_xp() {
     assert!(train_rest > 0);
     assert!(train_rest <= TRAIN_COOLDOWN_SECS as u64);
 
-    // A clean room cannot be cleaned again.
     pet.cleanliness = 100;
     pet.poop_count = 0;
     let xp_before = pet.xp;
@@ -196,14 +192,12 @@ fn care_actions_cannot_be_spammed_for_free_xp() {
     assert!(msg.contains("sparkling clean"), "{msg}");
     assert_eq!(pet.xp, xp_before);
 
-    // Healthy pets refuse medicine.
     pet.is_sick = false;
     pet.health = 100;
     let msg = pet.heal();
     assert!(msg.contains("tip-top health"), "{msg}");
     assert_eq!(pet.xp, xp_before);
 
-    // Exhausted / starving pets refuse play and training.
     pet.clear_cooldowns();
     pet.energy = 5;
     assert!(pet.play().contains("too tired"));
@@ -214,7 +208,6 @@ fn care_actions_cannot_be_spammed_for_free_xp() {
     assert!(pet.play().contains("too hungry"));
     assert!(pet.train().contains("too hungry to focus"));
 
-    // Sick pets need medicine first.
     pet.hunger = 80;
     pet.energy = 90;
     pet.is_sick = true;
@@ -225,7 +218,6 @@ fn care_actions_cannot_be_spammed_for_free_xp() {
     assert!(healed.contains("recovered"), "{healed}");
     assert!(!pet.is_sick);
 
-    // Sleeping pets ignore everything until woken.
     let mut sleepy = Pet::new("Mochi");
     sleepy.stage = EvolutionStage::Baby;
     let msg = sleepy.toggle_sleep();
@@ -236,15 +228,28 @@ fn care_actions_cannot_be_spammed_for_free_xp() {
 }
 
 #[test]
-fn feeding_cycle_produces_messes_that_must_be_cleaned() {
+fn pantry_meals_and_poop_cleaning_cycle() {
     let mut pet = Pet::new("Mochi");
     pet.stage = EvolutionStage::Baby;
     pet.hunger = 40;
 
+    // Expensive meal without coins is refused.
+    pet.coins = 0;
+    let refused = pet.feed_choice(FoodChoice::StarlightDelight);
+    assert!(refused.contains("Not enough coins"), "{refused}");
+
+    // Free favorite snack works.
+    pet.clear_cooldowns();
     pet.feed();
     assert_eq!(pet.poop_count, 0, "one meal is not enough for a mess");
+
+    // Second meal with coins buys Bento and triggers poop.
+    pet.coins = 20;
     pet.hunger = 40;
-    pet.feed();
+    pet.clear_cooldowns();
+    let bento = pet.feed_choice(FoodChoice::HeartyBento);
+    assert!(bento.contains("Hearty Bento"), "{bento}");
+    assert_eq!(pet.coins, 12);
     assert_eq!(pet.poop_count, 1);
     assert!(pet.cleanliness < 100);
 
@@ -254,7 +259,7 @@ fn feeding_cycle_produces_messes_that_must_be_cleaned() {
     assert_eq!(pet.cleanliness, 100);
 }
 
-// ── 4. Evolution needs time, bond and XP ──────────────────────────────────
+// ── 4. Evolution needs real multi-hour age, bond and XP ───────────────────
 
 #[test]
 fn evolution_requires_xp_bond_and_time_together() {
@@ -262,7 +267,7 @@ fn evolution_requires_xp_bond_and_time_together() {
     pet.stage = EvolutionStage::Baby;
     pet.xp = EvolutionStage::Teen.min_xp();
     pet.bond = EvolutionStage::Teen.min_bond();
-    pet.age_seconds = 1; // still too young
+    pet.age_seconds = 60; // 1 minute is too young for Teen (needs 6 hours)
 
     assert!(!pet.check_evolution());
     assert_eq!(pet.stage, EvolutionStage::Baby);
@@ -271,7 +276,6 @@ fn evolution_requires_xp_bond_and_time_together() {
     assert!(pet.check_evolution());
     assert_eq!(pet.stage, EvolutionStage::Teen);
 
-    // Low bond blocks the next step even with plenty of XP.
     pet.xp = EvolutionStage::Adult.min_xp();
     pet.age_seconds = EvolutionStage::Adult.min_age_seconds();
     pet.bond = 0;
@@ -283,7 +287,6 @@ fn evolution_requires_xp_bond_and_time_together() {
     assert_eq!(pet.stage, EvolutionStage::Adult);
     assert!(pet.xp_progress_ratio() >= 0.0 && pet.xp_progress_ratio() <= 1.0);
 
-    // Reaching the elder form and staying there.
     pet.xp = EvolutionStage::CyberElder.min_xp();
     pet.age_seconds = EvolutionStage::CyberElder.min_age_seconds();
     assert!(pet.check_evolution());
@@ -298,25 +301,29 @@ fn evolution_requires_xp_bond_and_time_together() {
 }
 
 #[test]
-fn offline_decay_only_hurts_hatched_pets() {
+fn offline_decay_generates_welcome_back_report_and_exploration_gifts() {
     let mut pet = Pet::new("Mochi");
     pet.stage = EvolutionStage::Baby;
-    let before = (pet.hunger, pet.happiness, pet.energy);
-    let now = Utc::now() + Duration::minutes(10);
-    let elapsed = pet.apply_offline_decay(now);
+    pet.hunger = 80;
+    let before = (pet.hunger, pet.happiness, pet.energy, pet.coins);
+    let now = Utc::now() + Duration::minutes(45);
+    let (elapsed, report) = pet.apply_offline_decay_with_report(now);
 
-    assert_eq!(elapsed, 600);
+    assert_eq!(elapsed, 2_700);
     assert!(pet.hunger < before.0);
     assert!(pet.happiness < before.1);
     assert!(pet.energy < before.2);
-    assert!(pet.age_seconds >= 600);
+    assert!(pet.coins > before.3, "pet should find coins while exploring");
+    let rep = report.expect("should generate welcome back report");
+    assert_eq!(rep.pet_name, "Mochi");
+    assert!(!rep.events.is_empty());
 
-    // A sleeping pet recovers energy instead.
+    // A sleeping pet recovers energy and wakes up after a long rest.
     let mut sleeper = Pet::new("Mochi");
     sleeper.stage = EvolutionStage::Baby;
     sleeper.energy = 20;
     sleeper.toggle_sleep();
-    sleeper.apply_offline_decay(Utc::now() + Duration::minutes(30));
+    sleeper.apply_offline_decay(Utc::now() + Duration::minutes(60));
     assert!(sleeper.energy > 20);
 }
 
@@ -341,7 +348,7 @@ fn sanctuary_holds_many_companions_and_cycles_between_them() {
     assert_eq!(idx_a, 1);
     assert_eq!(idx_b, 2);
     assert_eq!(sanctuary.active_pet().name, "Puni");
-    assert_eq!(sanctuary.hatched_count(), 0, "all three start as eggs");
+    assert_eq!(sanctuary.hatched_count(), 0);
 
     sanctuary.next_pet();
     assert_eq!(sanctuary.active_pet().name, "Ignis");
@@ -352,13 +359,11 @@ fn sanctuary_holds_many_companions_and_cycles_between_them() {
     assert_eq!(sanctuary.active_pet().species, PetSpecies::AzureWyrm);
     assert!(!sanctuary.switch_pet(99));
 
-    // Editing the active pet, then syncing it back, keeps the roster coherent.
     sanctuary.active_pet_mut().rename("Ao-chan");
     let snapshot = sanctuary.active_pet().clone();
     sanctuary.sync_active(&snapshot);
     assert_eq!(sanctuary.pets[1].name, "Ao-chan");
 
-    // Background decay touches every companion.
     let before: Vec<u64> = sanctuary.pets.iter().map(|p| p.age_seconds).collect();
     sanctuary.tick_decay_all();
     for (pet, old_age) in sanctuary.pets.iter().zip(before) {
@@ -390,7 +395,7 @@ fn sanctuary_survives_a_save_and_load_cycle() {
         ShellTheme::LavenderDream,
     ));
     sanctuary.pets[0].stage = EvolutionStage::Adult;
-    sanctuary.pets[0].xp = 700;
+    sanctuary.pets[0].xp = 1_500;
     sanctuary.active_index = 1;
 
     save_sanctuary(&sanctuary, &paths).expect("save sanctuary");
@@ -400,14 +405,12 @@ fn sanctuary_survives_a_save_and_load_cycle() {
     assert_eq!(loaded.pets.len(), 3);
     assert_eq!(loaded.active_index, 1);
     assert_eq!(loaded.pets[0].stage, EvolutionStage::Adult);
-    assert_eq!(loaded.pets[0].xp, 700);
+    assert_eq!(loaded.pets[0].xp, 1_500);
     assert_eq!(loaded.pets[2].species, PetSpecies::EmberFox);
 
-    // The active pet is also mirrored into the classic single-pet stores.
     let mirrored = load_dual(&paths).expect("legacy mirror");
     assert_eq!(mirrored.name, loaded.active_pet().name);
 
-    // A legacy single-pet save transparently upgrades to a one-pet Sanctuary.
     let (_dir2, legacy_paths) = temp_paths();
     save_dual(&Pet::new("Pebble"), &legacy_paths).expect("legacy save");
     let upgraded = load_sanctuary(&legacy_paths).expect("upgrade legacy save");
@@ -436,7 +439,7 @@ fn snack_catcher_arcade_awards_rewards() {
         }
     }
     assert!(game.is_finished());
-    assert!(game.ticks_remaining == 0);
+    assert_eq!(game.ticks_remaining, 0);
 }
 
 // ── 7. TUI end-to-end ─────────────────────────────────────────────────────
@@ -448,10 +451,10 @@ fn adoption_wizard_lets_you_build_a_collection() {
     assert_eq!(app.screen, AppScreen::Onboarding);
     assert_eq!(app.onboarding_step, OnboardingStep::SelectSpecies);
 
-    // Adopt Ignis Drake.
     for _ in 0..4 {
         app.handle_key(KeyCode::Down);
     }
+    app.handle_key(KeyCode::Char('v'));
     app.handle_key(KeyCode::Enter);
     assert_eq!(app.onboarding_step, OnboardingStep::SelectTheme);
     app.handle_key(KeyCode::Tab);
@@ -470,40 +473,34 @@ fn adoption_wizard_lets_you_build_a_collection() {
     assert_eq!(app.pet.name, "Sparky");
     assert_eq!(app.sanctuary.pets.len(), 1);
 
-    // Adopt a second companion without losing the first.
     app.handle_key(KeyCode::Char('n'));
     app.handle_key(KeyCode::Enter);
     app.handle_key(KeyCode::Enter);
     app.handle_key(KeyCode::Enter);
     assert_eq!(app.sanctuary.pets.len(), 2);
 
-    // Quick switching with [ and ].
     let before = app.pet.species;
     app.handle_key(KeyCode::Char('['));
     assert_ne!(app.pet.species, before);
     app.handle_key(KeyCode::Char(']'));
     assert_eq!(app.pet.species, before);
 
-    // Roster screen switching.
     app.handle_key(KeyCode::Char('l'));
     assert_eq!(app.screen, AppScreen::SanctuaryRoster);
     app.handle_key(KeyCode::Up);
     app.handle_key(KeyCode::Enter);
     assert_eq!(app.screen, AppScreen::Habitat);
 
-    // Egg care through the keyboard.
     let incubation = app.pet.incubation;
     app.handle_key(KeyCode::Char('w'));
     assert!(app.pet.incubation > incubation || app.pet.stage != EvolutionStage::Egg);
 
-    // Renaming.
     app.handle_key(KeyCode::Char('r'));
     app.handle_key(KeyCode::Backspace);
     app.handle_key(KeyCode::Char('z'));
     app.handle_key(KeyCode::Enter);
     assert!(!app.pet.name.is_empty());
 
-    // Shell recolor + quit.
     let theme = app.pet.theme;
     app.handle_key(KeyCode::Tab);
     assert_ne!(app.pet.theme, theme);
@@ -550,25 +547,37 @@ fn tui_renders_across_every_screen_and_terminal_size() {
         }
     }
 
-    // Mood particles and speech always resolve for every mood.
     for mood in PetMood::all() {
         app.pet.mood = *mood;
         assert!(!get_mood_particles(*mood, 0).is_empty());
         assert!(!speech_bubble(&app.pet, 0).is_empty());
         assert!(!render_animated_sprite(&app.pet, 0).is_empty());
+        assert!(!render_colored_sprite(&app.pet, 0).is_empty());
     }
 }
 
 #[test]
-fn habitat_keys_drive_the_care_loop_without_panicking() {
+fn habitat_keys_pantry_and_help_drive_care_loop() {
     let (_dir, paths) = temp_paths();
     let mut app = App::new(Pet::new("Mochi"), paths);
     app.pet.stage = EvolutionStage::Adult;
     app.pet.hunger = 50;
     app.pet.energy = 90;
 
+    // Open and use Pantry menu with 'm'
+    app.handle_key(KeyCode::Char('m'));
+    assert!(app.pantry_open);
+    app.handle_key(KeyCode::Enter);
+    assert!(!app.pantry_open);
+    assert!(app.pet.hunger > 50);
+
+    // Open and close Help modal with '?'
+    app.handle_key(KeyCode::Char('?'));
+    assert!(app.show_help);
+    app.handle_key(KeyCode::Esc);
+    assert!(!app.show_help);
+
     for key in [
-        KeyCode::Char('f'),
         KeyCode::Char('p'),
         KeyCode::Char('t'),
         KeyCode::Char('e'),
@@ -587,10 +596,4 @@ fn habitat_keys_drive_the_care_loop_without_panicking() {
     }
     assert_eq!(app.screen, AppScreen::Habitat);
     assert!(app.pet.xp > 0);
-
-    // The egg cannot enter the arcade.
-    let (_dir2, paths2) = temp_paths();
-    let mut egg_app = App::new(Pet::new("Mochi"), paths2);
-    egg_app.handle_key(KeyCode::Char('g'));
-    assert_eq!(egg_app.screen, AppScreen::Habitat);
 }

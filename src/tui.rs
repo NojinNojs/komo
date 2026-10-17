@@ -1,9 +1,11 @@
-//! The Ratatui interface: adoption wizard, LCD habitat, Sanctuary roster and
-//! the Snack Catcher arcade.
+//! The Ratatui interface: Adoption Wizard with stage-cycler & TrueColor art,
+//! LCD Habitat with Care Advisor, Pantry Menu, Help Overlay, Offline Welcome-Back
+//! Modal, Sanctuary Roster, and Snack Catcher Arcade.
 
 use std::io;
 use std::time::{Duration, Instant};
 
+use chrono::Utc;
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind},
     execute,
@@ -11,23 +13,27 @@ use crossterm::{
 };
 use ratatui::{
     backend::CrosstermBackend,
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
-    widgets::{Block, BorderType, Borders, Gauge, List, ListItem, Paragraph, Wrap},
+    widgets::{Block, BorderType, Borders, Clear, Gauge, List, ListItem, Paragraph, Wrap},
     Frame, Terminal,
 };
 
 use crate::minigame::MiniGame;
-use crate::pet::{EvolutionStage, Pet, PetSpecies, Sanctuary, ShellTheme};
+use crate::pet::{
+    format_duration_human, EvolutionStage, FoodChoice, OfflineReport, Pet, PetSpecies, Sanctuary,
+    ShellTheme,
+};
 use crate::sprites::{
-    get_mood_particles, mood_color, render_animated_sprite, render_species_preview, sky_scene,
-    speech_bubble, stage_color, theme_color,
+    mood_color, render_colored_preview, render_colored_sprite, sky_scene, speech_bubble,
+    species_palette, stage_color, theme_color,
 };
 use crate::storage::{save_sanctuary, StoragePaths};
 
 const TICK_MS: u64 = 250;
-const DECAY_EVERY_TICKS: usize = 20;
+/// In-game stat decay tick interval: 24 ticks * 250ms = 6 seconds.
+const DECAY_EVERY_TICKS: usize = 24;
 
 /// Responsive layout tiers: Compact < Standard < Wide.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -72,7 +78,12 @@ pub struct App {
     pub onboarding_step: OnboardingStep,
     pub selected_species_idx: usize,
     pub selected_theme_idx: usize,
+    pub preview_stage_idx: usize,
     pub roster_selected_idx: usize,
+    pub pantry_open: bool,
+    pub pantry_selected_idx: usize,
+    pub show_help: bool,
+    pub offline_report: Option<OfflineReport>,
     pub onboarding_name_input: String,
     pub adopting_new: bool,
     pub tick_count: usize,
@@ -113,19 +124,25 @@ impl App {
             onboarding_step: OnboardingStep::SelectSpecies,
             selected_species_idx,
             selected_theme_idx,
+            preview_stage_idx: 3, // Adult form by default in preview
             roster_selected_idx: 0,
+            pantry_open: false,
+            pantry_selected_idx: 0,
+            show_help: false,
+            offline_report: None,
             onboarding_name_input: String::new(),
             adopting_new: false,
             tick_count: 0,
             should_quit: false,
             minigame: None,
             rename_buffer: None,
-            last_storage_status: String::new(),
+            last_storage_status: "💾 ready".to_string(),
         }
     }
 
     pub fn new_onboarding(paths: StoragePaths) -> Self {
-        let mut app = Self::new_with_sanctuary(Sanctuary::new_with_pet(Pet::new("Mochi")), paths, true);
+        let mut app =
+            Self::new_with_sanctuary(Sanctuary::new_with_pet(Pet::new("Mochi")), paths, true);
         app.onboarding_name_input = "Mochi".to_string();
         app
     }
@@ -133,7 +150,7 @@ impl App {
     pub fn save_now(&mut self) {
         self.sanctuary.sync_active(&self.pet);
         match save_sanctuary(&self.sanctuary, &self.paths) {
-            Ok(()) => self.last_storage_status = "💾 saved".to_string(),
+            Ok(()) => self.last_storage_status = "💾 auto-saved".to_string(),
             Err(err) => self.last_storage_status = format!("⚠️ save failed: {err}"),
         }
     }
@@ -160,10 +177,13 @@ impl App {
 
     fn start_adopting(&mut self) {
         self.adopting_new = true;
+        self.pantry_open = false;
+        self.show_help = false;
         self.screen = AppScreen::Onboarding;
         self.onboarding_step = OnboardingStep::SelectSpecies;
         self.selected_species_idx = 0;
         self.selected_theme_idx = 0;
+        self.preview_stage_idx = 3;
         self.onboarding_name_input = PetSpecies::all()[0].default_name().to_string();
     }
 
@@ -188,8 +208,37 @@ impl App {
     }
 
     pub fn handle_key(&mut self, code: KeyCode) {
+        if self.offline_report.is_some() {
+            if matches!(
+                code,
+                KeyCode::Enter | KeyCode::Esc | KeyCode::Char(' ') | KeyCode::Char('q')
+            ) {
+                self.offline_report = None;
+            }
+            return;
+        }
+
+        if self.show_help {
+            if matches!(
+                code,
+                KeyCode::Esc
+                    | KeyCode::Enter
+                    | KeyCode::Char('?')
+                    | KeyCode::Char('q')
+                    | KeyCode::Char(' ')
+            ) {
+                self.show_help = false;
+            }
+            return;
+        }
+
         if self.rename_buffer.is_some() {
             self.handle_rename_key(code);
+            return;
+        }
+
+        if self.pantry_open {
+            self.handle_pantry_key(code);
             return;
         }
 
@@ -198,6 +247,37 @@ impl App {
             AppScreen::SanctuaryRoster => self.handle_roster_key(code),
             AppScreen::MiniGame => self.handle_minigame_key(code),
             AppScreen::Habitat => self.handle_habitat_key(code),
+        }
+    }
+
+    fn handle_pantry_key(&mut self, code: KeyCode) {
+        let choices = FoodChoice::all();
+        let count = choices.len();
+        match code {
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.pantry_selected_idx = (self.pantry_selected_idx + count - 1) % count;
+            }
+            KeyCode::Down | KeyCode::Char('j') | KeyCode::Tab => {
+                self.pantry_selected_idx = (self.pantry_selected_idx + 1) % count;
+            }
+            KeyCode::Enter | KeyCode::Char(' ') | KeyCode::Char('f') | KeyCode::Char('F') => {
+                let choice = choices[self.pantry_selected_idx];
+                let _ = self.pet.feed_choice(choice);
+                self.pantry_open = false;
+                self.save_now();
+            }
+            KeyCode::Char(c @ '1'..='5') => {
+                let idx = (c as usize) - ('1' as usize);
+                if let Some(&choice) = choices.get(idx) {
+                    let _ = self.pet.feed_choice(choice);
+                    self.pantry_open = false;
+                    self.save_now();
+                }
+            }
+            KeyCode::Esc | KeyCode::Char('q') => {
+                self.pantry_open = false;
+            }
+            _ => {}
         }
     }
 
@@ -224,6 +304,7 @@ impl App {
     fn handle_onboarding_key(&mut self, code: KeyCode) {
         let species_count = PetSpecies::all().len();
         let theme_count = ShellTheme::all().len();
+        let stage_count = EvolutionStage::all().len();
 
         match self.onboarding_step {
             OnboardingStep::SelectSpecies => match code {
@@ -238,13 +319,16 @@ impl App {
                 | KeyCode::Tab => {
                     self.selected_species_idx = (self.selected_species_idx + 1) % species_count;
                 }
+                KeyCode::Char('v') | KeyCode::Char('V') | KeyCode::Char(' ') => {
+                    self.preview_stage_idx = (self.preview_stage_idx + 1) % stage_count;
+                }
                 KeyCode::Enter => {
                     self.onboarding_step = OnboardingStep::SelectTheme;
                     self.onboarding_name_input =
                         PetSpecies::all()[self.selected_species_idx].default_name().to_string();
                 }
                 KeyCode::Esc | KeyCode::Char('q') => {
-                    if self.sanctuary.hatched_count() > 0 {
+                    if self.sanctuary.hatched_count() > 0 || self.adopting_new {
                         self.adopting_new = false;
                         self.screen = AppScreen::Habitat;
                     } else {
@@ -264,6 +348,9 @@ impl App {
                 | KeyCode::Char('l')
                 | KeyCode::Tab => {
                     self.selected_theme_idx = (self.selected_theme_idx + 1) % theme_count;
+                }
+                KeyCode::Char('v') | KeyCode::Char('V') => {
+                    self.preview_stage_idx = (self.preview_stage_idx + 1) % stage_count;
                 }
                 KeyCode::BackTab | KeyCode::Esc => {
                     self.onboarding_step = OnboardingStep::SelectSpecies;
@@ -357,10 +444,9 @@ impl App {
     fn finish_minigame(&mut self) {
         if let Some(game) = self.minigame.take() {
             if game.score > 0 || game.coins_earned > 0 || game.xp_earned > 0 {
-                let msg = self
+                let _ = self
                     .pet
                     .apply_minigame_reward(game.score, game.coins_earned, game.xp_earned);
-                self.pet.log_action(msg);
             }
         }
         self.screen = AppScreen::Habitat;
@@ -373,51 +459,53 @@ impl App {
                 self.save_now();
                 self.should_quit = true;
             }
+            KeyCode::Char('?') => {
+                self.show_help = true;
+            }
             KeyCode::Char('w') | KeyCode::Char('W') | KeyCode::Char(' ') => {
-                let msg = if self.pet.stage == EvolutionStage::Egg {
-                    self.pet.warm_egg()
+                if self.pet.stage == EvolutionStage::Egg {
+                    let _ = self.pet.warm_egg();
                 } else {
-                    self.pet.pet_love()
-                };
-                self.pet.log_action(msg);
+                    let _ = self.pet.pet_love();
+                }
                 self.save_now();
             }
             KeyCode::Char('f') | KeyCode::Char('F') | KeyCode::Char('1') => {
-                let msg = self.pet.feed();
-                self.pet.log_action(msg);
+                let _ = self.pet.feed();
                 self.save_now();
             }
+            KeyCode::Char('m') | KeyCode::Char('M') => {
+                if self.pet.stage == EvolutionStage::Egg {
+                    let _ = self.pet.feed();
+                } else {
+                    self.pantry_open = true;
+                }
+            }
             KeyCode::Char('p') | KeyCode::Char('P') | KeyCode::Char('2') => {
-                let msg = self.pet.play();
-                self.pet.log_action(msg);
+                let _ = self.pet.play();
                 self.save_now();
             }
             KeyCode::Char('t') | KeyCode::Char('T') | KeyCode::Char('3') => {
-                let msg = self.pet.pet_love();
-                self.pet.log_action(msg);
+                let _ = self.pet.pet_love();
                 self.save_now();
             }
             KeyCode::Char('e') | KeyCode::Char('E') | KeyCode::Char('4') => {
-                let msg = self.pet.train();
-                self.pet.log_action(msg);
+                let _ = self.pet.train();
                 self.save_now();
             }
             KeyCode::Char('s') | KeyCode::Char('S') | KeyCode::Char('5') => {
-                let msg = self.pet.toggle_sleep();
-                self.pet.log_action(msg);
+                let _ = self.pet.toggle_sleep();
                 self.save_now();
             }
             KeyCode::Char('c') | KeyCode::Char('C') | KeyCode::Char('6') => {
-                let msg = self.pet.clean();
-                self.pet.log_action(msg);
+                let _ = self.pet.clean();
                 self.save_now();
             }
             KeyCode::Char('h') | KeyCode::Char('H') | KeyCode::Char('7') => {
-                let msg = self.pet.heal();
-                self.pet.log_action(msg);
+                let _ = self.pet.heal();
                 self.save_now();
             }
-            KeyCode::Char('g') | KeyCode::Char('G') | KeyCode::Char('m') | KeyCode::Char('M') => {
+            KeyCode::Char('g') | KeyCode::Char('G') => {
                 self.launch_minigame();
             }
             KeyCode::Char('l') | KeyCode::Char('L') => {
@@ -490,6 +578,15 @@ fn ratio_of(value: u8) -> f64 {
 }
 
 fn stat_gauge(label: &str, value: u8, color: Color) -> Gauge<'static> {
+    let status_word = if value >= 80 {
+        "Great"
+    } else if value >= 45 {
+        "OK"
+    } else if value >= 20 {
+        "Low!"
+    } else {
+        "Critical!"
+    };
     Gauge::default()
         .block(
             Block::default().title(Span::styled(
@@ -499,7 +596,27 @@ fn stat_gauge(label: &str, value: u8, color: Color) -> Gauge<'static> {
         )
         .gauge_style(Style::default().fg(color))
         .ratio(ratio_of(value))
-        .label(format!("{value}%"))
+        .label(format!("{value}% ({status_word})"))
+}
+
+fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
+    let popup_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage((100 - percent_y) / 2),
+            Constraint::Percentage(percent_y),
+            Constraint::Percentage((100 - percent_y) / 2),
+        ])
+        .split(r);
+
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - percent_x) / 2),
+            Constraint::Percentage(percent_x),
+            Constraint::Percentage((100 - percent_x) / 2),
+        ])
+        .split(popup_layout[1])[1]
 }
 
 fn habitat_areas(area: Rect, tier: LayoutTier) -> (Rect, Rect, Vec<Rect>, Rect) {
@@ -522,7 +639,7 @@ fn habitat_areas(area: Rect, tier: LayoutTier) -> (Rect, Rect, Vec<Rect>, Rect) 
             .to_vec(),
         _ => Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(52), Constraint::Percentage(48)])
+            .constraints([Constraint::Percentage(54), Constraint::Percentage(46)])
             .split(body)
             .to_vec(),
     };
@@ -537,12 +654,25 @@ pub fn draw_ui(f: &mut Frame, app: &App) {
         AppScreen::MiniGame => draw_minigame(f, app),
         AppScreen::Habitat => draw_habitat(f, app),
     }
+
+    if app.pantry_open {
+        draw_pantry_modal(f, app);
+    }
+    if let Some(report) = app.offline_report.as_ref() {
+        draw_offline_report_modal(f, app, report);
+    }
+    if app.show_help {
+        draw_help_modal(f, app);
+    }
 }
 
 fn draw_onboarding(f: &mut Frame, app: &App) {
     let area = f.area();
     let species = PetSpecies::all()[app.selected_species_idx];
-    let block = shell_block(" 🍡 Mochigotchi — Adopt a Companion ", &app.pet);
+    let preview_stage = EvolutionStage::all()[app.preview_stage_idx % EvolutionStage::all().len()];
+    let (sp_primary, _, sp_accent) = species_palette(species);
+
+    let block = shell_block(" 🍡 Mochigotchi — Companion Adoption & Sanctuary Wizard ", &app.pet);
     let inner = block.inner(area);
     f.render_widget(block, area);
 
@@ -552,23 +682,27 @@ fn draw_onboarding(f: &mut Frame, app: &App) {
         OnboardingStep::EnterName => 3,
     };
     let step_line = Line::from(
-        ["1. Species", "2. Shell", "3. Name"]
-            .iter()
-            .enumerate()
-            .flat_map(|(i, s)| {
-                let style = if i + 1 == current {
-                    Style::default()
-                        .fg(Color::LightMagenta)
-                        .add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default().fg(Color::DarkGray)
-                };
-                vec![
-                    Span::styled(format!(" {s} "), style),
-                    Span::styled("→", Style::default().fg(Color::DarkGray)),
-                ]
-            })
-            .collect::<Vec<_>>(),
+        [
+            "1. Choose Species",
+            "2. Choose Shell Color",
+            "3. Name & Adopt",
+        ]
+        .iter()
+        .enumerate()
+        .flat_map(|(i, s)| {
+            let style = if i + 1 == current {
+                Style::default()
+                    .fg(Color::LightYellow)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::DarkGray)
+            };
+            vec![
+                Span::styled(format!(" {s} "), style),
+                Span::styled(" ──► ", Style::default().fg(Color::DarkGray)),
+            ]
+        })
+        .collect::<Vec<_>>(),
     );
 
     let rows = Layout::default()
@@ -583,7 +717,7 @@ fn draw_onboarding(f: &mut Frame, app: &App) {
 
     let columns = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(58), Constraint::Percentage(42)])
+        .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
         .split(rows[1]);
 
     let items: Vec<ListItem> = PetSpecies::all()
@@ -591,10 +725,9 @@ fn draw_onboarding(f: &mut Frame, app: &App) {
         .enumerate()
         .map(|(idx, sp)| {
             let selected = idx == app.selected_species_idx;
+            let (p_col, _, _) = species_palette(*sp);
             let style = if selected {
-                Style::default()
-                    .fg(Color::LightYellow)
-                    .add_modifier(Modifier::BOLD)
+                Style::default().fg(p_col).add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Color::Gray)
             };
@@ -616,40 +749,56 @@ fn draw_onboarding(f: &mut Frame, app: &App) {
             Block::default()
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(Color::DarkGray))
-                .title(" Choose your companion (↑/↓) "),
+                .border_style(Style::default().fg(sp_primary))
+                .title(" 10 Collectible Companions (↑/↓ select • [V/Space] cycle stage) "),
         ),
         columns[0],
     );
 
     let mut preview_lines = vec![
-        Line::from(Span::styled(
-            species.display_name().to_string(),
-            Style::default()
-                .fg(Color::LightCyan)
-                .add_modifier(Modifier::BOLD),
-        )),
+        Line::from(vec![
+            Span::styled(
+                format!("{} ", species.display_name()),
+                Style::default().fg(sp_primary).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!("[{}] ", species.rarity()),
+                Style::default().fg(sp_accent),
+            ),
+            Span::styled(
+                format!("Form: {}", preview_stage.badge()),
+                Style::default().fg(stage_color(preview_stage)),
+            ),
+        ]),
         Line::from(Span::styled(
             species.description().to_string(),
             Style::default().fg(Color::Gray),
         )),
         Line::from(""),
     ];
-    for line in render_species_preview(species) {
-        preview_lines.push(Line::from(Span::styled(
-            line,
-            Style::default().fg(stage_color(EvolutionStage::Adult)),
-        )));
-    }
+    preview_lines.extend(render_colored_preview(
+        species,
+        preview_stage,
+        app.tick_count,
+    ));
     preview_lines.push(Line::from(""));
-    preview_lines.push(Line::from(Span::styled(
-        format!("Loves: {}", species.favorite_snack()),
-        Style::default().fg(Color::LightGreen),
-    )));
+    preview_lines.push(Line::from(vec![
+        Span::styled("Favorite Snack: ", Style::default().fg(Color::Gray)),
+        Span::styled(
+            species.favorite_snack().to_string(),
+            Style::default()
+                .fg(Color::LightGreen)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!("  •  Element: {}", species.element_badge()),
+            Style::default().fg(sp_accent),
+        ),
+    ]));
 
     let right = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(8), Constraint::Length(6)])
+        .constraints([Constraint::Min(9), Constraint::Length(7)])
         .split(columns[1]);
 
     f.render_widget(
@@ -658,8 +807,8 @@ fn draw_onboarding(f: &mut Frame, app: &App) {
                 Block::default()
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded)
-                    .border_style(Style::default().fg(Color::DarkGray))
-                    .title(" Preview "),
+                    .border_style(Style::default().fg(sp_accent))
+                    .title(" Live TrueColor Sprite Preview "),
             )
             .wrap(Wrap { trim: false }),
         right[0],
@@ -668,17 +817,19 @@ fn draw_onboarding(f: &mut Frame, app: &App) {
     let detail = match app.onboarding_step {
         OnboardingStep::SelectSpecies => vec![
             Line::from(Span::styled(
-                "Cozy Classics or Mythical & Fantasy.",
-                Style::default().fg(Color::Gray),
+                "Press [V] or [Space] to preview Egg / Baby / Teen / Adult / Elder!",
+                Style::default().fg(Color::LightCyan),
             )),
             Line::from(Span::styled(
-                "Enter = choose shell color",
-                Style::default().fg(Color::LightMagenta),
+                "Press [Enter] to lock in this companion and pick a shell color.",
+                Style::default()
+                    .fg(Color::LightYellow)
+                    .add_modifier(Modifier::BOLD),
             )),
         ],
         OnboardingStep::SelectTheme => {
             let mut lines = vec![Line::from(Span::styled(
-                "Shell colorway (Enter confirms):",
+                "Choose LCD Shell Colorway (↑/↓ select, Enter confirms):",
                 Style::default().fg(Color::Gray),
             ))];
             for (idx, theme) in ShellTheme::all().iter().enumerate() {
@@ -702,11 +853,11 @@ fn draw_onboarding(f: &mut Frame, app: &App) {
         }
         OnboardingStep::EnterName => vec![
             Line::from(Span::styled(
-                "Type a name, then press Enter:",
+                "Type a custom name for your companion, then press [Enter]:",
                 Style::default().fg(Color::Gray),
             )),
             Line::from(Span::styled(
-                format!("▏{}▕", app.onboarding_name_input),
+                format!("  🏷️  ▏{}▕", app.onboarding_name_input),
                 Style::default()
                     .fg(Color::LightYellow)
                     .add_modifier(Modifier::BOLD),
@@ -720,7 +871,7 @@ fn draw_onboarding(f: &mut Frame, app: &App) {
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded)
                     .border_style(Style::default().fg(Color::DarkGray))
-                    .title(" Step details "),
+                    .title(" Wizard Step "),
             )
             .wrap(Wrap { trim: false }),
         right[1],
@@ -728,8 +879,8 @@ fn draw_onboarding(f: &mut Frame, app: &App) {
 
     f.render_widget(
         Paragraph::new(Line::from(Span::styled(
-            "↑/↓ choose · Enter next · Esc back/quit",
-            Style::default().fg(Color::DarkGray),
+            "↑/↓ Select • [V] Preview Stage • [Enter] Next / Adopt • [Esc] Back / Cancel",
+            Style::default().fg(Color::Gray),
         ))),
         rows[2],
     );
@@ -739,12 +890,16 @@ fn draw_habitat(f: &mut Frame, app: &App) {
     let area = f.area();
     let tier = LayoutTier::from_width(area.width);
     let pet = &app.pet;
+    let now = Utc::now();
+    let (sp_primary, _, sp_accent) = species_palette(pet.species);
+
     let title = format!(
-        " 🍡 {} · {} · {} · {} ",
+        " 🍡 {} · {} · {} · {} ·Lv.{} ",
         pet.name,
         pet.species.display_name(),
         pet.species.rarity(),
-        pet.stage.badge()
+        pet.stage.badge(),
+        pet.level
     );
     let block = shell_block(&title, pet);
     let inner = block.inner(area);
@@ -753,38 +908,54 @@ fn draw_habitat(f: &mut Frame, app: &App) {
     let (header_area, dock_area, columns, log_area) = habitat_areas(inner, tier);
 
     let (sky, mood_name) = sky_scene(app.tick_count);
-    let warm_cd = pet.warm_cooldown_remaining(chrono::Utc::now());
-    let train_cd = pet.train_cooldown_remaining(chrono::Utc::now());
+    let warm_cd = pet.warm_cooldown_remaining(now);
+    let train_cd = pet.train_cooldown_remaining(now);
     let cooldown_note = if pet.stage == EvolutionStage::Egg {
         if warm_cd > 0 {
-            format!("🕯️ warming rest {warm_cd}s")
+            format!("🕯️ warm cooldown {}", format_duration_human(warm_cd))
         } else {
-            "🕯️ ready to warm".to_string()
+            "🕯️ ready to warm [W]".to_string()
         }
     } else if train_cd > 0 {
-        format!("💪 training rest {train_cd}s")
+        format!("💪 train cooldown {}", format_duration_human(train_cd))
     } else {
-        "💪 ready to train".to_string()
+        "💪 ready to train [E]".to_string()
     };
 
-    f.render_widget(
-        Paragraph::new(Line::from(vec![
+    let advisor = pet.advisor_tip(now);
+    let header_lines = vec![
+        Line::from(vec![
             Span::styled(
-                format!("{sky}  {mood_name}  "),
-                Style::default().fg(Color::DarkGray),
+                format!("{sky} {mood_name}  "),
+                Style::default().fg(Color::Cyan),
             ),
             Span::styled(
                 format!(
-                    "🏰 {} pets · Lv.{}  ",
+                    "🏰 Sanctuary: {} pets (Lv.{})  ",
                     app.sanctuary.pets.len(),
                     app.sanctuary.sanctuary_level
                 ),
-                Style::default().fg(Color::LightBlue),
+                Style::default()
+                    .fg(Color::LightBlue)
+                    .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(cooldown_note, Style::default().fg(Color::LightYellow)),
-        ])),
-        header_area,
-    );
+            Span::styled(
+                format!("💰 {} coins  ", pet.coins),
+                Style::default().fg(Color::LightYellow),
+            ),
+            Span::styled(cooldown_note, Style::default().fg(sp_accent)),
+        ]),
+        Line::from(vec![
+            Span::styled(
+                "💡 Care Advisor: ",
+                Style::default()
+                    .fg(Color::LightGreen)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(advisor, Style::default().fg(Color::White)),
+        ]),
+    ];
+    f.render_widget(Paragraph::new(Text::from(header_lines)), header_area);
 
     let mut sprite_lines = vec![Line::from(Span::styled(
         speech_bubble(pet, app.tick_count),
@@ -792,28 +963,37 @@ fn draw_habitat(f: &mut Frame, app: &App) {
             .fg(mood_color(pet.mood))
             .add_modifier(Modifier::ITALIC),
     ))];
-    for line in render_animated_sprite(pet, app.tick_count) {
-        sprite_lines.push(Line::from(Span::styled(
-            line,
-            Style::default().fg(stage_color(pet.stage)),
-        )));
-    }
-    sprite_lines.push(Line::from(Span::styled(
-        format!(
-            "mood: {} {}",
-            pet.mood.label(),
-            get_mood_particles(pet.mood, app.tick_count)
+    sprite_lines.extend(render_colored_sprite(pet, app.tick_count));
+    sprite_lines.push(Line::from(vec![
+        Span::styled("Mood: ", Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            format!("{} {}  ", pet.mood.emoji(), pet.mood.label()),
+            Style::default()
+                .fg(mood_color(pet.mood))
+                .add_modifier(Modifier::BOLD),
         ),
-        Style::default().fg(Color::DarkGray),
-    )));
+        Span::styled(
+            format!(
+                "• Age: {} • Snack: {}",
+                format_duration_human(pet.age_seconds),
+                pet.species.favorite_snack()
+            ),
+            Style::default().fg(Color::Gray),
+        ),
+    ]));
+
     f.render_widget(
         Paragraph::new(Text::from(sprite_lines))
             .block(
                 Block::default()
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded)
-                    .border_style(Style::default().fg(Color::DarkGray))
-                    .title(" Habitat "),
+                    .border_style(Style::default().fg(sp_primary))
+                    .title(format!(
+                        " {} Habitat ({}) ",
+                        pet.species.element_badge(),
+                        pet.species.family()
+                    )),
             )
             .wrap(Wrap { trim: false }),
         columns[0],
@@ -834,7 +1014,7 @@ fn draw_habitat(f: &mut Frame, app: &App) {
 
     if pet.stage == EvolutionStage::Egg {
         f.render_widget(
-            stat_gauge("🥚 Incubation", pet.incubation, Color::LightYellow),
+            stat_gauge("🥚 Egg Incubation", pet.incubation, Color::LightYellow),
             gauges[0],
         );
     } else {
@@ -842,16 +1022,19 @@ fn draw_habitat(f: &mut Frame, app: &App) {
         f.render_widget(
             Gauge::default()
                 .block(Block::default().title(Span::styled(
-                    format!("⭐ XP {} / {}", pet.xp, target),
+                    format!("⭐ Stage XP ({} / {})", pet.xp, target),
                     Style::default().fg(Color::Gray),
                 )))
                 .gauge_style(Style::default().fg(Color::LightMagenta))
                 .ratio(pet.xp_progress_ratio())
-                .label(format!("Lv.{}", pet.level)),
+                .label(format!("Lv.{} ({:.0}%)", pet.level, pet.xp_progress_ratio() * 100.0)),
             gauges[0],
         );
     }
-    f.render_widget(stat_gauge("🍙 Hunger", pet.hunger, Color::LightGreen), gauges[1]);
+    f.render_widget(
+        stat_gauge("🍙 Fullness (Hunger)", pet.hunger, Color::LightGreen),
+        gauges[1],
+    );
     f.render_widget(
         stat_gauge("💖 Happiness", pet.happiness, Color::LightMagenta),
         gauges[2],
@@ -860,35 +1043,94 @@ fn draw_habitat(f: &mut Frame, app: &App) {
         stat_gauge("⚡ Energy", pet.energy, Color::LightYellow),
         gauges[3],
     );
-    f.render_widget(stat_gauge("❤️ Health", pet.health, Color::LightRed), gauges[4]);
+    f.render_widget(
+        stat_gauge("❤️ Health", pet.health, Color::LightRed),
+        gauges[4],
+    );
     f.render_widget(
         stat_gauge(
-            &format!("🫧 Cleanliness (poop: {})", pet.poop_count),
+            &format!("🫧 Cleanliness (Poop: {})", pet.poop_count),
             pet.cleanliness,
             Color::LightCyan,
         ),
         gauges[5],
     );
-    f.render_widget(stat_gauge("🤝 Bond", pet.bond, Color::LightBlue), gauges[6]);
+    f.render_widget(
+        stat_gauge("🤝 Bond", pet.bond, Color::LightBlue),
+        gauges[6],
+    );
 
     let egg = pet.stage == EvolutionStage::Egg;
     let mut dock_lines = vec![Line::from(Span::styled(
         pet.next_evolution_requirements(),
         Style::default().fg(Color::LightYellow),
     ))];
-    dock_lines.push(Line::from(""));
     let keys = if let Some(buffer) = app.rename_buffer.as_ref() {
-        format!("🏷️ Rename to: {buffer}▏ (Enter saves, Esc cancels)")
+        vec![Line::from(Span::styled(
+            format!("🏷️ Rename companion to: {buffer}▏  (Press [Enter] to save, [Esc] to cancel)"),
+            Style::default()
+                .fg(Color::LightYellow)
+                .add_modifier(Modifier::BOLD),
+        ))]
     } else if egg {
-        "[W] Warm egg · [N] Adopt another · [L] Sanctuary · [[/]] switch · [Tab] shell color · [R] rename · [Q] save & quit".to_string()
+        vec![
+            Line::from(vec![
+                Span::styled(
+                    "[W/Space] Warm Egg (+20%)  ",
+                    Style::default()
+                        .fg(Color::LightYellow)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled("[N] Adopt New Pet  ", Style::default().fg(Color::LightCyan)),
+                Span::styled(
+                    "[L] Sanctuary Roster  ",
+                    Style::default().fg(Color::LightBlue),
+                ),
+                Span::styled("[[ / ]] Switch Pet", Style::default().fg(Color::Gray)),
+            ]),
+            Line::from(vec![
+                Span::styled(
+                    "[Tab] Shell Color  [R] Rename  [?] Help Guide  [Q] Save & Quit   ",
+                    Style::default().fg(Color::DarkGray),
+                ),
+                Span::styled(
+                    app.last_storage_status.clone(),
+                    Style::default().fg(Color::Green),
+                ),
+            ]),
+        ]
     } else {
-        "[F] Feed  [P] Play  [E] Train  [S] Sleep  [C] Clean  [H] Heal  [G] Arcade  [N] Adopt  [L] Sanctuary  [[/]] switch  [Tab] color  [R] rename  [Q] quit".to_string()
+        vec![
+            Line::from(vec![
+                Span::styled(
+                    "[F] Quick Feed  ",
+                    Style::default()
+                        .fg(Color::LightGreen)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled("[M] Pantry Menu  ", Style::default().fg(Color::LightYellow)),
+                Span::styled("[P] Play  ", Style::default().fg(Color::LightMagenta)),
+                Span::styled("[T] Headpat  ", Style::default().fg(Color::LightCyan)),
+                Span::styled("[E] Train  ", Style::default().fg(Color::Yellow)),
+                Span::styled("[S] Sleep  ", Style::default().fg(Color::LightBlue)),
+                Span::styled("[C] Clean  ", Style::default().fg(Color::Cyan)),
+                Span::styled("[H] Heal  ", Style::default().fg(Color::LightRed)),
+                Span::styled("[G] Arcade", Style::default().fg(Color::Green)),
+            ]),
+            Line::from(vec![
+                Span::styled(
+                    "[N] Adopt Pet  [L] Sanctuary  [[/]] Switch Pet  [Tab] Shell  [R] Rename  [?] Help  [Q] Quit  ",
+                    Style::default().fg(Color::DarkGray),
+                ),
+                Span::styled(
+                    app.last_storage_status.clone(),
+                    Style::default().fg(Color::Green),
+                ),
+            ]),
+        ]
     };
-    dock_lines.push(Line::from(Span::styled(keys, Style::default().fg(Color::Gray))));
-    dock_lines.push(Line::from(Span::styled(
-        format!("💰 {} coins   {}", pet.coins, app.last_storage_status),
-        Style::default().fg(Color::DarkGray),
-    )));
+    dock_lines.extend(keys);
+
     f.render_widget(
         Paragraph::new(Text::from(dock_lines))
             .block(
@@ -896,7 +1138,7 @@ fn draw_habitat(f: &mut Frame, app: &App) {
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded)
                     .border_style(Style::default().fg(theme_color(pet.theme)))
-                    .title(" Care console "),
+                    .title(" Care Console "),
             )
             .wrap(Wrap { trim: false }),
         dock_area,
@@ -907,7 +1149,7 @@ fn draw_habitat(f: &mut Frame, app: &App) {
         .iter()
         .rev()
         .take(3)
-        .map(|msg| Line::from(Span::styled(msg.clone(), Style::default().fg(Color::DarkGray))))
+        .map(|msg| Line::from(Span::styled(msg.clone(), Style::default().fg(Color::Gray))))
         .collect();
     f.render_widget(
         Paragraph::new(Text::from(log_lines))
@@ -916,10 +1158,180 @@ fn draw_habitat(f: &mut Frame, app: &App) {
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded)
                     .border_style(Style::default().fg(Color::DarkGray))
-                    .title(" Care diary "),
+                    .title(" Care Diary (Recent Events) "),
             )
             .wrap(Wrap { trim: false }),
         log_area,
+    );
+}
+
+fn draw_pantry_modal(f: &mut Frame, app: &App) {
+    let area = centered_rect(68, 56, f.area());
+    f.render_widget(Clear, area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(Color::LightYellow))
+        .title(Span::styled(
+            format!(" 🍱 Sanctuary Pantry — Coins: {} 💰 ", app.pet.coins),
+            Style::default()
+                .fg(Color::LightYellow)
+                .add_modifier(Modifier::BOLD),
+        ));
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let mut items: Vec<ListItem> = Vec::new();
+    for (idx, choice) in FoodChoice::all().iter().enumerate() {
+        let selected = idx == app.pantry_selected_idx;
+        let marker = if selected { "▶" } else { " " };
+        let style = if selected {
+            Style::default()
+                .fg(Color::LightGreen)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::White)
+        };
+        items.push(ListItem::new(vec![
+            Line::from(Span::styled(
+                format!("{marker} [{}] {}", idx + 1, choice.title(app.pet.species)),
+                style,
+            )),
+            Line::from(Span::styled(
+                format!("      {}", choice.summary()),
+                Style::default().fg(Color::Gray),
+            )),
+        ]));
+    }
+
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(6), Constraint::Length(2)])
+        .split(inner);
+
+    f.render_widget(List::new(items), rows[0]);
+    f.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            "↑/↓ or [1-5] Select Meal • [Enter] Feed • [Esc] Close Pantry",
+            Style::default().fg(Color::Cyan),
+        )))
+        .alignment(Alignment::Center),
+        rows[1],
+    );
+}
+
+fn draw_offline_report_modal(f: &mut Frame, app: &App, report: &OfflineReport) {
+    let area = centered_rect(72, 58, f.area());
+    f.render_widget(Clear, area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(Color::LightCyan))
+        .title(Span::styled(
+            format!(
+                " 🌙 Welcome Back! You were away for {} ",
+                report.formatted_duration()
+            ),
+            Style::default()
+                .fg(Color::LightCyan)
+                .add_modifier(Modifier::BOLD),
+        ));
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let mut lines = vec![
+        Line::from(Span::styled(
+            format!(
+                "While the terminal was closed, {} continued living in the Sanctuary:",
+                report.pet_name
+            ),
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+    ];
+    for ev in &report.events {
+        lines.push(Line::from(Span::styled(
+            format!(" • {ev}"),
+            Style::default().fg(Color::LightYellow),
+        )));
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        format!("💡 Next step: {}", app.pet.advisor_tip(Utc::now())),
+        Style::default().fg(Color::LightGreen),
+    )));
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "Press [Enter] or [Space] to continue caring for your companion",
+        Style::default().fg(Color::Cyan),
+    )));
+
+    f.render_widget(
+        Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false }),
+        inner,
+    );
+}
+
+fn draw_help_modal(f: &mut Frame, _app: &App) {
+    let area = centered_rect(76, 72, f.area());
+    f.render_widget(Clear, area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(Color::LightMagenta))
+        .title(Span::styled(
+            " 📖 Mochigotchi Care Guide & Real-Time Rules ",
+            Style::default()
+                .fg(Color::LightMagenta)
+                .add_modifier(Modifier::BOLD),
+        ));
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let lines = vec![
+        Line::from(Span::styled(
+            "🥚 1. Egg Incubation",
+            Style::default()
+                .fg(Color::LightYellow)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from("   • Eggs cannot eat, play, or train until hatched."),
+        Line::from("   • Press [W] (+20% warmth, 3m cooldown) or let passive warmth build to 99%."),
+        Line::from(""),
+        Line::from(Span::styled(
+            "🍡 2. Daily Care & Pantry",
+            Style::default()
+                .fg(Color::LightGreen)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from("   • [F] feeds your companion's Favorite Snack for free."),
+        Line::from("   • [M] opens the Pantry (Bento, Boba Tea, Herbal Soup, Starlight Delight)."),
+        Line::from("   • Every 2 meals creates a mess (💩) — press [C] for a bubble bath!"),
+        Line::from(""),
+        Line::from(Span::styled(
+            "🌟 3. Long-Term Evolution & Offline Life",
+            Style::default()
+                .fg(Color::LightCyan)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from("   • Evolution requires XP + Bond + Real Companion Age (Teen 6h, Adult 24h, Elder 72h)."),
+        Line::from("   • While closed, your pet sleeps, gets hungry, and explores for coins."),
+        Line::from("   • Press [N] to adopt more pets and [L] or [[ / ]] to switch between them!"),
+        Line::from(""),
+        Line::from(Span::styled(
+            "Press [Esc], [Enter], or [?] to close this guide",
+            Style::default().fg(Color::Gray),
+        )),
+    ];
+
+    f.render_widget(
+        Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false }),
+        inner,
     );
 }
 
@@ -938,7 +1350,7 @@ fn draw_roster(f: &mut Frame, app: &App) {
 
     let columns = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(58), Constraint::Percentage(42)])
+        .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
         .split(inner);
 
     let items: Vec<ListItem> = app
@@ -948,6 +1360,7 @@ fn draw_roster(f: &mut Frame, app: &App) {
         .enumerate()
         .map(|(idx, pet)| {
             let selected = idx == app.roster_selected_idx;
+            let (p_col, _, _) = species_palette(pet.species);
             let marker = if idx == app.sanctuary.active_index {
                 "★"
             } else if selected {
@@ -956,15 +1369,13 @@ fn draw_roster(f: &mut Frame, app: &App) {
                 " "
             };
             let style = if selected {
-                Style::default()
-                    .fg(Color::LightYellow)
-                    .add_modifier(Modifier::BOLD)
+                Style::default().fg(p_col).add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Color::Gray)
             };
             ListItem::new(Line::from(Span::styled(
                 format!(
-                    "{marker} {}. {} [{}] {} Lv.{} · hunger {}% · incub {}%",
+                    "{marker} {}. {} [{}] {} Lv.{} · Full {}% · Incub {}%",
                     idx + 1,
                     pet.name,
                     pet.species.display_name(),
@@ -983,7 +1394,7 @@ fn draw_roster(f: &mut Frame, app: &App) {
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
                 .border_style(Style::default().fg(Color::DarkGray))
-                .title(" Roster (↑/↓ · Enter switch · N adopt) "),
+                .title(" Sanctuary Roster (↑/↓ select • [Enter] switch • [N] adopt new) "),
         ),
         columns[0],
     );
@@ -993,6 +1404,7 @@ fn draw_roster(f: &mut Frame, app: &App) {
         .pets
         .get(app.roster_selected_idx)
         .unwrap_or(&app.pet);
+    let (h_primary, _, _) = species_palette(highlighted.species);
     let mut lines = vec![
         Line::from(Span::styled(
             format!(
@@ -1001,9 +1413,7 @@ fn draw_roster(f: &mut Frame, app: &App) {
                 highlighted.species.display_name(),
                 highlighted.species.rarity()
             ),
-            Style::default()
-                .fg(Color::LightCyan)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(h_primary).add_modifier(Modifier::BOLD),
         )),
         Line::from(Span::styled(
             highlighted.status_summary(),
@@ -1011,20 +1421,15 @@ fn draw_roster(f: &mut Frame, app: &App) {
         )),
         Line::from(""),
     ];
-    for line in render_animated_sprite(highlighted, app.tick_count) {
-        lines.push(Line::from(Span::styled(
-            line,
-            Style::default().fg(stage_color(highlighted.stage)),
-        )));
-    }
+    lines.extend(render_colored_sprite(highlighted, app.tick_count));
     f.render_widget(
         Paragraph::new(Text::from(lines))
             .block(
                 Block::default()
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded)
-                    .border_style(Style::default().fg(Color::DarkGray))
-                    .title(" Companion card "),
+                    .border_style(Style::default().fg(h_primary))
+                    .title(" Companion Card "),
             )
             .wrap(Wrap { trim: false }),
         columns[1],
@@ -1052,7 +1457,7 @@ fn draw_minigame(f: &mut Frame, app: &App) {
             (
                 Text::from(lines),
                 format!(
-                    "score {} · coins {} · xp {} · ticks left {}",
+                    "Score {} · Coins +{} · XP +{} · Time left {}",
                     game.score, game.coins_earned, game.xp_earned, game.ticks_remaining
                 ),
             )
@@ -1066,7 +1471,7 @@ fn draw_minigame(f: &mut Frame, app: &App) {
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
                 .border_style(Style::default().fg(Color::DarkGray))
-                .title(" Catch the falling snacks! "),
+                .title(" Catch the falling snacks & stars! Avoid 💣! "),
         ),
         rows[0],
     );
@@ -1074,8 +1479,8 @@ fn draw_minigame(f: &mut Frame, app: &App) {
         Paragraph::new(Text::from(vec![
             Line::from(Span::styled(status, Style::default().fg(Color::LightYellow))),
             Line::from(Span::styled(
-                "←/→ or A/D to move · Esc/Q to stop",
-                Style::default().fg(Color::DarkGray),
+                "←/→ or A/D to move basket · Esc/Q to finish & claim rewards",
+                Style::default().fg(Color::Gray),
             )),
         ])),
         rows[1],
@@ -1087,6 +1492,15 @@ pub fn run_tui(
     paths: StoragePaths,
     start_onboarding: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    run_tui_with_report(sanctuary, paths, start_onboarding, None)
+}
+
+pub fn run_tui_with_report(
+    sanctuary: Sanctuary,
+    paths: StoragePaths,
+    start_onboarding: bool,
+    offline_report: Option<OfflineReport>,
+) -> Result<(), Box<dyn std::error::Error>> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
@@ -1094,6 +1508,7 @@ pub fn run_tui(
     let mut terminal = Terminal::new(backend)?;
 
     let mut app = App::new_with_sanctuary(sanctuary, paths, start_onboarding);
+    app.offline_report = offline_report;
     let tick_rate = Duration::from_millis(TICK_MS);
     let mut last_tick = Instant::now();
 
@@ -1152,6 +1567,7 @@ mod tests {
         for _ in 0..4 {
             app.handle_key(KeyCode::Down);
         }
+        app.handle_key(KeyCode::Char('v'));
         app.handle_key(KeyCode::Enter);
         assert_eq!(app.onboarding_step, OnboardingStep::SelectTheme);
         app.handle_key(KeyCode::Enter);
@@ -1198,13 +1614,12 @@ mod tests {
             let backend = TestBackend::new(w, h);
             let mut terminal = Terminal::new(backend).unwrap();
             let paths = tmp_paths(&format!("render{w}"));
-            let app = App::new(Pet::new("Mochi"), paths);
+            let mut app = App::new(Pet::new("Mochi"), paths);
+            app.pantry_open = true;
             terminal.draw(|f| draw_ui(f, &app)).unwrap();
-            assert_eq!(LayoutTier::from_width(w), match w {
-                50 => LayoutTier::Compact,
-                100 => LayoutTier::Standard,
-                _ => LayoutTier::Wide,
-            });
+            app.pantry_open = false;
+            app.show_help = true;
+            terminal.draw(|f| draw_ui(f, &app)).unwrap();
         }
     }
 

@@ -1,18 +1,23 @@
-//! Core pet model for **Mochigotchi** — collectible species, lifecycle stages,
-//! realistic incubation/care cooldowns, and the multi-pet `Sanctuary` roster.
+//! Core pet model for **Mochigotchi** — collectible species, realistic
+//! multi-hour/day lifecycle, cooldowns, offline care report, food pantry,
+//! and the multi-pet [`Sanctuary`] roster.
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-/// Seconds you must wait between two manual egg-warming sessions.
-pub const WARM_COOLDOWN_SECS: i64 = 12;
-/// Seconds you must wait between two training sessions.
-pub const TRAIN_COOLDOWN_SECS: i64 = 15;
-/// Seconds you must wait between two head-pat (cuddle) sessions.
-pub const PET_COOLDOWN_SECS: i64 = 8;
+/// Seconds you must wait between two manual egg-warming sessions (3 minutes).
+pub const WARM_COOLDOWN_SECS: i64 = 180;
+/// Seconds you must wait between two meals (2 minutes).
+pub const FEED_COOLDOWN_SECS: i64 = 120;
+/// Seconds you must wait between two play sessions (2.5 minutes).
+pub const PLAY_COOLDOWN_SECS: i64 = 150;
+/// Seconds you must wait between two training sessions (4 minutes).
+pub const TRAIN_COOLDOWN_SECS: i64 = 240;
+/// Seconds you must wait between two headpat sessions (45 seconds).
+pub const PET_COOLDOWN_SECS: i64 = 45;
 
-/// Life stages of every companion. Eggs hatch, then grow through three
-/// care-gated stages before reaching the Starlight Elder form.
+/// Life stages of every companion. Eggs hatch, then grow across days of care
+/// before reaching the Starlight Elder form.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Default,
 )]
@@ -64,10 +69,10 @@ impl EvolutionStage {
     pub fn min_xp(&self) -> u32 {
         match self {
             Self::Egg => 0,
-            Self::Baby => 80,
-            Self::Teen => 250,
-            Self::Adult => 600,
-            Self::CyberElder => 1200,
+            Self::Baby => 100,
+            Self::Teen => 450,
+            Self::Adult => 1_400,
+            Self::CyberElder => 3_500,
         }
     }
 
@@ -75,21 +80,22 @@ impl EvolutionStage {
     pub fn min_bond(&self) -> u8 {
         match self {
             Self::Egg => 0,
-            Self::Baby => 10,
-            Self::Teen => 25,
-            Self::Adult => 45,
-            Self::CyberElder => 70,
+            Self::Baby => 12,
+            Self::Teen => 35,
+            Self::Adult => 65,
+            Self::CyberElder => 90,
         }
     }
 
-    /// Time you must have spent together (in seconds) to *reach* this stage.
+    /// Time you must have spent together (real seconds, including offline time)
+    /// to *reach* this stage: Teen = 6h, Adult = 24h, Elder = 72h.
     pub fn min_age_seconds(&self) -> u64 {
         match self {
             Self::Egg => 0,
             Self::Baby => 0,
-            Self::Teen => 60,
-            Self::Adult => 180,
-            Self::CyberElder => 420,
+            Self::Teen => 6 * 3_600,
+            Self::Adult => 24 * 3_600,
+            Self::CyberElder => 72 * 3_600,
         }
     }
 
@@ -104,13 +110,13 @@ impl EvolutionStage {
     }
 
     pub fn from_xp(xp: u32) -> EvolutionStage {
-        if xp >= 1200 {
+        if xp >= 3_500 {
             Self::CyberElder
-        } else if xp >= 600 {
+        } else if xp >= 1_400 {
             Self::Adult
-        } else if xp >= 250 {
+        } else if xp >= 450 {
             Self::Teen
-        } else if xp >= 80 {
+        } else if xp >= 100 {
             Self::Baby
         } else {
             Self::Egg
@@ -348,6 +354,58 @@ impl PetMood {
     }
 }
 
+/// Five foods available in the Pantry (`[F]`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum FoodChoice {
+    FavoriteSnack,
+    HeartyBento,
+    WarmMilkTea,
+    HerbalSoup,
+    StarlightDelight,
+}
+
+impl FoodChoice {
+    pub fn all() -> &'static [FoodChoice] {
+        &[
+            Self::FavoriteSnack,
+            Self::HeartyBento,
+            Self::WarmMilkTea,
+            Self::HerbalSoup,
+            Self::StarlightDelight,
+        ]
+    }
+
+    pub fn title(&self, species: PetSpecies) -> String {
+        match self {
+            Self::FavoriteSnack => format!("{} (Favorite)", species.favorite_snack()),
+            Self::HeartyBento => "🍱 Hearty Bento Box".to_string(),
+            Self::WarmMilkTea => "🧋 Warm Boba Milk Tea".to_string(),
+            Self::HerbalSoup => "🍲 Soothing Herbal Soup".to_string(),
+            Self::StarlightDelight => "🌟 Starlight Delight".to_string(),
+        }
+    }
+
+    pub fn summary(&self) -> &'static str {
+        match self {
+            Self::FavoriteSnack => "Free • +20 Hunger, +6 Happy, +3 Bond",
+            Self::HeartyBento => "8 coins • +38 Hunger, +8 Happy, +5 Energy",
+            Self::WarmMilkTea => "5 coins • +14 Hunger, +14 Happy, +12 Energy",
+            Self::HerbalSoup => "10 coins • +22 Hunger, +20 Health, cures mild chills",
+            Self::StarlightDelight => "18 coins • +30 Hunger, +20 Happy, +8 Bond, +25 XP",
+        }
+    }
+
+    pub fn cost(&self) -> u32 {
+        match self {
+            Self::FavoriteSnack => 0,
+            Self::HeartyBento => 8,
+            Self::WarmMilkTea => 5,
+            Self::HerbalSoup => 10,
+            Self::StarlightDelight => 18,
+        }
+    }
+}
+
 /// Every care action the player can trigger.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum PetAction {
@@ -376,6 +434,37 @@ impl PetAction {
     }
 }
 
+/// Summary of what happened to your companions while the terminal was closed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct OfflineReport {
+    pub elapsed_seconds: u64,
+    pub pet_name: String,
+    pub events: Vec<String>,
+    pub coins_found: u32,
+}
+
+impl OfflineReport {
+    pub fn formatted_duration(&self) -> String {
+        format_duration_human(self.elapsed_seconds)
+    }
+}
+
+pub fn format_duration_human(secs: u64) -> String {
+    let days = secs / 86_400;
+    let hours = (secs % 86_400) / 3_600;
+    let mins = (secs % 3_600) / 60;
+    let rem_s = secs % 60;
+    if days > 0 {
+        format!("{days}d {hours}h")
+    } else if hours > 0 {
+        format!("{hours}h {mins}m")
+    } else if mins > 0 {
+        format!("{mins}m {rem_s}s")
+    } else {
+        format!("{rem_s}s")
+    }
+}
+
 /// A single companion: everything about one creature in your Sanctuary.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -397,10 +486,13 @@ pub struct Pet {
     pub xp: u32,
     pub level: u32,
     pub coins: u32,
+    pub care_mistakes: u32,
     pub is_sleeping: bool,
     pub is_sick: bool,
     pub last_updated: DateTime<Utc>,
     pub last_warmed_at: Option<DateTime<Utc>>,
+    pub last_fed_at: Option<DateTime<Utc>>,
+    pub last_played_at: Option<DateTime<Utc>>,
     pub last_trained_at: Option<DateTime<Utc>>,
     pub last_petted_at: Option<DateTime<Utc>>,
     pub age_seconds: u64,
@@ -444,10 +536,13 @@ impl Pet {
             xp: 0,
             level: 1,
             coins: 0,
+            care_mistakes: 0,
             is_sleeping: false,
             is_sick: false,
             last_updated: Utc::now(),
             last_warmed_at: None,
+            last_fed_at: None,
+            last_played_at: None,
             last_trained_at: None,
             last_petted_at: None,
             age_seconds: 0,
@@ -475,6 +570,8 @@ impl Pet {
 
     pub fn clear_cooldowns(&mut self) {
         self.last_warmed_at = None;
+        self.last_fed_at = None;
+        self.last_played_at = None;
         self.last_trained_at = None;
         self.last_petted_at = None;
     }
@@ -495,6 +592,14 @@ impl Pet {
 
     pub fn warm_cooldown_remaining(&self, now: DateTime<Utc>) -> u64 {
         Self::remaining_secs(self.last_warmed_at, WARM_COOLDOWN_SECS, now)
+    }
+
+    pub fn feed_cooldown_remaining(&self, now: DateTime<Utc>) -> u64 {
+        Self::remaining_secs(self.last_fed_at, FEED_COOLDOWN_SECS, now)
+    }
+
+    pub fn play_cooldown_remaining(&self, now: DateTime<Utc>) -> u64 {
+        Self::remaining_secs(self.last_played_at, PLAY_COOLDOWN_SECS, now)
     }
 
     pub fn train_cooldown_remaining(&self, now: DateTime<Utc>) -> u64 {
@@ -523,7 +628,7 @@ impl Pet {
     }
 
     pub fn level_up_threshold(&self) -> u32 {
-        80
+        100
     }
 
     pub fn add_xp(&mut self, amount: u32) -> bool {
@@ -550,11 +655,11 @@ impl Pet {
                 && self.age_seconds >= next.min_age_seconds()
             {
                 self.stage = next;
-                self.coins = self.coins.saturating_add(20);
-                self.happiness = (self.happiness + 10).min(100);
+                self.coins = self.coins.saturating_add(25);
+                self.happiness = (self.happiness + 12).min(100);
                 self.health = (self.health + 10).min(100);
                 self.log_action(format!(
-                    "✨ Evolution! {} became a {}! (+20 coins)",
+                    "✨ Evolution! {} grew into a {}! (+25 coins)",
                     self.name,
                     self.stage.badge()
                 ));
@@ -587,23 +692,87 @@ impl Pet {
     pub fn next_evolution_requirements(&self) -> String {
         if self.stage == EvolutionStage::Egg {
             return format!(
-                "Hatch at 100% Incubation (now {}% • warm [W] or wait)",
+                "Hatch at 100% Incubation (now {}% • [W] +20% every 3m or passive warmth)",
                 self.incubation
             );
         }
         match self.stage.next_stage() {
             Some(next) => format!(
-                "Next: {} • XP {}/{} • Bond {}/{} • Age {}s/{}s",
+                "Next: {} • XP {}/{} • Bond {}/{} • Age {}/{}",
                 next.badge(),
                 self.xp,
                 next.min_xp(),
                 self.bond,
                 next.min_bond(),
-                self.age_seconds,
-                next.min_age_seconds()
+                format_duration_human(self.age_seconds),
+                format_duration_human(next.min_age_seconds())
             ),
             None => "Max evolution reached — Starlight Elder 🌟".to_string(),
         }
+    }
+
+    /// Context-aware hint explaining what your companion needs most right now.
+    pub fn advisor_tip(&self, now: DateTime<Utc>) -> String {
+        if self.stage == EvolutionStage::Egg {
+            let rem = self.warm_cooldown_remaining(now);
+            if self.incubation >= 99 {
+                return "🥚 Ready to hatch! Press [W] or [Space] to crack the shell!".to_string();
+            } else if rem == 0 {
+                return "🤲 Egg is ready for warmth! Press [W] or [Space] (+20% incubation)."
+                    .to_string();
+            } else {
+                return format!(
+                    "🕯️ Egg is absorbing warmth ({}%). Next manual warm in {} (passive warmth active).",
+                    self.incubation,
+                    format_duration_human(rem)
+                );
+            }
+        }
+
+        if self.is_sick {
+            return format!(
+                "🤒 {} feels unwell! Press [H] to give herbal medicine right away.",
+                self.name
+            );
+        }
+        if self.poop_count > 0 || self.cleanliness < 45 {
+            return format!(
+                "🫧 Room is getting messy (Clean {}%, Poop {}). Press [C] for a bubble bath!",
+                self.cleanliness, self.poop_count
+            );
+        }
+        if self.is_sleeping {
+            if self.energy >= 95 {
+                return format!(
+                    "☀️ {} is fully rested ({}% Energy)! Press [S] to wake them up.",
+                    self.name, self.energy
+                );
+            }
+            return format!(
+                "💤 {} is sleeping peacefully ({}% Energy). Let them rest or press [S] to wake.",
+                self.name, self.energy
+            );
+        }
+        if self.hunger <= 35 {
+            return format!(
+                "🍙 {}'s tummy is rumbling ({}% Full)! Press [F] to open the Pantry.",
+                self.name, self.hunger
+            );
+        }
+        if self.energy <= 25 {
+            return format!(
+                "🥱 {} is getting sleepy ({}% Energy). Press [S] to tuck them into bed.",
+                self.name, self.energy
+            );
+        }
+        if self.happiness <= 50 {
+            return format!(
+                "🎾 {} looks a bit lonely ({}% Happy). Press [P] to play or [T] for headpats!",
+                self.name, self.happiness
+            );
+        }
+        "✨ Everything is cozy! Press [G] for Snack Arcade, [N] to adopt another pet, or [?] for Help."
+            .to_string()
     }
 
     pub fn perform_action(&mut self, action: PetAction) -> String {
@@ -649,8 +818,8 @@ impl Pet {
         let remaining = self.warm_cooldown_remaining(now);
         if remaining > 0 {
             return self.refuse(format!(
-                "⏳ The egg is still absorbing your warmth! Wait {}s (passive incubation continues).",
-                remaining
+                "⏳ The egg is still absorbing your warmth! Wait {} (passive incubation continues).",
+                format_duration_human(remaining)
             ));
         }
 
@@ -663,13 +832,13 @@ impl Pet {
             self.stage = EvolutionStage::Baby;
             self.xp = self.xp.max(EvolutionStage::Baby.min_xp());
             self.level = 2;
-            self.hunger = 65;
-            self.happiness = 85;
-            self.energy = 90;
+            self.hunger = 70;
+            self.happiness = 88;
+            self.energy = 92;
             self.mood = PetMood::Happy;
-            self.coins = self.coins.saturating_add(15);
+            self.coins = self.coins.saturating_add(20);
             let msg = format!(
-                "🐣 CRACK! {} hatched into a precious {} ({})! (+15 coins)",
+                "🐣 CRACK! {} hatched into a precious {} ({})! (+20 coins)",
                 self.name,
                 self.species.display_name(),
                 self.stage.badge()
@@ -688,6 +857,10 @@ impl Pet {
     }
 
     pub fn feed(&mut self) -> String {
+        self.feed_choice(FoodChoice::FavoriteSnack)
+    }
+
+    pub fn feed_choice(&mut self, choice: FoodChoice) -> String {
         if let Some(msg) = self.egg_guard() {
             return self.refuse(msg);
         }
@@ -704,9 +877,43 @@ impl Pet {
             ));
         }
 
-        self.hunger = (self.hunger + 22).min(100);
-        self.happiness = (self.happiness + 5).min(100);
-        self.bond = (self.bond + 2).min(100);
+        let now = Utc::now();
+        let remaining = self.feed_cooldown_remaining(now);
+        if remaining > 0 && self.hunger >= 60 {
+            return self.refuse(format!(
+                "⏳ {} is still digesting their last meal! Wait {}.",
+                self.name,
+                format_duration_human(remaining)
+            ));
+        }
+
+        let cost = choice.cost();
+        if self.coins < cost {
+            return self.refuse(format!(
+                "💰 Not enough coins for {} (need {} coins, have {}). Try Favorite Snack (Free)!",
+                choice.title(self.species),
+                cost,
+                self.coins
+            ));
+        }
+        self.coins -= cost;
+
+        let (hunger_gain, happy_gain, energy_gain, health_gain, bond_gain, xp_gain) = match choice {
+            FoodChoice::FavoriteSnack => (22, 6, 0, 0, 3, 10),
+            FoodChoice::HeartyBento => (38, 8, 5, 2, 3, 14),
+            FoodChoice::WarmMilkTea => (14, 14, 12, 0, 4, 12),
+            FoodChoice::HerbalSoup => {
+                self.is_sick = false;
+                (22, 5, 4, 20, 3, 14)
+            }
+            FoodChoice::StarlightDelight => (30, 20, 10, 5, 8, 25),
+        };
+
+        self.hunger = (self.hunger + hunger_gain).min(100);
+        self.happiness = (self.happiness + happy_gain).min(100);
+        self.energy = (self.energy + energy_gain).min(100);
+        self.health = (self.health + health_gain).min(100);
+        self.bond = (self.bond + bond_gain).min(100);
         self.meals_since_poop = self.meals_since_poop.saturating_add(1);
         if self.meals_since_poop >= 2 {
             self.meals_since_poop = 0;
@@ -714,13 +921,14 @@ impl Pet {
             self.cleanliness = self.cleanliness.saturating_sub(15);
         }
         self.mood = PetMood::Eating;
-        self.last_updated = Utc::now();
-        self.add_xp(10);
+        self.last_fed_at = Some(now);
+        self.last_updated = now;
+        self.add_xp(xp_gain);
 
+        let food_name = choice.title(self.species);
         let msg = format!(
-            "🍡 Fed {} their favorite {}! (+22 Fullness, +10 XP)",
-            self.name,
-            self.species.favorite_snack()
+            "🍡 Fed {} {}! (+{} Fullness, +{} XP)",
+            self.name, food_name, hunger_gain, xp_gain
         );
         self.log_action(msg.clone());
         msg
@@ -740,20 +948,37 @@ impl Pet {
             ));
         }
         if self.energy < 20 {
-            return self.refuse(format!("⚡ {} is too tired to play! Let them rest [S].", self.name));
+            return self.refuse(format!(
+                "⚡ {} is too tired to play! Let them rest [S].",
+                self.name
+            ));
         }
         if self.hunger < 20 {
-            return self.refuse(format!("🍙 {} is too hungry to play! Feed them [F] first.", self.name));
+            return self.refuse(format!(
+                "🍙 {} is too hungry to play! Feed them [F] first.",
+                self.name
+            ));
+        }
+
+        let now = Utc::now();
+        let remaining = self.play_cooldown_remaining(now);
+        if remaining > 0 && self.happiness >= 75 {
+            return self.refuse(format!(
+                "⏳ {} just finished playing! Let them catch their breath ({}).",
+                self.name,
+                format_duration_human(remaining)
+            ));
         }
 
         self.happiness = (self.happiness + 18).min(100);
-        self.energy = self.energy.saturating_sub(15);
-        self.hunger = self.hunger.saturating_sub(10);
+        self.energy = self.energy.saturating_sub(14);
+        self.hunger = self.hunger.saturating_sub(9);
         self.cleanliness = self.cleanliness.saturating_sub(5);
         self.bond = (self.bond + 4).min(100);
         self.coins = self.coins.saturating_add(5);
         self.mood = PetMood::Happy;
-        self.last_updated = Utc::now();
+        self.last_played_at = Some(now);
+        self.last_updated = now;
         self.add_xp(15);
 
         let msg = format!(
@@ -809,24 +1034,37 @@ impl Pet {
             return self.refuse(msg);
         }
         if self.is_sleeping {
-            return self.refuse(format!("💤 {} is asleep and cannot train right now.", self.name));
+            return self.refuse(format!(
+                "💤 {} is asleep and cannot train right now.",
+                self.name
+            ));
         }
         if self.is_sick {
-            return self.refuse(format!("🤒 {} is unwell! Heal them [H] before training.", self.name));
+            return self.refuse(format!(
+                "🤒 {} is unwell! Heal them [H] before training.",
+                self.name
+            ));
         }
         if self.energy < 25 {
-            return self.refuse(format!("⚡ {} lacks energy to train! Need 25+ Energy.", self.name));
+            return self.refuse(format!(
+                "⚡ {} lacks energy to train! Need 25+ Energy.",
+                self.name
+            ));
         }
         if self.hunger < 20 {
-            return self.refuse(format!("🍽️ {} is too hungry to focus on training!", self.name));
+            return self.refuse(format!(
+                "🍽️ {} is too hungry to focus on training!",
+                self.name
+            ));
         }
 
         let now = Utc::now();
         let remaining = self.train_cooldown_remaining(now);
         if remaining > 0 {
             return self.refuse(format!(
-                "⏳ {} is catching their breath after training! Wait {}s.",
-                self.name, remaining
+                "⏳ {} is catching their breath after training! Wait {}.",
+                self.name,
+                format_duration_human(remaining)
             ));
         }
 
@@ -887,7 +1125,10 @@ impl Pet {
         self.add_xp(8);
         self.refresh_mood();
 
-        let msg = format!("🫧 Gave {} a warm bubble bath and tidied up! (+8 XP)", self.name);
+        let msg = format!(
+            "🫧 Gave {} a warm bubble bath and tidied up! (+8 XP)",
+            self.name
+        );
         self.log_action(msg.clone());
         msg
     }
@@ -908,7 +1149,10 @@ impl Pet {
         self.add_xp(10);
         self.refresh_mood();
 
-        let msg = format!("💊 Gave {} sweet herbal medicine. Fully recovered! (+10 XP)", self.name);
+        let msg = format!(
+            "💊 Gave {} sweet herbal medicine. Fully recovered! (+10 XP)",
+            self.name
+        );
         self.log_action(msg.clone());
         msg
     }
@@ -929,7 +1173,7 @@ impl Pet {
         msg
     }
 
-    /// One in-session heartbeat (the TUI ticks every ~5s).
+    /// One in-session heartbeat (called gradually by the TUI).
     pub fn tick_decay(&mut self) {
         self.age_seconds = self.age_seconds.saturating_add(1);
         self.last_updated = Utc::now();
@@ -940,7 +1184,7 @@ impl Pet {
         }
 
         if self.is_sleeping {
-            self.energy = (self.energy + 6).min(100);
+            self.energy = (self.energy + 5).min(100);
             self.hunger = self.hunger.saturating_sub(1);
         } else {
             self.hunger = self.hunger.saturating_sub(2);
@@ -953,6 +1197,7 @@ impl Pet {
         }
         if self.hunger <= 15 || self.cleanliness <= 25 {
             self.health = self.health.saturating_sub(3);
+            self.care_mistakes = self.care_mistakes.saturating_add(1);
         }
         if self.health <= 35 {
             self.is_sick = true;
@@ -962,51 +1207,182 @@ impl Pet {
         self.refresh_mood();
     }
 
-    /// Apply everything that happened while you were away.
-    /// Eggs only absorb *passive* warmth (up to 99%) and never starve.
-    pub fn apply_offline_decay(&mut self, now: DateTime<Utc>) -> u64 {
+    /// Apply realistic offline progression while the terminal was closed, and
+    /// generate a rich [`OfflineReport`] when away for at least 2 minutes.
+    pub fn apply_offline_decay_with_report(
+        &mut self,
+        now: DateTime<Utc>,
+    ) -> (u64, Option<OfflineReport>) {
         let elapsed = now
             .signed_duration_since(self.last_updated)
             .num_seconds()
             .max(0) as u64;
         if elapsed == 0 {
-            return 0;
+            return (0, None);
         }
 
         self.last_updated = now;
         self.age_seconds = self.age_seconds.saturating_add(elapsed);
 
+        let mut events = Vec::new();
+        let mut coins_found = 0u32;
+
         if self.stage == EvolutionStage::Egg {
+            let before = self.incubation;
             let passive = ((elapsed / 15) as u8).min(99);
             self.incubation = self.incubation.saturating_add(passive).min(99);
-            return elapsed;
+            let gained = self.incubation.saturating_sub(before);
+            if gained > 0 {
+                events.push(format!(
+                    "🥚 Your egg absorbed ambient sanctuary warmth (+{}% -> {}% incubation).",
+                    gained, self.incubation
+                ));
+            }
+            if self.incubation >= 99 {
+                events.push(
+                    "🐣 The shell is trembling! Press [W] once to hatch your companion!".to_string(),
+                );
+            }
+            let report = if elapsed >= 120 {
+                Some(OfflineReport {
+                    elapsed_seconds: elapsed,
+                    pet_name: self.name.clone(),
+                    events,
+                    coins_found: 0,
+                })
+            } else {
+                None
+            };
+            return (elapsed, report);
         }
 
-        let intervals = (elapsed / 60).min(48) as u8;
-        if intervals == 0 {
-            return elapsed;
+        let minutes = elapsed / 60;
+        if minutes == 0 {
+            return (elapsed, None);
         }
+
+        let (hunger_drop, happy_drop, energy_delta, clean_drop) = if minutes <= 30 {
+            let m = minutes as u8;
+            if self.is_sleeping {
+                (m, m / 2, m.saturating_mul(5), m / 2)
+            } else {
+                (m.saturating_mul(2), m, m, m)
+            }
+        } else {
+            let ten_min_blocks = (minutes / 10).min(144) as u8;
+            if self.is_sleeping {
+                (
+                    ten_min_blocks.min(70),
+                    (ten_min_blocks / 2).min(50),
+                    ten_min_blocks.saturating_mul(6).min(100),
+                    (ten_min_blocks / 2).min(55),
+                )
+            } else {
+                (
+                    ten_min_blocks.saturating_add(ten_min_blocks / 5).min(85),
+                    ten_min_blocks.min(75),
+                    ten_min_blocks.min(80),
+                    ten_min_blocks.min(75),
+                )
+            }
+        };
+
+        let old_hunger = self.hunger;
+        let old_energy = self.energy;
 
         if self.is_sleeping {
-            self.energy = self.energy.saturating_add(intervals.saturating_mul(5)).min(100);
-            self.hunger = self.hunger.saturating_sub(intervals);
+            self.energy = self.energy.saturating_add(energy_delta).min(100);
+            self.hunger = self.hunger.saturating_sub(hunger_drop).max(5);
+            self.happiness = self.happiness.saturating_sub(happy_drop).max(15);
+            self.cleanliness = self.cleanliness.saturating_sub(clean_drop).max(20);
+            if self.energy >= 95 && minutes >= 45 {
+                self.is_sleeping = false;
+                events.push(format!(
+                    "☀️ {} slept soundly while you were away and woke up at {}% Energy!",
+                    self.name, self.energy
+                ));
+            } else {
+                events.push(format!(
+                    "💤 {} rested peacefully (Energy {}% -> {}%).",
+                    self.name, old_energy, self.energy
+                ));
+            }
         } else {
-            self.hunger = self.hunger.saturating_sub(intervals.saturating_mul(2));
-            self.happiness = self.happiness.saturating_sub(intervals);
-            self.energy = self.energy.saturating_sub(intervals);
-            self.cleanliness = self.cleanliness.saturating_sub(intervals);
+            self.hunger = self.hunger.saturating_sub(hunger_drop).max(5);
+            self.happiness = self.happiness.saturating_sub(happy_drop).max(10);
+            self.energy = self.energy.saturating_sub(energy_delta).max(10);
+            self.cleanliness = self.cleanliness.saturating_sub(clean_drop).max(15);
+
+            events.push(format!(
+                "🍙 Appetite grew over {} (Fullness {}% -> {}%).",
+                format_duration_human(elapsed),
+                old_hunger,
+                self.hunger
+            ));
+
+            if self.energy <= 20 && minutes >= 120 {
+                self.is_sleeping = true;
+                self.energy = 55;
+                events.push(format!(
+                    "🌙 {} got sleepy waiting for you and curled up for a nap.",
+                    self.name
+                ));
+            }
+        }
+
+        let offline_poops = ((minutes / 180) as u8).min(3);
+        if offline_poops > 0 {
+            self.poop_count = (self.poop_count + offline_poops).min(5);
+            events.push(format!(
+                "💩 {} left {} mess(es) in the habitat — time for a bubble bath [C]!",
+                self.name, offline_poops
+            ));
+        }
+
+        if !self.is_sick && old_hunger >= 50 && minutes >= 15 {
+            coins_found = ((minutes / 15) as u32 * 3).clamp(3, 35);
+            self.coins = self.coins.saturating_add(coins_found);
+            self.add_xp(coins_found);
+            events.push(format!(
+                "🎁 While exploring the sanctuary garden, {} found +{} coins & +{} XP for you!",
+                self.name, coins_found, coins_found
+            ));
         }
 
         if self.hunger <= 15 || self.cleanliness <= 20 {
-            self.health = self.health.saturating_sub(intervals).max(20);
+            let dmg = ((minutes / 30) as u8).clamp(5, 35);
+            self.health = self.health.saturating_sub(dmg).max(20);
+            self.care_mistakes = self.care_mistakes.saturating_add(1);
             if self.health <= 35 {
                 self.is_sick = true;
+                events.push(format!(
+                    "🤒 {} caught a chill from low hunger/cleanliness and needs medicine [H]!",
+                    self.name
+                ));
             }
         }
 
         self.check_evolution();
         self.refresh_mood();
-        elapsed
+
+        let report = if elapsed >= 120 {
+            Some(OfflineReport {
+                elapsed_seconds: elapsed,
+                pet_name: self.name.clone(),
+                events,
+                coins_found,
+            })
+        } else {
+            None
+        };
+
+        (elapsed, report)
+    }
+
+    /// Apply everything that happened while you were away.
+    /// Eggs only absorb *passive* warmth (up to 99%) and never starve.
+    pub fn apply_offline_decay(&mut self, now: DateTime<Utc>) -> u64 {
+        self.apply_offline_decay_with_report(now).0
     }
 
     pub fn status_summary(&self) -> String {
@@ -1114,11 +1490,27 @@ impl Sanctuary {
     }
 
     pub fn apply_offline_decay_all(&mut self, now: DateTime<Utc>) -> u64 {
-        self.pets
-            .iter_mut()
-            .map(|p| p.apply_offline_decay(now))
-            .max()
-            .unwrap_or(0)
+        self.apply_offline_decay_all_with_report(now).0
+    }
+
+    pub fn apply_offline_decay_all_with_report(
+        &mut self,
+        now: DateTime<Utc>,
+    ) -> (u64, Option<OfflineReport>) {
+        let mut max_elapsed = 0u64;
+        let mut active_report = None;
+        let active_idx = self.active_index.min(self.pets.len().saturating_sub(1));
+
+        for (idx, pet) in self.pets.iter_mut().enumerate() {
+            let (elapsed, report) = pet.apply_offline_decay_with_report(now);
+            if elapsed > max_elapsed {
+                max_elapsed = elapsed;
+            }
+            if idx == active_idx {
+                active_report = report;
+            }
+        }
+        (max_elapsed, active_report)
     }
 
     pub fn tick_decay_all(&mut self) {
