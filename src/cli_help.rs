@@ -14,7 +14,7 @@ OPTIONS:
     -h, --help                Print this help information
     -V, --version             Print version information
     --name <NAME>             Set companion name when creating or adopting
-    --call-me <TITLE>         Set how your companion addresses you (e.g., Aqsan, Boss, Keeper)
+    --call-me <TITLE>         Set how your companion addresses you (e.g., Boss, Keeper, Captain)
     --species <SPECIES>       cat | pup | bun | pengu | dragon | wyrm | fox | phoenix | uni | slime
     --theme <THEME>           pink | matcha | blue | lavender | gold
     --adopt                   Adopt a new companion into your Sanctuary (blocked if active died unburied)

@@ -91,7 +91,7 @@ komo                       # Launch the handheld LCD interface
 ```
 
 1. Pick a species (Step 1), a shell color (Step 2), and tell it what to call
-   you (Step 3, press Tab) — for example `Aqsan`, `Boss`, or `Keeper`.
+   you (Step 3, press Tab) — for example `Boss`, `Keeper`, or `Captain`.
 2. Warm the egg with [W]. It incubates +20% per 3 minutes; patience matters
    not only in the egg stage.
 3. Once hatched, try [F] to feed, [Y] to talk, [P] to play, and [U] for
