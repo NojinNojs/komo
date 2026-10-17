@@ -1,3 +1,6 @@
+//! The Ratatui interface: adoption wizard, LCD habitat, Sanctuary roster and
+//! the Snack Catcher arcade.
+
 use std::io;
 use std::time::{Duration, Instant};
 
@@ -8,24 +11,49 @@ use crossterm::{
 };
 use ratatui::{
     backend::CrosstermBackend,
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    text::{Line, Span},
+    text::{Line, Span, Text},
     widgets::{Block, BorderType, Borders, Gauge, List, ListItem, Paragraph, Wrap},
     Frame, Terminal,
 };
 
 use crate::minigame::MiniGame;
-use crate::pet::{EvolutionStage, Pet, PetAction, PetSpecies, ShellTheme};
+use crate::pet::{EvolutionStage, Pet, PetSpecies, Sanctuary, ShellTheme};
 use crate::sprites::{
-    get_sprite_frames, mood_color, render_animated_sprite, speech_bubble, stage_color, theme_color,
+    get_mood_particles, mood_color, render_animated_sprite, render_species_preview, sky_scene,
+    speech_bubble, stage_color, theme_color,
 };
-use crate::storage::{save_dual, StoragePaths};
+use crate::storage::{save_sanctuary, StoragePaths};
+
+const TICK_MS: u64 = 250;
+const DECAY_EVERY_TICKS: usize = 20;
+
+/// Responsive layout tiers: Compact < Standard < Wide.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LayoutTier {
+    Compact,
+    Standard,
+    Wide,
+}
+
+impl LayoutTier {
+    pub fn from_width(width: u16) -> Self {
+        if width < 78 {
+            Self::Compact
+        } else if width < 110 {
+            Self::Standard
+        } else {
+            Self::Wide
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppScreen {
     Onboarding,
     Habitat,
+    SanctuaryRoster,
     MiniGame,
 }
 
@@ -36,113 +64,378 @@ pub enum OnboardingStep {
     EnterName,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum LayoutTier {
-    Compact,
-    Standard,
-    Wide,
-}
-
-impl LayoutTier {
-    fn from_width(width: u16) -> Self {
-        if width < 78 {
-            Self::Compact
-        } else if width < 110 {
-            Self::Standard
-        } else {
-            Self::Wide
-        }
-    }
-
-    fn label(&self) -> &'static str {
-        match self {
-            Self::Compact => "Compact LCD",
-            Self::Standard => "Standard LCD",
-            Self::Wide => "Wide Deluxe LCD",
-        }
-    }
-}
-
-const CARE_ACTIONS: [(PetAction, &str, &str); 8] = [
-    (PetAction::WarmEgg, "Warm/Love", "W/0"),
-    (PetAction::Feed, "Feed", "F/1"),
-    (PetAction::Play, "Play", "P/2"),
-    (PetAction::PetLove, "Headpat", "V/3"),
-    (PetAction::Train, "Train", "T/4"),
-    (PetAction::ToggleSleep, "Sleep", "S/5"),
-    (PetAction::Clean, "Clean", "C/6"),
-    (PetAction::Heal, "Heal", "H/7"),
-];
-
 pub struct App {
     pub pet: Pet,
+    pub sanctuary: Sanctuary,
     pub paths: StoragePaths,
     pub screen: AppScreen,
     pub onboarding_step: OnboardingStep,
     pub selected_species_idx: usize,
     pub selected_theme_idx: usize,
-    pub name_input: String,
-    pub selected_action_idx: usize,
+    pub roster_selected_idx: usize,
+    pub onboarding_name_input: String,
+    pub adopting_new: bool,
     pub tick_count: usize,
-    pub status_banner: String,
-    pub minigame: Option<MiniGame>,
     pub should_quit: bool,
+    pub minigame: Option<MiniGame>,
+    pub rename_buffer: Option<String>,
+    pub last_storage_status: String,
 }
 
 impl App {
     pub fn new(pet: Pet, paths: StoragePaths) -> Self {
-        let banner = pet
-            .action_log
-            .last()
-            .cloned()
-            .unwrap_or_else(|| "Welcome to Mochigotchi!".to_string());
+        Self::new_with_sanctuary(Sanctuary::new_with_pet(pet), paths, false)
+    }
+
+    pub fn new_with_sanctuary(
+        sanctuary: Sanctuary,
+        paths: StoragePaths,
+        start_onboarding: bool,
+    ) -> Self {
+        let pet = sanctuary.active_pet().clone();
         let selected_species_idx = PetSpecies::all()
             .iter()
-            .position(|&s| s == pet.species)
+            .position(|s| *s == pet.species)
             .unwrap_or(0);
         let selected_theme_idx = ShellTheme::all()
             .iter()
-            .position(|&t| t == pet.theme)
+            .position(|t| *t == pet.theme)
             .unwrap_or(0);
-        let name_input = pet.name.clone();
-
         Self {
             pet,
+            sanctuary,
             paths,
-            screen: AppScreen::Habitat,
+            screen: if start_onboarding {
+                AppScreen::Onboarding
+            } else {
+                AppScreen::Habitat
+            },
             onboarding_step: OnboardingStep::SelectSpecies,
             selected_species_idx,
             selected_theme_idx,
-            name_input,
-            selected_action_idx: 0,
+            roster_selected_idx: 0,
+            onboarding_name_input: String::new(),
+            adopting_new: false,
             tick_count: 0,
-            status_banner: banner,
-            minigame: None,
             should_quit: false,
+            minigame: None,
+            rename_buffer: None,
+            last_storage_status: String::new(),
         }
     }
 
     pub fn new_onboarding(paths: StoragePaths) -> Self {
-        let default_species = PetSpecies::MochiCat;
-        let pet = Pet::new_custom(
-            default_species.default_name(),
-            default_species,
-            ShellTheme::StrawberryPink,
-        );
-        Self {
-            pet,
-            paths,
-            screen: AppScreen::Onboarding,
-            onboarding_step: OnboardingStep::SelectSpecies,
-            selected_species_idx: 0,
-            selected_theme_idx: 0,
-            name_input: default_species.default_name().to_string(),
-            selected_action_idx: 0,
-            tick_count: 0,
-            status_banner: "✨ Welcome! Choose your companion species, shell theme, and name."
-                .to_string(),
-            minigame: None,
-            should_quit: false,
+        let mut app = Self::new_with_sanctuary(Sanctuary::new_with_pet(Pet::new("Mochi")), paths, true);
+        app.onboarding_name_input = "Mochi".to_string();
+        app
+    }
+
+    pub fn save_now(&mut self) {
+        self.sanctuary.sync_active(&self.pet);
+        match save_sanctuary(&self.sanctuary, &self.paths) {
+            Ok(()) => self.last_storage_status = "💾 saved".to_string(),
+            Err(err) => self.last_storage_status = format!("⚠️ save failed: {err}"),
+        }
+    }
+
+    fn switch_to_roster_pet(&mut self) {
+        self.sanctuary.sync_active(&self.pet);
+        if self.sanctuary.switch_pet(self.roster_selected_idx) {
+            self.pet = self.sanctuary.active_pet().clone();
+            self.save_now();
+        }
+    }
+
+    fn cycle_pet(&mut self, forward: bool) {
+        self.sanctuary.sync_active(&self.pet);
+        if forward {
+            self.sanctuary.next_pet();
+        } else {
+            self.sanctuary.prev_pet();
+        }
+        self.pet = self.sanctuary.active_pet().clone();
+        self.roster_selected_idx = self.sanctuary.active_index;
+        self.save_now();
+    }
+
+    fn start_adopting(&mut self) {
+        self.adopting_new = true;
+        self.screen = AppScreen::Onboarding;
+        self.onboarding_step = OnboardingStep::SelectSpecies;
+        self.selected_species_idx = 0;
+        self.selected_theme_idx = 0;
+        self.onboarding_name_input = PetSpecies::all()[0].default_name().to_string();
+    }
+
+    fn launch_minigame(&mut self) {
+        let refusal = if self.pet.stage == EvolutionStage::Egg {
+            Some("🥚 The egg can't play yet — warm it first!".to_string())
+        } else if self.pet.is_sleeping {
+            Some(format!("💤 {} is asleep — wake them first!", self.pet.name))
+        } else if self.pet.energy < 15 {
+            Some(format!("⚡ {} is too tired for the arcade.", self.pet.name))
+        } else {
+            None
+        };
+
+        match refusal {
+            Some(msg) => self.pet.log_action(msg),
+            None => {
+                self.minigame = Some(MiniGame::new(38, 12, 120));
+                self.screen = AppScreen::MiniGame;
+            }
+        }
+    }
+
+    pub fn handle_key(&mut self, code: KeyCode) {
+        if self.rename_buffer.is_some() {
+            self.handle_rename_key(code);
+            return;
+        }
+
+        match self.screen {
+            AppScreen::Onboarding => self.handle_onboarding_key(code),
+            AppScreen::SanctuaryRoster => self.handle_roster_key(code),
+            AppScreen::MiniGame => self.handle_minigame_key(code),
+            AppScreen::Habitat => self.handle_habitat_key(code),
+        }
+    }
+
+    fn handle_rename_key(&mut self, code: KeyCode) {
+        let mut buffer = self.rename_buffer.take().unwrap_or_default();
+        match code {
+            KeyCode::Enter => {
+                self.pet.rename(&buffer);
+                self.save_now();
+            }
+            KeyCode::Esc => {}
+            KeyCode::Backspace => {
+                buffer.pop();
+                self.rename_buffer = Some(buffer);
+            }
+            KeyCode::Char(c) if buffer.chars().count() < 18 => {
+                buffer.push(c);
+                self.rename_buffer = Some(buffer);
+            }
+            _ => self.rename_buffer = Some(buffer),
+        }
+    }
+
+    fn handle_onboarding_key(&mut self, code: KeyCode) {
+        let species_count = PetSpecies::all().len();
+        let theme_count = ShellTheme::all().len();
+
+        match self.onboarding_step {
+            OnboardingStep::SelectSpecies => match code {
+                KeyCode::Up | KeyCode::Left | KeyCode::Char('k') | KeyCode::Char('h') => {
+                    self.selected_species_idx =
+                        (self.selected_species_idx + species_count - 1) % species_count;
+                }
+                KeyCode::Down
+                | KeyCode::Right
+                | KeyCode::Char('j')
+                | KeyCode::Char('l')
+                | KeyCode::Tab => {
+                    self.selected_species_idx = (self.selected_species_idx + 1) % species_count;
+                }
+                KeyCode::Enter => {
+                    self.onboarding_step = OnboardingStep::SelectTheme;
+                    self.onboarding_name_input =
+                        PetSpecies::all()[self.selected_species_idx].default_name().to_string();
+                }
+                KeyCode::Esc | KeyCode::Char('q') => {
+                    if self.sanctuary.hatched_count() > 0 {
+                        self.adopting_new = false;
+                        self.screen = AppScreen::Habitat;
+                    } else {
+                        self.should_quit = true;
+                    }
+                }
+                _ => {}
+            },
+            OnboardingStep::SelectTheme => match code {
+                KeyCode::Up | KeyCode::Left | KeyCode::Char('k') | KeyCode::Char('h') => {
+                    self.selected_theme_idx =
+                        (self.selected_theme_idx + theme_count - 1) % theme_count;
+                }
+                KeyCode::Down
+                | KeyCode::Right
+                | KeyCode::Char('j')
+                | KeyCode::Char('l')
+                | KeyCode::Tab => {
+                    self.selected_theme_idx = (self.selected_theme_idx + 1) % theme_count;
+                }
+                KeyCode::BackTab | KeyCode::Esc => {
+                    self.onboarding_step = OnboardingStep::SelectSpecies;
+                }
+                KeyCode::Enter => {
+                    self.onboarding_step = OnboardingStep::EnterName;
+                }
+                _ => {}
+            },
+            OnboardingStep::EnterName => match code {
+                KeyCode::Enter => self.finish_adoption(),
+                KeyCode::Backspace => {
+                    self.onboarding_name_input.pop();
+                }
+                KeyCode::Esc | KeyCode::BackTab => {
+                    self.onboarding_step = OnboardingStep::SelectTheme;
+                }
+                KeyCode::Char(c) if self.onboarding_name_input.chars().count() < 18 => {
+                    self.onboarding_name_input.push(c);
+                }
+                _ => {}
+            },
+        }
+    }
+
+    fn finish_adoption(&mut self) {
+        let species = PetSpecies::all()[self.selected_species_idx];
+        let theme = ShellTheme::all()[self.selected_theme_idx];
+        let name = self.onboarding_name_input.trim().to_string();
+        let new_pet = Pet::new_custom(&name, species, theme);
+
+        if self.adopting_new {
+            self.sanctuary.add_pet(new_pet.clone());
+        } else {
+            self.sanctuary = Sanctuary::new_with_pet(new_pet.clone());
+        }
+
+        self.pet = new_pet;
+        self.roster_selected_idx = self.sanctuary.active_index;
+        self.adopting_new = false;
+        self.screen = AppScreen::Habitat;
+        self.save_now();
+    }
+
+    fn handle_roster_key(&mut self, code: KeyCode) {
+        let count = self.sanctuary.pets.len().max(1);
+        match code {
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.roster_selected_idx = (self.roster_selected_idx + count - 1) % count;
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.roster_selected_idx = (self.roster_selected_idx + 1) % count;
+            }
+            KeyCode::Enter | KeyCode::Char(' ') => {
+                self.switch_to_roster_pet();
+                self.screen = AppScreen::Habitat;
+            }
+            KeyCode::Char('n') | KeyCode::Char('N') => self.start_adopting(),
+            KeyCode::Esc | KeyCode::Char('l') | KeyCode::Char('L') | KeyCode::Char('q') => {
+                self.screen = AppScreen::Habitat;
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_minigame_key(&mut self, code: KeyCode) {
+        let finished = {
+            let Some(game) = self.minigame.as_mut() else {
+                self.screen = AppScreen::Habitat;
+                return;
+            };
+            match code {
+                KeyCode::Left | KeyCode::Char('a') | KeyCode::Char('A') | KeyCode::Char('h') => {
+                    game.move_left();
+                }
+                KeyCode::Right | KeyCode::Char('d') | KeyCode::Char('D') | KeyCode::Char('l') => {
+                    game.move_right();
+                }
+                KeyCode::Esc | KeyCode::Char('q') => {
+                    game.ticks_remaining = 0;
+                }
+                _ => {}
+            }
+            game.is_finished()
+        };
+        if finished {
+            self.finish_minigame();
+        }
+    }
+
+    fn finish_minigame(&mut self) {
+        if let Some(game) = self.minigame.take() {
+            if game.score > 0 || game.coins_earned > 0 || game.xp_earned > 0 {
+                let msg = self
+                    .pet
+                    .apply_minigame_reward(game.score, game.coins_earned, game.xp_earned);
+                self.pet.log_action(msg);
+            }
+        }
+        self.screen = AppScreen::Habitat;
+        self.save_now();
+    }
+
+    fn handle_habitat_key(&mut self, code: KeyCode) {
+        match code {
+            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => {
+                self.save_now();
+                self.should_quit = true;
+            }
+            KeyCode::Char('w') | KeyCode::Char('W') | KeyCode::Char(' ') => {
+                let msg = if self.pet.stage == EvolutionStage::Egg {
+                    self.pet.warm_egg()
+                } else {
+                    self.pet.pet_love()
+                };
+                self.pet.log_action(msg);
+                self.save_now();
+            }
+            KeyCode::Char('f') | KeyCode::Char('F') | KeyCode::Char('1') => {
+                let msg = self.pet.feed();
+                self.pet.log_action(msg);
+                self.save_now();
+            }
+            KeyCode::Char('p') | KeyCode::Char('P') | KeyCode::Char('2') => {
+                let msg = self.pet.play();
+                self.pet.log_action(msg);
+                self.save_now();
+            }
+            KeyCode::Char('t') | KeyCode::Char('T') | KeyCode::Char('3') => {
+                let msg = self.pet.pet_love();
+                self.pet.log_action(msg);
+                self.save_now();
+            }
+            KeyCode::Char('e') | KeyCode::Char('E') | KeyCode::Char('4') => {
+                let msg = self.pet.train();
+                self.pet.log_action(msg);
+                self.save_now();
+            }
+            KeyCode::Char('s') | KeyCode::Char('S') | KeyCode::Char('5') => {
+                let msg = self.pet.toggle_sleep();
+                self.pet.log_action(msg);
+                self.save_now();
+            }
+            KeyCode::Char('c') | KeyCode::Char('C') | KeyCode::Char('6') => {
+                let msg = self.pet.clean();
+                self.pet.log_action(msg);
+                self.save_now();
+            }
+            KeyCode::Char('h') | KeyCode::Char('H') | KeyCode::Char('7') => {
+                let msg = self.pet.heal();
+                self.pet.log_action(msg);
+                self.save_now();
+            }
+            KeyCode::Char('g') | KeyCode::Char('G') | KeyCode::Char('m') | KeyCode::Char('M') => {
+                self.launch_minigame();
+            }
+            KeyCode::Char('l') | KeyCode::Char('L') => {
+                self.sanctuary.sync_active(&self.pet);
+                self.roster_selected_idx = self.sanctuary.active_index;
+                self.screen = AppScreen::SanctuaryRoster;
+            }
+            KeyCode::Char('[') => self.cycle_pet(false),
+            KeyCode::Char(']') => self.cycle_pet(true),
+            KeyCode::Char('n') | KeyCode::Char('N') => self.start_adopting(),
+            KeyCode::Char('r') | KeyCode::Char('R') => {
+                self.rename_buffer = Some(self.pet.name.clone());
+            }
+            KeyCode::Tab => {
+                self.pet.theme = self.pet.theme.next();
+                self.save_now();
+            }
+            _ => {}
         }
     }
 
@@ -150,764 +443,658 @@ impl App {
         self.tick_count = self.tick_count.wrapping_add(1);
 
         if self.screen == AppScreen::MiniGame {
-            if let Some(game) = &mut self.minigame {
-                game.step();
-                if game.is_finished() {
-                    let score = game.score;
-                    let coins = game.coins_earned;
-                    let xp = game.xp_earned;
-                    self.minigame = None;
+            let finished = {
+                let Some(game) = self.minigame.as_mut() else {
                     self.screen = AppScreen::Habitat;
-                    self.status_banner = self.pet.apply_minigame_reward(score, coins, xp);
-                    let _ = save_dual(&self.pet, &self.paths);
-                }
+                    return;
+                };
+                game.step();
+                game.is_finished()
+            };
+            if finished {
+                self.finish_minigame();
             }
             return;
         }
 
-        if self.screen == AppScreen::Habitat && self.tick_count.is_multiple_of(20) {
-            self.pet.tick_decay();
-            let _ = save_dual(&self.pet, &self.paths);
-        }
-    }
-
-    pub fn handle_key(&mut self, key: KeyCode) {
-        match self.screen {
-            AppScreen::Onboarding => self.handle_onboarding_key(key),
-            AppScreen::Habitat => self.handle_habitat_key(key),
-            AppScreen::MiniGame => self.handle_minigame_key(key),
-        }
-    }
-
-    fn handle_onboarding_key(&mut self, key: KeyCode) {
-        let species_list = PetSpecies::all();
-        let theme_list = ShellTheme::all();
-
-        match self.onboarding_step {
-            OnboardingStep::SelectSpecies => match key {
-                KeyCode::Left | KeyCode::Up | KeyCode::Char('h') | KeyCode::Char('k') => {
-                    self.selected_species_idx =
-                        (self.selected_species_idx + species_list.len() - 1) % species_list.len();
-                    self.name_input =
-                        species_list[self.selected_species_idx].default_name().to_string();
-                }
-                KeyCode::Right | KeyCode::Down | KeyCode::Char('l') | KeyCode::Char('j') => {
-                    self.selected_species_idx =
-                        (self.selected_species_idx + 1) % species_list.len();
-                    self.name_input =
-                        species_list[self.selected_species_idx].default_name().to_string();
-                }
-                KeyCode::Enter => {
-                    self.name_input =
-                        species_list[self.selected_species_idx].default_name().to_string();
-                    self.onboarding_step = OnboardingStep::SelectTheme;
-                }
-                KeyCode::Esc | KeyCode::Char('q') => {
-                    self.should_quit = true;
-                }
-                _ => {}
-            },
-            OnboardingStep::SelectTheme => match key {
-                KeyCode::Left | KeyCode::Up | KeyCode::Char('h') | KeyCode::Char('k') => {
-                    self.selected_theme_idx =
-                        (self.selected_theme_idx + theme_list.len() - 1) % theme_list.len();
-                    self.pet.theme = theme_list[self.selected_theme_idx];
-                }
-                KeyCode::Right | KeyCode::Down | KeyCode::Char('l') | KeyCode::Char('j') => {
-                    self.selected_theme_idx = (self.selected_theme_idx + 1) % theme_list.len();
-                    self.pet.theme = theme_list[self.selected_theme_idx];
-                }
-                KeyCode::Enter => {
-                    self.onboarding_step = OnboardingStep::EnterName;
-                }
-                KeyCode::Backspace | KeyCode::Esc => {
-                    self.onboarding_step = OnboardingStep::SelectSpecies;
-                }
-                _ => {}
-            },
-            OnboardingStep::EnterName => match key {
-                KeyCode::Backspace => {
-                    self.name_input.pop();
-                }
-                KeyCode::Char(c) if !c.is_control() => {
-                    if self.name_input.chars().count() < 18 {
-                        self.name_input.push(c);
-                    }
-                }
-                KeyCode::Enter => {
-                    let chosen_species = species_list[self.selected_species_idx];
-                    let chosen_theme = theme_list[self.selected_theme_idx];
-                    self.pet = Pet::new_custom(&self.name_input, chosen_species, chosen_theme);
-                    self.status_banner = self
-                        .pet
-                        .action_log
-                        .last()
-                        .cloned()
-                        .unwrap_or_else(|| "Egg adopted!".to_string());
-                    let _ = save_dual(&self.pet, &self.paths);
-                    self.screen = AppScreen::Habitat;
-                }
-                KeyCode::Esc => {
-                    self.onboarding_step = OnboardingStep::SelectTheme;
-                }
-                _ => {}
-            },
-        }
-    }
-
-    fn execute_pet_action(&mut self, idx: usize) {
-        self.selected_action_idx = idx % CARE_ACTIONS.len();
-        let (action, _, _) = CARE_ACTIONS[self.selected_action_idx];
-        self.status_banner = self.pet.perform_action(action);
-        let _ = save_dual(&self.pet, &self.paths);
-    }
-
-    fn handle_habitat_key(&mut self, key: KeyCode) {
-        match key {
-            KeyCode::Left => {
-                self.selected_action_idx =
-                    (self.selected_action_idx + CARE_ACTIONS.len() - 1) % CARE_ACTIONS.len();
+        if self.screen != AppScreen::Onboarding
+            && self.tick_count.is_multiple_of(DECAY_EVERY_TICKS)
+        {
+            self.sanctuary.sync_active(&self.pet);
+            self.sanctuary.tick_decay_all();
+            self.pet = self.sanctuary.active_pet().clone();
+            if self.tick_count.is_multiple_of(DECAY_EVERY_TICKS * 4) {
+                self.save_now();
             }
-            KeyCode::Right => {
-                self.selected_action_idx = (self.selected_action_idx + 1) % CARE_ACTIONS.len();
-            }
-            KeyCode::Enter | KeyCode::Char(' ') => {
-                self.execute_pet_action(self.selected_action_idx);
-            }
-            KeyCode::Char('w') | KeyCode::Char('W') | KeyCode::Char('0') => {
-                self.execute_pet_action(0);
-            }
-            KeyCode::Char('f') | KeyCode::Char('F') | KeyCode::Char('1') => {
-                self.execute_pet_action(1);
-            }
-            KeyCode::Char('p') | KeyCode::Char('P') | KeyCode::Char('2') => {
-                self.execute_pet_action(2);
-            }
-            KeyCode::Char('v') | KeyCode::Char('V') | KeyCode::Char('3') => {
-                self.execute_pet_action(3);
-            }
-            KeyCode::Char('t') | KeyCode::Char('T') | KeyCode::Char('4') => {
-                self.execute_pet_action(4);
-            }
-            KeyCode::Char('s') | KeyCode::Char('S') | KeyCode::Char('5') => {
-                self.execute_pet_action(5);
-            }
-            KeyCode::Char('c') | KeyCode::Char('C') | KeyCode::Char('6') => {
-                self.execute_pet_action(6);
-            }
-            KeyCode::Char('h') | KeyCode::Char('H') | KeyCode::Char('7') => {
-                self.execute_pet_action(7);
-            }
-            KeyCode::Char('g') | KeyCode::Char('G') => {
-                self.minigame = Some(MiniGame::new(36, 12, 60));
-                self.screen = AppScreen::MiniGame;
-                self.status_banner =
-                    "🎮 Snack & Star Catcher! Use [←/→] to catch [O]/[*] and dodge [X]!".to_string();
-            }
-            KeyCode::Tab => {
-                let themes = ShellTheme::all();
-                let next_idx = themes
-                    .iter()
-                    .position(|&t| t == self.pet.theme)
-                    .map(|i| (i + 1) % themes.len())
-                    .unwrap_or(0);
-                self.pet.theme = themes[next_idx];
-                self.selected_theme_idx = next_idx;
-                self.status_banner =
-                    format!("🎨 Switched shell theme to {}!", self.pet.theme.display_name());
-                let _ = save_dual(&self.pet, &self.paths);
-            }
-            KeyCode::Char('n') | KeyCode::Char('N') => {
-                self.screen = AppScreen::Onboarding;
-                self.onboarding_step = OnboardingStep::SelectSpecies;
-            }
-            KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => {
-                let _ = save_dual(&self.pet, &self.paths);
-                self.should_quit = true;
-            }
-            _ => {}
-        }
-    }
-
-    fn handle_minigame_key(&mut self, key: KeyCode) {
-        match key {
-            KeyCode::Left
-            | KeyCode::Char('a')
-            | KeyCode::Char('A')
-            | KeyCode::Char('h')
-            | KeyCode::Char('H') => {
-                if let Some(game) = &mut self.minigame {
-                    game.move_left();
-                }
-            }
-            KeyCode::Right
-            | KeyCode::Char('d')
-            | KeyCode::Char('D')
-            | KeyCode::Char('l')
-            | KeyCode::Char('L') => {
-                if let Some(game) = &mut self.minigame {
-                    game.move_right();
-                }
-            }
-            KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q') | KeyCode::Char('Q') => {
-                if let Some(game) = self.minigame.take() {
-                    if game.score > 0 || game.coins_earned > 0 || game.xp_earned > 0 {
-                        self.status_banner = self.pet.apply_minigame_reward(
-                            game.score,
-                            game.coins_earned,
-                            game.xp_earned,
-                        );
-                    } else {
-                        self.status_banner =
-                            "🎮 Returned from Snack Catcher arcade!".to_string();
-                    }
-                    let _ = save_dual(&self.pet, &self.paths);
-                }
-                self.screen = AppScreen::Habitat;
-            }
-            _ => {}
         }
     }
 }
 
-fn themed_block(title: impl Into<String>, border_color: Color) -> Block<'static> {
+// ── Rendering ──────────────────────────────────────────────────────────────
+
+fn shell_block(title: &str, pet: &Pet) -> Block<'static> {
     Block::default()
-        .title(format!(" {} ", title.into()))
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(border_color))
+        .border_style(Style::default().fg(theme_color(pet.theme)))
+        .title(Span::styled(
+            title.to_string(),
+            Style::default()
+                .fg(theme_color(pet.theme))
+                .add_modifier(Modifier::BOLD),
+        ))
 }
 
-pub fn draw_ui(frame: &mut Frame, app: &App) {
-    match app.screen {
-        AppScreen::Onboarding => draw_onboarding(frame, app),
-        AppScreen::Habitat => draw_habitat(frame, app),
-        AppScreen::MiniGame => draw_minigame(frame, app),
-    }
+fn ratio_of(value: u8) -> f64 {
+    (value as f64 / 100.0).clamp(0.0, 1.0)
 }
 
-fn draw_onboarding(frame: &mut Frame, app: &App) {
-    let area = frame.area();
-    let themes = ShellTheme::all();
-    let active_theme = themes
-        .get(app.selected_theme_idx)
-        .copied()
-        .unwrap_or(app.pet.theme);
-    let border_col = theme_color(active_theme);
+fn stat_gauge(label: &str, value: u8, color: Color) -> Gauge<'static> {
+    Gauge::default()
+        .block(
+            Block::default().title(Span::styled(
+                label.to_string(),
+                Style::default().fg(Color::Gray),
+            )),
+        )
+        .gauge_style(Style::default().fg(color))
+        .ratio(ratio_of(value))
+        .label(format!("{value}%"))
+}
 
-    let outer = themed_block("🥚 Mochigotchi Adoption & Shell Wizard", border_col);
-    let inner = outer.inner(area);
-    frame.render_widget(outer, area);
-
-    let chunks = Layout::default()
+fn habitat_areas(area: Rect, tier: LayoutTier) -> (Rect, Rect, Vec<Rect>, Rect) {
+    let vertical = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3),
             Constraint::Min(8),
-            Constraint::Length(3),
-        ])
-        .split(inner);
-
-    let step_label = match app.onboarding_step {
-        OnboardingStep::SelectSpecies => "Step 1/3: Choose Your Companion Species",
-        OnboardingStep::SelectTheme => "Step 2/3: Choose Your Pastel LCD Shell Theme",
-        OnboardingStep::EnterName => "Step 3/3: Name Your New Pocket Pet",
-    };
-
-    let header = Paragraph::new(Line::from(vec![
-        Span::styled(
-            step_label,
-            Style::default()
-                .fg(border_col)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::raw("  •  Use [←/→] to browse, [Enter] to confirm"),
-    ]))
-    .alignment(Alignment::Center)
-    .block(themed_block("Wizard Progress", border_col));
-    frame.render_widget(header, chunks[0]);
-
-    match app.onboarding_step {
-        OnboardingStep::SelectSpecies => {
-            let species_list = PetSpecies::all();
-            let chosen = species_list
-                .get(app.selected_species_idx)
-                .copied()
-                .unwrap_or(PetSpecies::MochiCat);
-            let preview_frames =
-                get_sprite_frames(chosen, EvolutionStage::Baby, crate::pet::PetMood::Happy);
-            let sprite = preview_frames[app.tick_count % preview_frames.len()];
-
-            let mut lines = Vec::new();
-            let mut tabs = Vec::new();
-            for (idx, sp) in species_list.iter().enumerate() {
-                if idx == app.selected_species_idx {
-                    tabs.push(Span::styled(
-                        format!(" [ {} ] ", sp.display_name()),
-                        Style::default()
-                            .fg(Color::Black)
-                            .bg(border_col)
-                            .add_modifier(Modifier::BOLD),
-                    ));
-                } else {
-                    tabs.push(Span::styled(
-                        format!("   {}   ", sp.display_name()),
-                        Style::default().fg(Color::Gray),
-                    ));
-                }
-            }
-            lines.push(Line::from(tabs));
-            lines.push(Line::from(""));
-            for sl in sprite.lines() {
-                lines.push(Line::from(Span::styled(
-                    sl.to_string(),
-                    Style::default()
-                        .fg(border_col)
-                        .add_modifier(Modifier::BOLD),
-                )));
-            }
-            lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(
-                chosen.description(),
-                Style::default().fg(Color::White),
-            )));
-            lines.push(Line::from(Span::styled(
-                format!(
-                    "Default Name: {}   |   Favorite Snack: {}",
-                    chosen.default_name(),
-                    chosen.favorite_snack()
-                ),
-                Style::default().fg(Color::Yellow),
-            )));
-
-            let body = Paragraph::new(lines)
-                .alignment(Alignment::Center)
-                .wrap(Wrap { trim: false })
-                .block(themed_block("Species Preview", border_col));
-            frame.render_widget(body, chunks[1]);
-        }
-        OnboardingStep::SelectTheme => {
-            let mut lines = Vec::new();
-            lines.push(Line::from(""));
-            for (idx, th) in themes.iter().enumerate() {
-                let col = theme_color(*th);
-                if idx == app.selected_theme_idx {
-                    lines.push(Line::from(Span::styled(
-                        format!("  ▶ [ {} ] ◀  ", th.display_name()),
-                        Style::default()
-                            .fg(Color::Black)
-                            .bg(col)
-                            .add_modifier(Modifier::BOLD),
-                    )));
-                } else {
-                    lines.push(Line::from(Span::styled(
-                        format!("      {}      ", th.display_name()),
-                        Style::default().fg(col),
-                    )));
-                }
-                lines.push(Line::from(""));
-            }
-
-            let body = Paragraph::new(lines)
-                .alignment(Alignment::Center)
-                .block(themed_block("Shell Casing Palette", border_col));
-            frame.render_widget(body, chunks[1]);
-        }
-        OnboardingStep::EnterName => {
-            let chosen_species = PetSpecies::all()
-                .get(app.selected_species_idx)
-                .copied()
-                .unwrap_or(PetSpecies::MochiCat);
-            let lines = vec![
-                Line::from(""),
-                Line::from(Span::styled(
-                    format!("Species: {}  |  Theme: {}", chosen_species.display_name(), active_theme.display_name()),
-                    Style::default().fg(Color::Cyan),
-                )),
-                Line::from(""),
-                Line::from(Span::styled(
-                    "Type your pet's name (or leave blank for default):",
-                    Style::default().fg(Color::White),
-                )),
-                Line::from(""),
-                Line::from(Span::styled(
-                    format!("  > {}█ <  ", app.name_input),
-                    Style::default()
-                        .fg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD),
-                )),
-            ];
-            let body = Paragraph::new(lines)
-                .alignment(Alignment::Center)
-                .block(themed_block("Pet Name", border_col));
-            frame.render_widget(body, chunks[1]);
-        }
-    }
-
-    let footer = Paragraph::new(Line::from(vec![
-        Span::styled(
-            " [←/→] ",
-            Style::default().fg(border_col).add_modifier(Modifier::BOLD),
-        ),
-        Span::raw("Select   "),
-        Span::styled(
-            " [Enter] ",
-            Style::default()
-                .fg(Color::Green)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::raw("Next / Hatch Egg   "),
-        Span::styled(
-            " [Esc] ",
-            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-        ),
-        Span::raw("Back / Quit"),
-    ]))
-    .alignment(Alignment::Center)
-    .block(themed_block("Controls", border_col));
-    frame.render_widget(footer, chunks[2]);
-}
-
-fn draw_habitat(frame: &mut Frame, app: &App) {
-    let area = frame.area();
-    let tier = LayoutTier::from_width(area.width);
-    let border_col = theme_color(app.pet.theme);
-
-    let root_chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(3),
-            Constraint::Min(10),
+            Constraint::Length(7),
             Constraint::Length(5),
         ])
         .split(area);
 
-    // Header
-    let header_line = Line::from(vec![
-        Span::styled(
-            format!(" {} ", app.pet.name),
-            Style::default()
-                .fg(Color::Black)
-                .bg(border_col)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::raw(" "),
-        Span::styled(
-            app.pet.species.display_name(),
-            Style::default().fg(border_col).add_modifier(Modifier::BOLD),
-        ),
-        Span::raw(" • "),
-        Span::styled(
-            format!(
-                "{} (Lv.{} | {} XP)",
-                app.pet.stage.display_name(),
-                app.pet.level,
-                app.pet.xp
-            ),
-            Style::default().fg(stage_color(app.pet.stage)),
-        ),
-        Span::raw(" • "),
-        Span::styled(
-            format!("🪙 {} Coins", app.pet.coins),
-            Style::default().fg(Color::Yellow),
-        ),
-        Span::raw(" • "),
-        Span::styled(
-            format!("[{}]", tier.label()),
-            Style::default().fg(Color::DarkGray),
-        ),
-    ]);
-    let header = Paragraph::new(header_line)
-        .alignment(Alignment::Center)
-        .block(themed_block(
-            format!("🍓 Mochigotchi — {}", app.pet.theme.display_name()),
-            border_col,
-        ));
-    frame.render_widget(header, root_chunks[0]);
+    let body = vertical[1];
+    let columns = match tier {
+        LayoutTier::Compact => Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(6), Constraint::Length(9)])
+            .split(body)
+            .to_vec(),
+        _ => Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(52), Constraint::Percentage(48)])
+            .split(body)
+            .to_vec(),
+    };
 
-    // Responsive 3-tier middle section
-    match tier {
-        LayoutTier::Compact => {
-            let mid_chunks = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([Constraint::Percentage(58), Constraint::Percentage(42)])
-                .split(root_chunks[1]);
-            draw_lcd_viewport(frame, app, mid_chunks[0], border_col);
-            draw_vital_gauges(frame, app, mid_chunks[1], border_col);
-        }
-        LayoutTier::Standard => {
-            let mid_chunks = Layout::default()
-                .direction(Direction::Horizontal)
-                .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
-                .split(root_chunks[1]);
-            draw_lcd_viewport(frame, app, mid_chunks[0], border_col);
-            draw_vital_gauges(frame, app, mid_chunks[1], border_col);
-        }
-        LayoutTier::Wide => {
-            let mid_chunks = Layout::default()
-                .direction(Direction::Horizontal)
-                .constraints([
-                    Constraint::Percentage(38),
-                    Constraint::Percentage(34),
-                    Constraint::Percentage(28),
-                ])
-                .split(root_chunks[1]);
-            draw_lcd_viewport(frame, app, mid_chunks[0], border_col);
-            draw_vital_gauges(frame, app, mid_chunks[1], border_col);
-            draw_diary_and_profile(frame, app, mid_chunks[2], border_col);
-        }
-    }
-
-    // Bottom LCD Care Buttons + Status Banner
-    let mut button_spans = Vec::new();
-    for (idx, (_, label, shortcut)) in CARE_ACTIONS.iter().enumerate() {
-        let display_label = if idx == 0 && app.pet.stage == EvolutionStage::Egg {
-            "Warm Egg"
-        } else {
-            *label
-        };
-        if idx == app.selected_action_idx {
-            button_spans.push(Span::styled(
-                format!(" [{}:{}] ", shortcut, display_label),
-                Style::default()
-                    .fg(Color::Black)
-                    .bg(border_col)
-                    .add_modifier(Modifier::BOLD),
-            ));
-        } else {
-            button_spans.push(Span::styled(
-                format!(" [{}:{}] ", shortcut, display_label),
-                Style::default().fg(border_col),
-            ));
-        }
-    }
-
-    let footer_lines = vec![
-        Line::from(button_spans),
-        Line::from(Span::styled(
-            &app.status_banner,
-            Style::default()
-                .fg(Color::White)
-                .add_modifier(Modifier::BOLD),
-        )),
-        Line::from(Span::styled(
-            "[←/→/Enter] Care  [G] Mini-Game  [Tab] Shell Theme  [N] New Pet  [Q] Save & Quit",
-            Style::default().fg(Color::Gray),
-        )),
-    ];
-
-    let footer = Paragraph::new(footer_lines)
-        .alignment(Alignment::Center)
-        .wrap(Wrap { trim: true })
-        .block(themed_block("LCD Care Deck", border_col));
-    frame.render_widget(footer, root_chunks[2]);
+    (vertical[0], vertical[2], columns, vertical[3])
 }
 
-fn draw_lcd_viewport(frame: &mut Frame, app: &App, area: Rect, border_col: Color) {
-    let sprite_lines = render_animated_sprite(&app.pet, app.tick_count);
-    let bubble = speech_bubble(&app.pet, app.tick_count);
-    let m_col = mood_color(app.pet.mood);
-
-    let mut text_lines = Vec::new();
-    text_lines.push(Line::from(Span::styled(
-        format!(
-            "Mood: {}  |  Bond: {}%  |  Snack: {}",
-            app.pet.mood.label(),
-            app.pet.bond,
-            app.pet.species.favorite_snack()
-        ),
-        Style::default().fg(m_col).add_modifier(Modifier::BOLD),
-    )));
-    text_lines.push(Line::from(""));
-
-    for line in sprite_lines {
-        text_lines.push(Line::from(Span::styled(
-            line,
-            Style::default().fg(m_col).add_modifier(Modifier::BOLD),
-        )));
+pub fn draw_ui(f: &mut Frame, app: &App) {
+    match app.screen {
+        AppScreen::Onboarding => draw_onboarding(f, app),
+        AppScreen::SanctuaryRoster => draw_roster(f, app),
+        AppScreen::MiniGame => draw_minigame(f, app),
+        AppScreen::Habitat => draw_habitat(f, app),
     }
-
-    text_lines.push(Line::from(""));
-    text_lines.push(Line::from(Span::styled(
-        bubble,
-        Style::default().fg(Color::White),
-    )));
-
-    let viewport = Paragraph::new(text_lines)
-        .alignment(Alignment::Center)
-        .wrap(Wrap { trim: false })
-        .block(themed_block("LCD Habitat Screen", border_col));
-    frame.render_widget(viewport, area);
 }
 
-fn draw_vital_gauges(frame: &mut Frame, app: &App, area: Rect, border_col: Color) {
-    let block = themed_block("Vital Telemetry", border_col);
+fn draw_onboarding(f: &mut Frame, app: &App) {
+    let area = f.area();
+    let species = PetSpecies::all()[app.selected_species_idx];
+    let block = shell_block(" 🍡 Mochigotchi — Adopt a Companion ", &app.pet);
     let inner = block.inner(area);
-    frame.render_widget(block, area);
+    f.render_widget(block, area);
+
+    let current = match app.onboarding_step {
+        OnboardingStep::SelectSpecies => 1,
+        OnboardingStep::SelectTheme => 2,
+        OnboardingStep::EnterName => 3,
+    };
+    let step_line = Line::from(
+        ["1. Species", "2. Shell", "3. Name"]
+            .iter()
+            .enumerate()
+            .flat_map(|(i, s)| {
+                let style = if i + 1 == current {
+                    Style::default()
+                        .fg(Color::LightMagenta)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Color::DarkGray)
+                };
+                vec![
+                    Span::styled(format!(" {s} "), style),
+                    Span::styled("→", Style::default().fg(Color::DarkGray)),
+                ]
+            })
+            .collect::<Vec<_>>(),
+    );
 
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(2),
+            Constraint::Min(8),
             Constraint::Length(2),
-            Constraint::Length(2),
-            Constraint::Length(2),
-            Constraint::Length(2),
-            Constraint::Length(2),
-            Constraint::Min(0),
         ])
         .split(inner);
+    f.render_widget(Paragraph::new(step_line), rows[0]);
 
-    let progress_pct = (app.pet.xp_progress_ratio() * 100.0).round() as u16;
-    let evo_label = if app.pet.stage == EvolutionStage::Egg {
-        format!("🥚 Egg Incubation: {}%", app.pet.incubation)
-    } else if let Some(next) = app.pet.stage.next_stage() {
-        format!(
-            "✨ Evolution to {}: {}% ({} XP)",
-            next.display_name(),
-            progress_pct,
-            app.pet.xp
-        )
+    let columns = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(58), Constraint::Percentage(42)])
+        .split(rows[1]);
+
+    let items: Vec<ListItem> = PetSpecies::all()
+        .iter()
+        .enumerate()
+        .map(|(idx, sp)| {
+            let selected = idx == app.selected_species_idx;
+            let style = if selected {
+                Style::default()
+                    .fg(Color::LightYellow)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::Gray)
+            };
+            ListItem::new(Line::from(Span::styled(
+                format!(
+                    "{} {} · {} · {} · {}",
+                    if selected { "▶" } else { " " },
+                    sp.display_name(),
+                    sp.family(),
+                    sp.rarity(),
+                    sp.element_badge()
+                ),
+                style,
+            )))
+        })
+        .collect();
+    f.render_widget(
+        List::new(items).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(Color::DarkGray))
+                .title(" Choose your companion (↑/↓) "),
+        ),
+        columns[0],
+    );
+
+    let mut preview_lines = vec![
+        Line::from(Span::styled(
+            species.display_name().to_string(),
+            Style::default()
+                .fg(Color::LightCyan)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(
+            species.description().to_string(),
+            Style::default().fg(Color::Gray),
+        )),
+        Line::from(""),
+    ];
+    for line in render_species_preview(species) {
+        preview_lines.push(Line::from(Span::styled(
+            line,
+            Style::default().fg(stage_color(EvolutionStage::Adult)),
+        )));
+    }
+    preview_lines.push(Line::from(""));
+    preview_lines.push(Line::from(Span::styled(
+        format!("Loves: {}", species.favorite_snack()),
+        Style::default().fg(Color::LightGreen),
+    )));
+
+    let right = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(8), Constraint::Length(6)])
+        .split(columns[1]);
+
+    f.render_widget(
+        Paragraph::new(Text::from(preview_lines))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .border_style(Style::default().fg(Color::DarkGray))
+                    .title(" Preview "),
+            )
+            .wrap(Wrap { trim: false }),
+        right[0],
+    );
+
+    let detail = match app.onboarding_step {
+        OnboardingStep::SelectSpecies => vec![
+            Line::from(Span::styled(
+                "Cozy Classics or Mythical & Fantasy.",
+                Style::default().fg(Color::Gray),
+            )),
+            Line::from(Span::styled(
+                "Enter = choose shell color",
+                Style::default().fg(Color::LightMagenta),
+            )),
+        ],
+        OnboardingStep::SelectTheme => {
+            let mut lines = vec![Line::from(Span::styled(
+                "Shell colorway (Enter confirms):",
+                Style::default().fg(Color::Gray),
+            ))];
+            for (idx, theme) in ShellTheme::all().iter().enumerate() {
+                let selected = idx == app.selected_theme_idx;
+                lines.push(Line::from(Span::styled(
+                    format!(
+                        "{} {}",
+                        if selected { "▶" } else { " " },
+                        theme.display_name()
+                    ),
+                    if selected {
+                        Style::default()
+                            .fg(theme_color(*theme))
+                            .add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(Color::DarkGray)
+                    },
+                )));
+            }
+            lines
+        }
+        OnboardingStep::EnterName => vec![
+            Line::from(Span::styled(
+                "Type a name, then press Enter:",
+                Style::default().fg(Color::Gray),
+            )),
+            Line::from(Span::styled(
+                format!("▏{}▕", app.onboarding_name_input),
+                Style::default()
+                    .fg(Color::LightYellow)
+                    .add_modifier(Modifier::BOLD),
+            )),
+        ],
+    };
+    f.render_widget(
+        Paragraph::new(Text::from(detail))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .border_style(Style::default().fg(Color::DarkGray))
+                    .title(" Step details "),
+            )
+            .wrap(Wrap { trim: false }),
+        right[1],
+    );
+
+    f.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            "↑/↓ choose · Enter next · Esc back/quit",
+            Style::default().fg(Color::DarkGray),
+        ))),
+        rows[2],
+    );
+}
+
+fn draw_habitat(f: &mut Frame, app: &App) {
+    let area = f.area();
+    let tier = LayoutTier::from_width(area.width);
+    let pet = &app.pet;
+    let title = format!(
+        " 🍡 {} · {} · {} · {} ",
+        pet.name,
+        pet.species.display_name(),
+        pet.species.rarity(),
+        pet.stage.badge()
+    );
+    let block = shell_block(&title, pet);
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let (header_area, dock_area, columns, log_area) = habitat_areas(inner, tier);
+
+    let (sky, mood_name) = sky_scene(app.tick_count);
+    let warm_cd = pet.warm_cooldown_remaining(chrono::Utc::now());
+    let train_cd = pet.train_cooldown_remaining(chrono::Utc::now());
+    let cooldown_note = if pet.stage == EvolutionStage::Egg {
+        if warm_cd > 0 {
+            format!("🕯️ warming rest {warm_cd}s")
+        } else {
+            "🕯️ ready to warm".to_string()
+        }
+    } else if train_cd > 0 {
+        format!("💪 training rest {train_cd}s")
     } else {
-        format!("🌟 Max Stage ({} XP)", app.pet.xp)
+        "💪 ready to train".to_string()
     };
 
-    let gauges: [(&str, u16, Color); 6] = [
-        (&evo_label, progress_pct.min(100), border_col),
-        (
-            &format!("🍙 Fullness: {}%", app.pet.hunger),
-            app.pet.hunger as u16,
-            Color::Green,
-        ),
-        (
-            &format!("💖 Happiness: {}%", app.pet.happiness),
-            app.pet.happiness as u16,
-            Color::LightMagenta,
-        ),
-        (
-            &format!("⚡ Energy: {}%", app.pet.energy),
-            app.pet.energy as u16,
-            Color::Cyan,
-        ),
-        (
-            &format!("🧼 Cleanliness: {}% (💩x{})", app.pet.cleanliness, app.pet.poop_count),
-            app.pet.cleanliness as u16,
-            Color::Blue,
-        ),
-        (
-            &format!("💊 Health: {}%", app.pet.health),
-            app.pet.health as u16,
-            if app.pet.is_sick {
-                Color::LightRed
-            } else {
-                Color::LightGreen
-            },
-        ),
-    ];
+    f.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled(
+                format!("{sky}  {mood_name}  "),
+                Style::default().fg(Color::DarkGray),
+            ),
+            Span::styled(
+                format!(
+                    "🏰 {} pets · Lv.{}  ",
+                    app.sanctuary.pets.len(),
+                    app.sanctuary.sanctuary_level
+                ),
+                Style::default().fg(Color::LightBlue),
+            ),
+            Span::styled(cooldown_note, Style::default().fg(Color::LightYellow)),
+        ])),
+        header_area,
+    );
 
-    for (i, (label, pct, color)) in gauges.iter().enumerate() {
-        if i < rows.len() {
-            let g = Gauge::default()
-                .gauge_style(Style::default().fg(*color).bg(Color::Black))
-                .percent((*pct).min(100))
-                .label(label.to_string());
-            frame.render_widget(g, rows[i]);
-        }
+    let mut sprite_lines = vec![Line::from(Span::styled(
+        speech_bubble(pet, app.tick_count),
+        Style::default()
+            .fg(mood_color(pet.mood))
+            .add_modifier(Modifier::ITALIC),
+    ))];
+    for line in render_animated_sprite(pet, app.tick_count) {
+        sprite_lines.push(Line::from(Span::styled(
+            line,
+            Style::default().fg(stage_color(pet.stage)),
+        )));
     }
-}
+    sprite_lines.push(Line::from(Span::styled(
+        format!(
+            "mood: {} {}",
+            pet.mood.label(),
+            get_mood_particles(pet.mood, app.tick_count)
+        ),
+        Style::default().fg(Color::DarkGray),
+    )));
+    f.render_widget(
+        Paragraph::new(Text::from(sprite_lines))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .border_style(Style::default().fg(Color::DarkGray))
+                    .title(" Habitat "),
+            )
+            .wrap(Wrap { trim: false }),
+        columns[0],
+    );
 
-fn draw_diary_and_profile(frame: &mut Frame, app: &App, area: Rect, border_col: Color) {
-    let items: Vec<ListItem> = app
-        .pet
-        .action_log
-        .iter()
-        .rev()
-        .take(12)
-        .map(|entry| ListItem::new(Line::from(Span::raw(entry.clone()))))
-        .collect();
-
-    let list = List::new(items).block(themed_block("Care Diary & Activity Log", border_col));
-    frame.render_widget(list, area);
-}
-
-fn draw_minigame(frame: &mut Frame, app: &App) {
-    let area = frame.area();
-    let border_col = theme_color(app.pet.theme);
-
-    let chunks = Layout::default()
+    let gauges = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3),
-            Constraint::Min(10),
+            Constraint::Length(3),
+            Constraint::Length(3),
+            Constraint::Length(3),
+            Constraint::Length(3),
+            Constraint::Length(3),
             Constraint::Length(3),
         ])
-        .split(area);
+        .split(columns[1]);
 
-    if let Some(game) = &app.minigame {
-        let header = Paragraph::new(Line::from(vec![
-            Span::styled(
-                format!(" 🎮 Snack & Star Catcher — {} ", app.pet.name),
-                Style::default()
-                    .fg(Color::Black)
-                    .bg(border_col)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw(format!(
-                "  Score: {}  |  Coins: +{}  |  XP: +{}  |  Time Left: {} ticks",
-                game.score, game.coins_earned, game.xp_earned, game.ticks_remaining
-            )),
-        ]))
-        .alignment(Alignment::Center)
-        .block(themed_block("Arcade Mode", border_col));
-        frame.render_widget(header, chunks[0]);
-
-        let board_lines: Vec<Line> = game
-            .render_lines()
-            .into_iter()
-            .map(|l| {
-                Line::from(Span::styled(
-                    l,
-                    Style::default()
-                        .fg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD),
-                ))
-            })
-            .collect();
-
-        let board = Paragraph::new(board_lines)
-            .alignment(Alignment::Center)
-            .block(themed_block(
-                "Catch [O] Snack (+15) & [*] Star (+25) — Dodge [X] Storm (-15)",
-                border_col,
-            ));
-        frame.render_widget(board, chunks[1]);
+    if pet.stage == EvolutionStage::Egg {
+        f.render_widget(
+            stat_gauge("🥚 Incubation", pet.incubation, Color::LightYellow),
+            gauges[0],
+        );
+    } else {
+        let target = pet.stage.next_stage().map_or(pet.xp, |n| n.min_xp());
+        f.render_widget(
+            Gauge::default()
+                .block(Block::default().title(Span::styled(
+                    format!("⭐ XP {} / {}", pet.xp, target),
+                    Style::default().fg(Color::Gray),
+                )))
+                .gauge_style(Style::default().fg(Color::LightMagenta))
+                .ratio(pet.xp_progress_ratio())
+                .label(format!("Lv.{}", pet.level)),
+            gauges[0],
+        );
     }
+    f.render_widget(stat_gauge("🍙 Hunger", pet.hunger, Color::LightGreen), gauges[1]);
+    f.render_widget(
+        stat_gauge("💖 Happiness", pet.happiness, Color::LightMagenta),
+        gauges[2],
+    );
+    f.render_widget(
+        stat_gauge("⚡ Energy", pet.energy, Color::LightYellow),
+        gauges[3],
+    );
+    f.render_widget(stat_gauge("❤️ Health", pet.health, Color::LightRed), gauges[4]);
+    f.render_widget(
+        stat_gauge(
+            &format!("🫧 Cleanliness (poop: {})", pet.poop_count),
+            pet.cleanliness,
+            Color::LightCyan,
+        ),
+        gauges[5],
+    );
+    f.render_widget(stat_gauge("🤝 Bond", pet.bond, Color::LightBlue), gauges[6]);
 
-    let footer = Paragraph::new(Line::from(
-        "[← / A / H] Move Left    [→ / D / L] Move Right    [Esc / Enter / Q] Collect Rewards & Exit",
-    ))
-    .alignment(Alignment::Center)
-    .block(themed_block("Arcade Controls", border_col));
-    frame.render_widget(footer, chunks[2]);
+    let egg = pet.stage == EvolutionStage::Egg;
+    let mut dock_lines = vec![Line::from(Span::styled(
+        pet.next_evolution_requirements(),
+        Style::default().fg(Color::LightYellow),
+    ))];
+    dock_lines.push(Line::from(""));
+    let keys = if let Some(buffer) = app.rename_buffer.as_ref() {
+        format!("🏷️ Rename to: {buffer}▏ (Enter saves, Esc cancels)")
+    } else if egg {
+        "[W] Warm egg · [N] Adopt another · [L] Sanctuary · [[/]] switch · [Tab] shell color · [R] rename · [Q] save & quit".to_string()
+    } else {
+        "[F] Feed  [P] Play  [E] Train  [S] Sleep  [C] Clean  [H] Heal  [G] Arcade  [N] Adopt  [L] Sanctuary  [[/]] switch  [Tab] color  [R] rename  [Q] quit".to_string()
+    };
+    dock_lines.push(Line::from(Span::styled(keys, Style::default().fg(Color::Gray))));
+    dock_lines.push(Line::from(Span::styled(
+        format!("💰 {} coins   {}", pet.coins, app.last_storage_status),
+        Style::default().fg(Color::DarkGray),
+    )));
+    f.render_widget(
+        Paragraph::new(Text::from(dock_lines))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .border_style(Style::default().fg(theme_color(pet.theme)))
+                    .title(" Care console "),
+            )
+            .wrap(Wrap { trim: false }),
+        dock_area,
+    );
+
+    let log_lines: Vec<Line> = pet
+        .action_log
+        .iter()
+        .rev()
+        .take(3)
+        .map(|msg| Line::from(Span::styled(msg.clone(), Style::default().fg(Color::DarkGray))))
+        .collect();
+    f.render_widget(
+        Paragraph::new(Text::from(log_lines))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .border_style(Style::default().fg(Color::DarkGray))
+                    .title(" Care diary "),
+            )
+            .wrap(Wrap { trim: false }),
+        log_area,
+    );
 }
 
-pub fn run_tui(pet: Pet, paths: StoragePaths) -> io::Result<Pet> {
+fn draw_roster(f: &mut Frame, app: &App) {
+    let area = f.area();
+    let block = shell_block(
+        &format!(
+            " 🏰 Mythical Sanctuary — {} companions · Sanctuary Lv.{} ",
+            app.sanctuary.pets.len(),
+            app.sanctuary.sanctuary_level
+        ),
+        &app.pet,
+    );
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let columns = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(58), Constraint::Percentage(42)])
+        .split(inner);
+
+    let items: Vec<ListItem> = app
+        .sanctuary
+        .pets
+        .iter()
+        .enumerate()
+        .map(|(idx, pet)| {
+            let selected = idx == app.roster_selected_idx;
+            let marker = if idx == app.sanctuary.active_index {
+                "★"
+            } else if selected {
+                "▶"
+            } else {
+                " "
+            };
+            let style = if selected {
+                Style::default()
+                    .fg(Color::LightYellow)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::Gray)
+            };
+            ListItem::new(Line::from(Span::styled(
+                format!(
+                    "{marker} {}. {} [{}] {} Lv.{} · hunger {}% · incub {}%",
+                    idx + 1,
+                    pet.name,
+                    pet.species.display_name(),
+                    pet.stage.badge(),
+                    pet.level,
+                    pet.hunger,
+                    pet.incubation
+                ),
+                style,
+            )))
+        })
+        .collect();
+    f.render_widget(
+        List::new(items).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(Color::DarkGray))
+                .title(" Roster (↑/↓ · Enter switch · N adopt) "),
+        ),
+        columns[0],
+    );
+
+    let highlighted = app
+        .sanctuary
+        .pets
+        .get(app.roster_selected_idx)
+        .unwrap_or(&app.pet);
+    let mut lines = vec![
+        Line::from(Span::styled(
+            format!(
+                "{} · {} · {}",
+                highlighted.name,
+                highlighted.species.display_name(),
+                highlighted.species.rarity()
+            ),
+            Style::default()
+                .fg(Color::LightCyan)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(
+            highlighted.status_summary(),
+            Style::default().fg(Color::Gray),
+        )),
+        Line::from(""),
+    ];
+    for line in render_animated_sprite(highlighted, app.tick_count) {
+        lines.push(Line::from(Span::styled(
+            line,
+            Style::default().fg(stage_color(highlighted.stage)),
+        )));
+    }
+    f.render_widget(
+        Paragraph::new(Text::from(lines))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .border_style(Style::default().fg(Color::DarkGray))
+                    .title(" Companion card "),
+            )
+            .wrap(Wrap { trim: false }),
+        columns[1],
+    );
+}
+
+fn draw_minigame(f: &mut Frame, app: &App) {
+    let area = f.area();
+    let block = shell_block(" 🎮 Snack Catcher Arcade ", &app.pet);
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(6), Constraint::Length(3)])
+        .split(inner);
+
+    let (arena, status) = match app.minigame.as_ref() {
+        Some(game) => {
+            let lines: Vec<Line> = game
+                .render_lines()
+                .into_iter()
+                .map(|line| Line::from(Span::styled(line, Style::default().fg(Color::LightGreen))))
+                .collect();
+            (
+                Text::from(lines),
+                format!(
+                    "score {} · coins {} · xp {} · ticks left {}",
+                    game.score, game.coins_earned, game.xp_earned, game.ticks_remaining
+                ),
+            )
+        }
+        None => (Text::from(""), "no game running".to_string()),
+    };
+
+    f.render_widget(
+        Paragraph::new(arena).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(Color::DarkGray))
+                .title(" Catch the falling snacks! "),
+        ),
+        rows[0],
+    );
+    f.render_widget(
+        Paragraph::new(Text::from(vec![
+            Line::from(Span::styled(status, Style::default().fg(Color::LightYellow))),
+            Line::from(Span::styled(
+                "←/→ or A/D to move · Esc/Q to stop",
+                Style::default().fg(Color::DarkGray),
+            )),
+        ])),
+        rows[1],
+    );
+}
+
+pub fn run_tui(
+    sanctuary: Sanctuary,
+    paths: StoragePaths,
+    start_onboarding: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let mut app = if !crate::storage::has_existing_save(&paths)
-        && pet.age_seconds == 0
-        && pet.xp == 0
-        && pet.incubation == 0
-    {
-        App::new_onboarding(paths.clone())
-    } else {
-        App::new(pet, paths.clone())
-    };
-    let tick_rate = Duration::from_millis(250);
+    let mut app = App::new_with_sanctuary(sanctuary, paths, start_onboarding);
+    let tick_rate = Duration::from_millis(TICK_MS);
     let mut last_tick = Instant::now();
 
     let loop_result: io::Result<()> = (|| {
@@ -940,6 +1127,132 @@ pub fn run_tui(pet: Pet, paths: StoragePaths) -> io::Result<Pet> {
     terminal.show_cursor()?;
 
     loop_result?;
-    let _ = save_dual(&app.pet, &paths);
-    Ok(app.pet)
+    app.save_now();
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::{backend::TestBackend, Terminal};
+
+    fn tmp_paths(tag: &str) -> StoragePaths {
+        let dir = std::env::temp_dir().join(format!("mochi_tui_{tag}_{}", std::process::id()));
+        StoragePaths::new(dir.join("save.json"), dir.join("save.db"))
+    }
+
+    #[test]
+    fn onboarding_adopts_dragon_then_a_second_pet() {
+        let paths = tmp_paths("adopt");
+        let _ = std::fs::remove_dir_all(paths.json_path.parent().unwrap());
+
+        let mut app = App::new_onboarding(paths.clone());
+        assert_eq!(app.screen, AppScreen::Onboarding);
+
+        for _ in 0..4 {
+            app.handle_key(KeyCode::Down);
+        }
+        app.handle_key(KeyCode::Enter);
+        assert_eq!(app.onboarding_step, OnboardingStep::SelectTheme);
+        app.handle_key(KeyCode::Enter);
+        assert_eq!(app.onboarding_step, OnboardingStep::EnterName);
+        for _ in 0..6 {
+            app.handle_key(KeyCode::Backspace);
+        }
+        app.handle_key(KeyCode::Char('X'));
+        app.handle_key(KeyCode::Enter);
+
+        assert_eq!(app.screen, AppScreen::Habitat);
+        assert_eq!(app.pet.species, PetSpecies::IgnisDragon);
+        assert_eq!(app.pet.name, "X");
+        assert_eq!(app.sanctuary.pets.len(), 1);
+
+        app.handle_key(KeyCode::Char('n'));
+        for _ in 0..5 {
+            app.handle_key(KeyCode::Down);
+        }
+        app.handle_key(KeyCode::Enter);
+        app.handle_key(KeyCode::Enter);
+        app.handle_key(KeyCode::Enter);
+
+        assert_eq!(app.sanctuary.pets.len(), 2);
+        assert_eq!(app.pet.species, PetSpecies::AzureWyrm);
+        assert_eq!(app.sanctuary.active_index, 1);
+
+        app.handle_key(KeyCode::Char('['));
+        assert_eq!(app.pet.species, PetSpecies::IgnisDragon);
+
+        app.handle_key(KeyCode::Char('l'));
+        assert_eq!(app.screen, AppScreen::SanctuaryRoster);
+        app.handle_key(KeyCode::Down);
+        app.handle_key(KeyCode::Enter);
+        assert_eq!(app.screen, AppScreen::Habitat);
+        assert_eq!(app.pet.species, PetSpecies::AzureWyrm);
+
+        let _ = std::fs::remove_dir_all(paths.json_path.parent().unwrap());
+    }
+
+    #[test]
+    fn renders_at_compact_standard_and_wide_sizes_without_panic() {
+        for (w, h) in [(50u16, 18u16), (100, 32), (140, 44)] {
+            let backend = TestBackend::new(w, h);
+            let mut terminal = Terminal::new(backend).unwrap();
+            let paths = tmp_paths(&format!("render{w}"));
+            let app = App::new(Pet::new("Mochi"), paths);
+            terminal.draw(|f| draw_ui(f, &app)).unwrap();
+            assert_eq!(LayoutTier::from_width(w), match w {
+                50 => LayoutTier::Compact,
+                100 => LayoutTier::Standard,
+                _ => LayoutTier::Wide,
+            });
+        }
+    }
+
+    #[test]
+    fn every_screen_and_wizard_step_renders() {
+        let paths = tmp_paths("screens");
+        let mut app = App::new(Pet::new("Mochi"), paths.clone());
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        for screen in [
+            AppScreen::Habitat,
+            AppScreen::SanctuaryRoster,
+            AppScreen::MiniGame,
+            AppScreen::Onboarding,
+        ] {
+            app.screen = screen;
+            terminal.draw(|f| draw_ui(f, &app)).unwrap();
+        }
+
+        let mut wizard = App::new_onboarding(paths);
+        for step in [
+            OnboardingStep::SelectSpecies,
+            OnboardingStep::SelectTheme,
+            OnboardingStep::EnterName,
+        ] {
+            wizard.onboarding_step = step;
+            terminal.draw(|f| draw_ui(f, &wizard)).unwrap();
+        }
+    }
+
+    #[test]
+    fn tick_loop_decays_stats_and_arcade_finishes() {
+        let paths = tmp_paths("tick");
+        let mut app = App::new(Pet::new("Mochi"), paths);
+        app.pet.stage = EvolutionStage::Baby;
+        let hunger_before = app.pet.hunger;
+        for _ in 0..(DECAY_EVERY_TICKS * 2) {
+            app.on_tick();
+        }
+        assert!(app.pet.hunger < hunger_before);
+
+        app.pet.energy = 90;
+        app.handle_key(KeyCode::Char('g'));
+        assert_eq!(app.screen, AppScreen::MiniGame);
+        while app.screen == AppScreen::MiniGame {
+            app.on_tick();
+        }
+        assert!(app.pet.xp > 0);
+    }
 }

@@ -1,458 +1,596 @@
+//! End-to-end integration tests for **Mochigotchi**: lifecycle rules,
+//! realistic cooldowns, the multi-pet Sanctuary, persistence, and the TUI.
+
 use chrono::{Duration, Utc};
 use crossterm::event::KeyCode;
 use mochigotchi::minigame::{ItemKind, MiniGame};
 use mochigotchi::pet::{
-    EvolutionStage, Pet, PetAction, PetMood, PetSpecies, PetState, ShellTheme,
+    EvolutionStage, Pet, PetAction, PetMood, PetSpecies, Sanctuary, ShellTheme,
+    PET_COOLDOWN_SECS, TRAIN_COOLDOWN_SECS, WARM_COOLDOWN_SECS,
 };
 use mochigotchi::sprites::{
-    get_mood_particles, get_sprite_frames, mood_color, render_animated_sprite, speech_bubble,
-    stage_color, theme_color,
+    get_mood_particles, get_sprite_frames, render_animated_sprite, render_species_preview,
+    speech_bubble, theme_color,
 };
 use mochigotchi::storage::{
-    has_existing_save, load_dual, load_json, load_or_create, load_sqlite, save_dual, save_json,
-    save_sqlite, StoragePaths,
+    has_existing_save, load_dual, load_sanctuary, save_dual, save_sanctuary, StoragePaths,
 };
-use mochigotchi::tui::{draw_ui, App, AppScreen, OnboardingStep};
+use mochigotchi::tui::{draw_ui, App, AppScreen, LayoutTier, OnboardingStep};
 use ratatui::{backend::TestBackend, Terminal};
-use tempfile::tempdir;
+use tempfile::TempDir;
 
-#[test]
-fn test_egg_initialization_and_guards() {
-    let mut pet = Pet::new("Mochi");
-    assert_eq!(pet.name, "Mochi");
-    assert_eq!(pet.stage, EvolutionStage::Egg);
-    assert_eq!(pet.incubation, 0);
-    assert_eq!(pet.hunger, 65);
-    assert_eq!(pet.xp, 0);
-    assert_eq!(pet.level, 1);
-    assert_eq!(pet.coins, 0);
-
-    // Unhatched Egg guards: care actions should not alter stats, XP, or coins
-    let msg_feed = pet.feed();
-    assert!(!msg_feed.is_empty());
-    assert_eq!(pet.hunger, 65);
-    assert_eq!(pet.xp, 0);
-    assert_eq!(pet.coins, 0);
-
-    let msg_play = pet.play();
-    assert!(!msg_play.is_empty());
-    assert_eq!(pet.xp, 0);
-    assert_eq!(pet.coins, 0);
-
-    let msg_pet = pet.pet_love();
-    assert!(!msg_pet.is_empty());
-    assert_eq!(pet.xp, 0);
-
-    let msg_train = pet.train();
-    assert!(!msg_train.is_empty());
-    assert_eq!(pet.xp, 0);
-
-    let msg_sleep = pet.toggle_sleep();
-    assert!(!msg_sleep.is_empty());
-    assert!(!pet.is_sleeping);
-
-    let msg_clean = pet.clean();
-    assert!(!msg_clean.is_empty());
-    assert_eq!(pet.xp, 0);
-
-    let msg_heal = pet.heal();
-    assert!(!msg_heal.is_empty());
-    assert_eq!(pet.xp, 0);
+fn temp_paths() -> (TempDir, StoragePaths) {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let paths = StoragePaths::new(dir.path().join("save.json"), dir.path().join("save.db"));
+    (dir, paths)
 }
 
-#[test]
-fn test_egg_warming_and_hatching() {
-    let mut pet = Pet::new_custom("Boba", PetSpecies::BobaPup, ShellTheme::MatchaGreen);
-    assert_eq!(pet.stage, EvolutionStage::Egg);
-    assert_eq!(pet.incubation, 0);
-
-    for step in 1..=3 {
-        let msg = pet.warm_egg();
-        assert!(!msg.is_empty());
-        assert_eq!(pet.incubation, step * 25);
-        assert_eq!(pet.stage, EvolutionStage::Egg);
-    }
-
-    // 4th warm hatches Egg -> Baby
-    let hatch_msg = pet.warm_egg();
-    assert!(!hatch_msg.is_empty());
-    assert_eq!(pet.incubation, 100);
-    assert_eq!(pet.stage, EvolutionStage::Baby);
-    assert!(pet.xp >= 50);
-    assert!(pet.level >= 2);
-    assert_eq!(pet.mood, PetMood::Happy);
-
-    // Calling warm_egg() after hatching delegates to pet_love()
-    pet.happiness = 70;
-    let xp_before = pet.xp;
-    let love_msg = pet.warm_egg();
-    assert!(!love_msg.is_empty());
-    assert!(pet.happiness > 70);
-    assert!(pet.xp > xp_before);
-}
+// ── 1. Species catalogue ───────────────────────────────────────────────────
 
 #[test]
-fn test_anti_spam_care_guards() {
-    let mut pet = Pet::new("Cloudy");
-    for _ in 0..4 {
-        pet.warm_egg();
-    }
-    assert_eq!(pet.stage, EvolutionStage::Baby);
+fn all_ten_species_are_described_and_animated() {
+    let all = PetSpecies::all();
+    assert_eq!(all.len(), 10);
 
-    // 1. Full stomach guard (hunger >= 95)
-    pet.hunger = 95;
-    let xp_before = pet.xp;
-    let _ = pet.feed();
-    assert_eq!(pet.xp, xp_before);
+    let cozy = all.iter().filter(|s| s.family() == "Cozy Classics").count();
+    let mythical = all.iter().filter(|s| s.is_mythical()).count();
+    assert_eq!(cozy, 4);
+    assert_eq!(mythical, 6);
 
-    // 2. Max happiness guard (happiness >= 98)
-    pet.happiness = 98;
-    let xp_before = pet.xp;
-    let _ = pet.pet_love();
-    assert_eq!(pet.happiness, 100);
-    assert_eq!(pet.xp, xp_before);
-
-    // 3. Clean room guard (cleanliness == 100 && poop_count == 0)
-    pet.cleanliness = 100;
-    pet.poop_count = 0;
-    let xp_before = pet.xp;
-    let _ = pet.clean();
-    assert_eq!(pet.xp, xp_before);
-
-    // 4. Healthy pet guard (!is_sick && health >= 95)
-    pet.is_sick = false;
-    pet.health = 95;
-    let xp_before = pet.xp;
-    let _ = pet.heal();
-    assert_eq!(pet.xp, xp_before);
-
-    // 5. Low energy / sleeping / sick guards for play() and train()
-    pet.energy = 10;
-    pet.hunger = 80;
-    let xp_before = pet.xp;
-    let _ = pet.play();
-    let _ = pet.train();
-    assert_eq!(pet.xp, xp_before);
-
-    pet.energy = 80;
-    pet.is_sleeping = true;
-    let _ = pet.play();
-    let _ = pet.train();
-    assert_eq!(pet.xp, xp_before);
-
-    pet.is_sleeping = false;
-    pet.is_sick = true;
-    let _ = pet.play();
-    let _ = pet.train();
-    assert_eq!(pet.xp, xp_before);
-}
-
-#[test]
-fn test_feeding_poop_cycle_and_cleaning() {
-    let mut pet = Pet::new("Mochi");
-    for _ in 0..4 {
-        pet.warm_egg();
-    }
-
-    pet.hunger = 30;
-    pet.poop_count = 0;
-    pet.meals_since_poop = 0;
-    pet.cleanliness = 100;
-
-    pet.feed();
-    assert_eq!(pet.poop_count, 0);
-
-    pet.hunger = 40;
-    pet.feed();
-    assert!(pet.poop_count >= 1);
-    assert!(pet.cleanliness < 100);
-
-    let xp_before = pet.xp;
-    pet.clean();
-    assert_eq!(pet.poop_count, 0);
-    assert_eq!(pet.cleanliness, 100);
-    assert!(pet.xp > xp_before);
-}
-
-#[test]
-fn test_xp_and_evolution_stages() {
-    assert_eq!(EvolutionStage::all().len(), 5);
-    assert_eq!(EvolutionStage::from_xp(0), EvolutionStage::Egg);
-    assert_eq!(EvolutionStage::from_xp(50), EvolutionStage::Baby);
-    assert_eq!(EvolutionStage::from_xp(150), EvolutionStage::Teen);
-    assert_eq!(EvolutionStage::from_xp(350), EvolutionStage::Adult);
-    assert_eq!(EvolutionStage::from_xp(700), EvolutionStage::CyberElder);
-
-    for stage in EvolutionStage::all() {
-        assert!(!stage.name().is_empty());
-        assert_eq!(stage.name(), stage.display_name());
-        let _ = stage.min_xp();
-        let _ = stage.max_stat_bonus();
-        let _ = stage.next_stage();
-    }
-
-    let mut pet = Pet::new("Pebble");
-    assert_eq!(pet.stage, EvolutionStage::Egg);
-
-    pet.add_xp(50);
-    assert_eq!(pet.stage, EvolutionStage::Baby);
-    assert!(pet.xp_progress_ratio() >= 0.0 && pet.xp_progress_ratio() <= 1.0);
-
-    pet.add_xp(100);
-    assert_eq!(pet.stage, EvolutionStage::Teen);
-
-    pet.add_xp(200);
-    assert_eq!(pet.stage, EvolutionStage::Adult);
-
-    pet.add_xp(400);
-    assert_eq!(pet.stage, EvolutionStage::CyberElder);
-    assert_eq!(pet.stage.next_stage(), None);
-    assert_eq!(pet.xp_progress_ratio(), 1.0);
-}
-
-#[test]
-fn test_species_themes_moods_and_actions() {
-    assert_eq!(PetSpecies::all().len(), 4);
-    for species in PetSpecies::all() {
+    for species in all {
         assert!(!species.display_name().is_empty());
+        assert!(!species.rarity().contains("  "));
+        assert!(!species.element_badge().is_empty());
         assert!(!species.description().is_empty());
         assert!(!species.default_name().is_empty());
         assert!(!species.favorite_snack().is_empty());
-    }
 
-    assert_eq!(ShellTheme::all().len(), 5);
-    for theme in ShellTheme::all() {
-        assert!(!theme.display_name().is_empty());
-    }
+        let preview = render_species_preview(*species);
+        assert!(!preview.is_empty(), "{species:?} preview");
 
-    assert_eq!(PetMood::all().len(), 6);
-    for mood in PetMood::all() {
-        let state: PetState = *mood;
-        assert!(!state.label().is_empty());
-    }
-
-    let mut pet = Pet::new("Tester");
-    pet.rename("Starry");
-    assert_eq!(pet.name, "Starry");
-
-    // Warm via perform_action
-    for _ in 0..4 {
-        let _ = pet.perform_action(PetAction::WarmEgg);
-    }
-    assert_eq!(pet.stage, EvolutionStage::Baby);
-
-    pet.hunger = 50;
-    let _ = pet.perform_action(PetAction::Feed);
-    let _ = pet.perform_action(PetAction::Play);
-    pet.happiness = 70;
-    let _ = pet.perform_action(PetAction::PetLove);
-    let _ = pet.perform_action(PetAction::Train);
-    let _ = pet.perform_action(PetAction::ToggleSleep);
-    assert!(pet.is_sleeping);
-    let _ = pet.perform_action(PetAction::ToggleSleep);
-    assert!(!pet.is_sleeping);
-
-    pet.poop_count = 1;
-    pet.cleanliness = 70;
-    let _ = pet.perform_action(PetAction::Clean);
-    assert_eq!(pet.poop_count, 0);
-
-    pet.is_sick = true;
-    pet.health = 50;
-    let _ = pet.perform_action(PetAction::Heal);
-    assert!(!pet.is_sick);
-
-    assert!(!pet.status_summary().is_empty());
-}
-
-#[test]
-fn test_offline_decay_and_tick_decay() {
-    // Unhatched Egg does not decay stats
-    let mut egg = Pet::new("Eggy");
-    egg.tick_decay();
-    assert_eq!(egg.hunger, 65);
-
-    let future = Utc::now() + Duration::hours(2);
-    let elapsed = egg.apply_offline_decay(future);
-    assert!(elapsed >= 7190);
-    assert_eq!(egg.hunger, 65);
-
-    // Hatched pet decays over time
-    let mut pet = Pet::new("Mochi");
-    for _ in 0..4 {
-        pet.warm_egg();
-    }
-    pet.hunger = 80;
-    pet.happiness = 80;
-    pet.energy = 80;
-    pet.tick_decay();
-    assert!(pet.hunger < 80);
-
-    let future2 = Utc::now() + Duration::hours(3);
-    let _ = pet.apply_offline_decay(future2);
-    assert!(pet.hunger < 75);
-}
-
-#[test]
-fn test_dual_storage_roundtrip() {
-    let dir = tempdir().expect("tempdir");
-    let json_path = dir.path().join("pet.json");
-    let sqlite_path = dir.path().join("pet.db");
-    let paths = StoragePaths::new(json_path.clone(), sqlite_path.clone());
-
-    assert!(!has_existing_save(&paths));
-
-    let fresh = load_or_create(&paths, "DefaultMochi");
-    assert_eq!(fresh.name, "DefaultMochi");
-
-    let mut pet = Pet::new_custom("Boba", PetSpecies::BobaPup, ShellTheme::LavenderDream);
-    for _ in 0..4 {
-        pet.warm_egg();
-    }
-    pet.coins = 42;
-
-    save_dual(&pet, &paths).expect("save_dual should succeed");
-    assert!(has_existing_save(&paths));
-
-    let from_json = load_json(&json_path).expect("load_json");
-    assert_eq!(from_json.name, "Boba");
-    assert_eq!(from_json.species, PetSpecies::BobaPup);
-    assert_eq!(from_json.theme, ShellTheme::LavenderDream);
-    assert_eq!(from_json.coins, 42);
-
-    let from_sql = load_sqlite(&sqlite_path).expect("load_sqlite");
-    assert_eq!(from_sql.name, "Boba");
-    assert_eq!(from_sql.coins, 42);
-
-    save_json(&pet, &json_path).expect("save_json");
-    save_sqlite(&pet, &sqlite_path).expect("save_sqlite");
-
-    let loaded = load_dual(&paths).expect("load_dual");
-    assert_eq!(loaded.name, "Boba");
-    assert_eq!(loaded.stage, EvolutionStage::Baby);
-}
-
-#[test]
-fn test_sprites_and_speech_bubbles() {
-    for species in PetSpecies::all() {
         for stage in EvolutionStage::all() {
-            let _ = stage_color(*stage);
             for mood in PetMood::all() {
-                let _ = mood_color(*mood);
-                let _ = get_mood_particles(*mood, 0);
                 let frames = get_sprite_frames(*species, *stage, *mood);
-                assert!(!frames.is_empty());
+                assert_eq!(frames.len(), 2, "{species:?} {stage:?} {mood:?}");
+                assert_ne!(frames[0], frames[1], "{species:?} {stage:?} {mood:?}");
             }
         }
     }
 
-    for theme in ShellTheme::all() {
-        let _ = theme_color(*theme);
+    // Dragons are part of the roster.
+    assert!(all.iter().any(|s| s.display_name().contains("Ignis Drake")));
+    assert!(all.iter().any(|s| s.display_name().contains("Azure Wyrm")));
+}
+
+// ── 2. Egg stage: guarding, realistic incubation, hatching ─────────────────
+
+#[test]
+fn unhatched_egg_refuses_every_care_action() {
+    let mut pet = Pet::new("Mochi");
+    assert_eq!(pet.stage, EvolutionStage::Egg);
+    assert_eq!(pet.incubation, 0);
+    assert_eq!(pet.coins, 0);
+
+    for action in [
+        PetAction::Feed,
+        PetAction::Play,
+        PetAction::PetLove,
+        PetAction::Train,
+        PetAction::ToggleSleep,
+        PetAction::Clean,
+        PetAction::Heal,
+    ] {
+        let mut clone = pet.clone();
+        let message = clone.apply_action(action);
+        assert!(message.contains("unhatched"), "{action:?} -> {message}");
+        assert_eq!(clone.xp, 0, "{action:?} must not grant XP to an egg");
+        assert_eq!(clone.coins, 0);
+        assert_eq!(clone.stage, EvolutionStage::Egg);
+        assert_eq!(clone.mood, PetMood::Idle);
     }
 
-    let pet = Pet::new("Mochi");
-    for tick in 0..8 {
-        assert!(!speech_bubble(&pet, tick).is_empty());
-        assert!(!render_animated_sprite(&pet, tick).is_empty());
-    }
+    // Warming is the only legal action, and it is rate-limited.
+    let first = pet.warm_egg();
+    assert!(first.contains("Incubation at 20%"), "{first}");
+    assert_eq!(pet.incubation, 20);
+
+    let blocked = pet.warm_egg();
+    assert!(blocked.contains("absorbing your warmth"), "{blocked}");
+    assert_eq!(pet.incubation, 20, "cooldown must block incubation gain");
+    let remaining = pet.warm_cooldown_remaining(Utc::now());
+    assert!(remaining > 0);
+    assert!(remaining <= WARM_COOLDOWN_SECS as u64);
 }
 
 #[test]
-fn test_minigame_mechanics_and_rewards() {
-    let mut game = MiniGame::new(40, 16, 20);
+fn five_manual_warmings_hatch_the_egg_into_a_baby() {
+    let mut pet = Pet::new_custom("Ignis", PetSpecies::IgnisDragon, ShellTheme::SunsetGold);
+
+    for expected in [20u8, 40, 60, 80, 100] {
+        pet.clear_cooldowns();
+        pet.warm_egg();
+        assert_eq!(pet.incubation, expected);
+    }
+
+    assert_eq!(pet.stage, EvolutionStage::Baby);
+    assert!(pet.xp >= EvolutionStage::Baby.min_xp());
+    assert_eq!(pet.level, 2);
+    assert!(pet.coins >= 15);
+    assert!(pet.action_log.iter().any(|l| l.contains("hatched")));
+}
+
+#[test]
+fn passive_incubation_never_hatches_the_egg_by_itself() {
+    let mut pet = Pet::new("Mochi");
+    for _ in 0..200 {
+        pet.tick_decay();
+    }
+    assert_eq!(pet.stage, EvolutionStage::Egg, "time alone must not hatch");
+    assert_eq!(pet.incubation, 99, "passive warmth tops out at 99%");
+    assert_eq!(pet.hunger, 65, "an egg never starves");
+
+    // Coming back after a long break also stops at 99%.
+    let mut pet = Pet::new("Mochi");
+    let now = Utc::now() + Duration::hours(3);
+    let elapsed = pet.apply_offline_decay(now);
+    assert!(elapsed >= 10_000);
+    assert_eq!(pet.incubation, 99);
+    assert_eq!(pet.hunger, 65);
+
+    // One single warm (after the cooldown) is the final push.
+    pet.clear_cooldowns();
+    let msg = pet.warm_egg();
+    assert!(msg.contains("CRACK"), "{msg}");
+    assert_eq!(pet.stage, EvolutionStage::Baby);
+}
+
+// ── 3. Anti-spam care guards ──────────────────────────────────────────────
+
+#[test]
+fn care_actions_cannot_be_spammed_for_free_xp() {
+    let mut pet = Pet::new("Mochi");
+    pet.stage = EvolutionStage::Baby;
+
+    // Full stomach refuses food.
+    pet.hunger = 98;
+    let before = pet.xp;
+    let msg = pet.feed();
+    assert!(msg.contains("completely full"), "{msg}");
+    assert_eq!(pet.xp, before);
+
+    // Maxed happiness refuses endless headpats.
+    pet.happiness = 100;
+    pet.clear_cooldowns();
+    let msg = pet.pet_love();
+    assert!(msg.contains("maxed out"), "{msg}");
+    assert_eq!(pet.xp, before);
+
+    // Back-to-back cuddles respect the cooldown.
+    pet.happiness = 50;
+    pet.clear_cooldowns();
+    let first = pet.pet_love();
+    assert!(!first.contains("still basking"), "{first}");
+    let second = pet.pet_love();
+    assert!(second.contains("still basking"), "{second}");
+    let pet_rest = pet.pet_cooldown_remaining(Utc::now());
+    assert!(pet_rest > 0);
+    assert!(pet_rest <= PET_COOLDOWN_SECS as u64);
+
+    // Training respects its cooldown too.
+    pet.energy = 100;
+    pet.hunger = 100;
+    pet.clear_cooldowns();
+    let trained = pet.train();
+    assert!(!trained.contains("catching their breath"), "{trained}");
+    let too_soon = pet.train();
+    assert!(too_soon.contains("catching their breath"), "{too_soon}");
+    let train_rest = pet.train_cooldown_remaining(Utc::now());
+    assert!(train_rest > 0);
+    assert!(train_rest <= TRAIN_COOLDOWN_SECS as u64);
+
+    // A clean room cannot be cleaned again.
+    pet.cleanliness = 100;
+    pet.poop_count = 0;
+    let xp_before = pet.xp;
+    let msg = pet.clean();
+    assert!(msg.contains("sparkling clean"), "{msg}");
+    assert_eq!(pet.xp, xp_before);
+
+    // Healthy pets refuse medicine.
+    pet.is_sick = false;
+    pet.health = 100;
+    let msg = pet.heal();
+    assert!(msg.contains("tip-top health"), "{msg}");
+    assert_eq!(pet.xp, xp_before);
+
+    // Exhausted / starving pets refuse play and training.
+    pet.clear_cooldowns();
+    pet.energy = 5;
+    assert!(pet.play().contains("too tired"));
+    assert!(pet.train().contains("lacks energy"));
+
+    pet.energy = 100;
+    pet.hunger = 10;
+    assert!(pet.play().contains("too hungry"));
+    assert!(pet.train().contains("too hungry to focus"));
+
+    // Sick pets need medicine first.
+    pet.hunger = 80;
+    pet.energy = 90;
+    pet.is_sick = true;
+    pet.health = 30;
+    assert!(pet.play().contains("sick"));
+    assert!(pet.train().contains("unwell"));
+    let healed = pet.heal();
+    assert!(healed.contains("recovered"), "{healed}");
+    assert!(!pet.is_sick);
+
+    // Sleeping pets ignore everything until woken.
+    let mut sleepy = Pet::new("Mochi");
+    sleepy.stage = EvolutionStage::Baby;
+    let msg = sleepy.toggle_sleep();
+    assert!(msg.contains("Goodnight"), "{msg}");
+    assert!(sleepy.feed().contains("fast asleep"));
+    assert!(sleepy.play().contains("sleeping"));
+    assert!(sleepy.train().contains("asleep"));
+}
+
+#[test]
+fn feeding_cycle_produces_messes_that_must_be_cleaned() {
+    let mut pet = Pet::new("Mochi");
+    pet.stage = EvolutionStage::Baby;
+    pet.hunger = 40;
+
+    pet.feed();
+    assert_eq!(pet.poop_count, 0, "one meal is not enough for a mess");
+    pet.hunger = 40;
+    pet.feed();
+    assert_eq!(pet.poop_count, 1);
+    assert!(pet.cleanliness < 100);
+
+    let cleaned = pet.clean();
+    assert!(cleaned.contains("bubble bath"), "{cleaned}");
+    assert_eq!(pet.poop_count, 0);
+    assert_eq!(pet.cleanliness, 100);
+}
+
+// ── 4. Evolution needs time, bond and XP ──────────────────────────────────
+
+#[test]
+fn evolution_requires_xp_bond_and_time_together() {
+    let mut pet = Pet::new("Mochi");
+    pet.stage = EvolutionStage::Baby;
+    pet.xp = EvolutionStage::Teen.min_xp();
+    pet.bond = EvolutionStage::Teen.min_bond();
+    pet.age_seconds = 1; // still too young
+
+    assert!(!pet.check_evolution());
+    assert_eq!(pet.stage, EvolutionStage::Baby);
+
+    pet.age_seconds = EvolutionStage::Teen.min_age_seconds();
+    assert!(pet.check_evolution());
+    assert_eq!(pet.stage, EvolutionStage::Teen);
+
+    // Low bond blocks the next step even with plenty of XP.
+    pet.xp = EvolutionStage::Adult.min_xp();
+    pet.age_seconds = EvolutionStage::Adult.min_age_seconds();
+    pet.bond = 0;
+    assert!(!pet.check_evolution());
+    assert_eq!(pet.stage, EvolutionStage::Teen);
+
+    pet.bond = 100;
+    assert!(pet.check_evolution());
+    assert_eq!(pet.stage, EvolutionStage::Adult);
+    assert!(pet.xp_progress_ratio() >= 0.0 && pet.xp_progress_ratio() <= 1.0);
+
+    // Reaching the elder form and staying there.
+    pet.xp = EvolutionStage::CyberElder.min_xp();
+    pet.age_seconds = EvolutionStage::CyberElder.min_age_seconds();
+    assert!(pet.check_evolution());
+    assert_eq!(pet.stage, EvolutionStage::CyberElder);
+    assert!(!pet.check_evolution());
+    assert!(pet.next_evolution_requirements().contains("Max evolution"));
+
+    let maxed = EvolutionStage::CyberElder.max_stat_bonus();
+    assert!(maxed > EvolutionStage::Egg.max_stat_bonus());
+    assert_eq!(EvolutionStage::from_xp(0), EvolutionStage::Egg);
+    assert_eq!(EvolutionStage::from_xp(5_000), EvolutionStage::CyberElder);
+}
+
+#[test]
+fn offline_decay_only_hurts_hatched_pets() {
+    let mut pet = Pet::new("Mochi");
+    pet.stage = EvolutionStage::Baby;
+    let before = (pet.hunger, pet.happiness, pet.energy);
+    let now = Utc::now() + Duration::minutes(10);
+    let elapsed = pet.apply_offline_decay(now);
+
+    assert_eq!(elapsed, 600);
+    assert!(pet.hunger < before.0);
+    assert!(pet.happiness < before.1);
+    assert!(pet.energy < before.2);
+    assert!(pet.age_seconds >= 600);
+
+    // A sleeping pet recovers energy instead.
+    let mut sleeper = Pet::new("Mochi");
+    sleeper.stage = EvolutionStage::Baby;
+    sleeper.energy = 20;
+    sleeper.toggle_sleep();
+    sleeper.apply_offline_decay(Utc::now() + Duration::minutes(30));
+    assert!(sleeper.energy > 20);
+}
+
+// ── 5. Multi-pet Sanctuary ────────────────────────────────────────────────
+
+#[test]
+fn sanctuary_holds_many_companions_and_cycles_between_them() {
+    let mut sanctuary = Sanctuary::new_with_pet(Pet::new_custom(
+        "Ignis",
+        PetSpecies::IgnisDragon,
+        ShellTheme::SunsetGold,
+    ));
+    assert_eq!(sanctuary.pets.len(), 1);
+    assert_eq!(sanctuary.active_index, 0);
+
+    let idx_a = sanctuary.add_pet(Pet::new_custom(
+        "Ao",
+        PetSpecies::AzureWyrm,
+        ShellTheme::SkyBlue,
+    ));
+    let idx_b = sanctuary.add_pet(Pet::new("Puni"));
+    assert_eq!(idx_a, 1);
+    assert_eq!(idx_b, 2);
+    assert_eq!(sanctuary.active_pet().name, "Puni");
+    assert_eq!(sanctuary.hatched_count(), 0, "all three start as eggs");
+
+    sanctuary.next_pet();
+    assert_eq!(sanctuary.active_pet().name, "Ignis");
+    sanctuary.prev_pet();
+    assert_eq!(sanctuary.active_pet().name, "Puni");
+
+    assert!(sanctuary.switch_pet(1));
+    assert_eq!(sanctuary.active_pet().species, PetSpecies::AzureWyrm);
+    assert!(!sanctuary.switch_pet(99));
+
+    // Editing the active pet, then syncing it back, keeps the roster coherent.
+    sanctuary.active_pet_mut().rename("Ao-chan");
+    let snapshot = sanctuary.active_pet().clone();
+    sanctuary.sync_active(&snapshot);
+    assert_eq!(sanctuary.pets[1].name, "Ao-chan");
+
+    // Background decay touches every companion.
+    let before: Vec<u64> = sanctuary.pets.iter().map(|p| p.age_seconds).collect();
+    sanctuary.tick_decay_all();
+    for (pet, old_age) in sanctuary.pets.iter().zip(before) {
+        assert!(pet.age_seconds > old_age);
+    }
+
+    sanctuary.apply_offline_decay_all(Utc::now() + Duration::minutes(5));
+    assert!(sanctuary.sanctuary_level >= 1);
+}
+
+#[test]
+fn sanctuary_survives_a_save_and_load_cycle() {
+    let (_dir, paths) = temp_paths();
+    assert!(!has_existing_save(&paths));
+
+    let mut sanctuary = Sanctuary::new_with_pet(Pet::new_custom(
+        "Ignis",
+        PetSpecies::IgnisDragon,
+        ShellTheme::SunsetGold,
+    ));
+    sanctuary.add_pet(Pet::new_custom(
+        "Ao",
+        PetSpecies::AzureWyrm,
+        ShellTheme::SkyBlue,
+    ));
+    sanctuary.add_pet(Pet::new_custom(
+        "Kitsune",
+        PetSpecies::EmberFox,
+        ShellTheme::LavenderDream,
+    ));
+    sanctuary.pets[0].stage = EvolutionStage::Adult;
+    sanctuary.pets[0].xp = 700;
+    sanctuary.active_index = 1;
+
+    save_sanctuary(&sanctuary, &paths).expect("save sanctuary");
+    assert!(has_existing_save(&paths));
+
+    let loaded = load_sanctuary(&paths).expect("load sanctuary");
+    assert_eq!(loaded.pets.len(), 3);
+    assert_eq!(loaded.active_index, 1);
+    assert_eq!(loaded.pets[0].stage, EvolutionStage::Adult);
+    assert_eq!(loaded.pets[0].xp, 700);
+    assert_eq!(loaded.pets[2].species, PetSpecies::EmberFox);
+
+    // The active pet is also mirrored into the classic single-pet stores.
+    let mirrored = load_dual(&paths).expect("legacy mirror");
+    assert_eq!(mirrored.name, loaded.active_pet().name);
+
+    // A legacy single-pet save transparently upgrades to a one-pet Sanctuary.
+    let (_dir2, legacy_paths) = temp_paths();
+    save_dual(&Pet::new("Pebble"), &legacy_paths).expect("legacy save");
+    let upgraded = load_sanctuary(&legacy_paths).expect("upgrade legacy save");
+    assert_eq!(upgraded.pets.len(), 1);
+    assert_eq!(upgraded.active_pet().name, "Pebble");
+}
+
+// ── 6. Mini-game ──────────────────────────────────────────────────────────
+
+#[test]
+fn snack_catcher_arcade_awards_rewards() {
+    let mut game = MiniGame::new(30, 10, 40);
     assert!(!game.is_finished());
 
-    let initial_x = game.player_x;
+    game.spawn_item(5, ItemKind::Snack);
+    game.spawn_item(6, ItemKind::Star);
+    game.spawn_item(7, ItemKind::Hazard);
+    assert_eq!(game.items.len(), 3);
+
+    game.move_right();
     game.move_left();
-    assert!(game.player_x <= initial_x);
-    game.move_right();
-    game.move_right();
-
-    for kind in [ItemKind::Snack, ItemKind::Star, ItemKind::Hazard] {
-        assert!(!kind.symbol().is_empty());
-        assert!(!kind.label().is_empty());
-        let _ = kind.is_reward();
-    }
-
-    game.spawn_item(game.player_x, ItemKind::Snack);
-    assert!(!game.render_lines().is_empty());
-
-    for _ in 0..20 {
+    for _ in 0..50 {
         game.step();
+        if game.is_finished() {
+            break;
+        }
     }
     assert!(game.is_finished());
-    assert_eq!(game.ticks_remaining, 0);
-
-    let mut pet = Pet::new("Mochi");
-    for _ in 0..4 {
-        pet.warm_egg();
-    }
-    let xp_before = pet.xp;
-    let coins_before = pet.coins;
-    let reward_msg = pet.apply_minigame_reward(120, 18, 35);
-    assert!(!reward_msg.is_empty());
-    assert_eq!(pet.coins, coins_before + 18);
-    assert!(pet.xp >= xp_before + 35);
+    assert!(game.ticks_remaining == 0);
 }
 
-#[test]
-fn test_tui_onboarding_and_responsive_rendering() {
-    let dir = tempdir().expect("tempdir");
-    let paths = StoragePaths::new(dir.path().join("pet.json"), dir.path().join("pet.db"));
+// ── 7. TUI end-to-end ─────────────────────────────────────────────────────
 
-    // 1. Onboarding wizard flow
-    let mut app = App::new_onboarding(paths.clone());
+#[test]
+fn adoption_wizard_lets_you_build_a_collection() {
+    let (_dir, paths) = temp_paths();
+    let mut app = App::new_onboarding(paths);
     assert_eq!(app.screen, AppScreen::Onboarding);
     assert_eq!(app.onboarding_step, OnboardingStep::SelectSpecies);
 
-    let backend = TestBackend::new(90, 28);
-    let mut terminal = Terminal::new(backend).expect("terminal");
-    terminal
-        .draw(|f| draw_ui(f, &app))
-        .expect("draw onboarding species");
-
-    app.handle_key(KeyCode::Right);
+    // Adopt Ignis Drake.
+    for _ in 0..4 {
+        app.handle_key(KeyCode::Down);
+    }
     app.handle_key(KeyCode::Enter);
     assert_eq!(app.onboarding_step, OnboardingStep::SelectTheme);
-    terminal
-        .draw(|f| draw_ui(f, &app))
-        .expect("draw onboarding theme");
-
-    app.handle_key(KeyCode::Right);
+    app.handle_key(KeyCode::Tab);
     app.handle_key(KeyCode::Enter);
     assert_eq!(app.onboarding_step, OnboardingStep::EnterName);
-    terminal
-        .draw(|f| draw_ui(f, &app))
-        .expect("draw onboarding name");
+    for _ in 0..8 {
+        app.handle_key(KeyCode::Backspace);
+    }
+    for c in "Sparky".chars() {
+        app.handle_key(KeyCode::Char(c));
+    }
+    app.handle_key(KeyCode::Enter);
 
-    app.handle_key(KeyCode::Backspace);
-    app.handle_key(KeyCode::Char('K'));
+    assert_eq!(app.screen, AppScreen::Habitat);
+    assert_eq!(app.pet.species, PetSpecies::IgnisDragon);
+    assert_eq!(app.pet.name, "Sparky");
+    assert_eq!(app.sanctuary.pets.len(), 1);
+
+    // Adopt a second companion without losing the first.
+    app.handle_key(KeyCode::Char('n'));
+    app.handle_key(KeyCode::Enter);
+    app.handle_key(KeyCode::Enter);
+    app.handle_key(KeyCode::Enter);
+    assert_eq!(app.sanctuary.pets.len(), 2);
+
+    // Quick switching with [ and ].
+    let before = app.pet.species;
+    app.handle_key(KeyCode::Char('['));
+    assert_ne!(app.pet.species, before);
+    app.handle_key(KeyCode::Char(']'));
+    assert_eq!(app.pet.species, before);
+
+    // Roster screen switching.
+    app.handle_key(KeyCode::Char('l'));
+    assert_eq!(app.screen, AppScreen::SanctuaryRoster);
+    app.handle_key(KeyCode::Up);
     app.handle_key(KeyCode::Enter);
     assert_eq!(app.screen, AppScreen::Habitat);
 
-    // 2. Habitat rendering across Compact (60x22), Standard (90x28), and Wide Deluxe (120x34)
-    for (w, h) in [(60, 22), (90, 28), (120, 34)] {
-        let b = TestBackend::new(w, h);
-        let mut term = Terminal::new(b).expect("term");
-        term.draw(|f| draw_ui(f, &app)).expect("draw habitat");
+    // Egg care through the keyboard.
+    let incubation = app.pet.incubation;
+    app.handle_key(KeyCode::Char('w'));
+    assert!(app.pet.incubation > incubation || app.pet.stage != EvolutionStage::Egg);
+
+    // Renaming.
+    app.handle_key(KeyCode::Char('r'));
+    app.handle_key(KeyCode::Backspace);
+    app.handle_key(KeyCode::Char('z'));
+    app.handle_key(KeyCode::Enter);
+    assert!(!app.pet.name.is_empty());
+
+    // Shell recolor + quit.
+    let theme = app.pet.theme;
+    app.handle_key(KeyCode::Tab);
+    assert_ne!(app.pet.theme, theme);
+    app.handle_key(KeyCode::Char('q'));
+    assert!(app.should_quit);
+    let _ = theme_color(app.pet.theme);
+}
+
+#[test]
+fn tui_renders_across_every_screen_and_terminal_size() {
+    let (_dir, paths) = temp_paths();
+    let mut sanctuary = Sanctuary::new_with_pet(Pet::new_custom(
+        "Ignis",
+        PetSpecies::IgnisDragon,
+        ShellTheme::SunsetGold,
+    ));
+    sanctuary.add_pet(Pet::new_custom(
+        "Ao",
+        PetSpecies::AzureWyrm,
+        ShellTheme::SkyBlue,
+    ));
+    let mut app = App::new_with_sanctuary(sanctuary, paths, false);
+    app.pet.stage = EvolutionStage::Adult;
+    app.pet.poop_count = 2;
+    app.pet.log_action("test entry");
+
+    assert_eq!(LayoutTier::from_width(60), LayoutTier::Compact);
+    assert_eq!(LayoutTier::from_width(90), LayoutTier::Standard);
+    assert_eq!(LayoutTier::from_width(200), LayoutTier::Wide);
+
+    for (width, height) in [(50u16, 18u16), (78, 24), (100, 32), (132, 40)] {
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("terminal");
+        for screen in [
+            AppScreen::Habitat,
+            AppScreen::SanctuaryRoster,
+            AppScreen::MiniGame,
+            AppScreen::Onboarding,
+        ] {
+            app.screen = screen;
+            terminal.draw(|f| draw_ui(f, &app)).expect("draw");
+            let buffer = terminal.backend().buffer().clone();
+            assert_eq!(buffer.area.width, width);
+            assert_eq!(buffer.area.height, height);
+        }
     }
 
-    // 3. Hatch pet via keyboard 'w' and enter MiniGame via 'g'
-    for _ in 0..4 {
-        app.handle_key(KeyCode::Char('w'));
+    // Mood particles and speech always resolve for every mood.
+    for mood in PetMood::all() {
+        app.pet.mood = *mood;
+        assert!(!get_mood_particles(*mood, 0).is_empty());
+        assert!(!speech_bubble(&app.pet, 0).is_empty());
+        assert!(!render_animated_sprite(&app.pet, 0).is_empty());
     }
-    assert_eq!(app.pet.stage, EvolutionStage::Baby);
+}
 
-    app.on_tick();
-    app.handle_key(KeyCode::Char('g'));
+#[test]
+fn habitat_keys_drive_the_care_loop_without_panicking() {
+    let (_dir, paths) = temp_paths();
+    let mut app = App::new(Pet::new("Mochi"), paths);
+    app.pet.stage = EvolutionStage::Adult;
+    app.pet.hunger = 50;
+    app.pet.energy = 90;
+
+    for key in [
+        KeyCode::Char('f'),
+        KeyCode::Char('p'),
+        KeyCode::Char('t'),
+        KeyCode::Char('e'),
+        KeyCode::Char('s'),
+        KeyCode::Char('s'),
+        KeyCode::Char('c'),
+        KeyCode::Char('h'),
+        KeyCode::Char('g'),
+    ] {
+        app.handle_key(key);
+    }
     assert_eq!(app.screen, AppScreen::MiniGame);
 
-    terminal
-        .draw(|f| draw_ui(f, &app))
-        .expect("draw minigame");
-
-    app.handle_key(KeyCode::Left);
-    app.handle_key(KeyCode::Right);
-    app.handle_key(KeyCode::Esc);
+    while app.screen == AppScreen::MiniGame {
+        app.on_tick();
+    }
     assert_eq!(app.screen, AppScreen::Habitat);
+    assert!(app.pet.xp > 0);
+
+    // The egg cannot enter the arcade.
+    let (_dir2, paths2) = temp_paths();
+    let mut egg_app = App::new(Pet::new("Mochi"), paths2);
+    egg_app.handle_key(KeyCode::Char('g'));
+    assert_eq!(egg_app.screen, AppScreen::Habitat);
 }
