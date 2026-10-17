@@ -69,22 +69,129 @@ Your keeper name is woven into every spoken line, sense, and epitaph. And your
 
 ## Installation
 
-Rust 1.87+ is required. No other setup, no accounts, no network calls.
+Rust 1.87+ is required everywhere. No accounts, no sign-ups — the only
+network traffic is cargo fetching its dependencies on the first build, and
+after that the whole game is one binary and two save files.
+
+### Linux (Debian / Arch / Fedora / openSUSE)
 
 ```bash
 git clone https://github.com/NojinNojs/komo.git
 cd komo
 cargo build --release
-cp target/release/mochigotchi ~/.local/bin/komo   # Short name
+mkdir -p ~/.local/bin && cp target/release/mochigotchi ~/.local/bin/komo
 ```
 
-Or install straight from the repo:
+`~/.local/bin` is already on `PATH` in most desktop distributions (it is added
+by your `~/.profile`). If `komo` is not found, log out and back in, or add
+this to `~/.profile` and re-login:
 
 ```bash
-cargo install --path .   # Installs as 'mochigotchi'
+export PATH="$HOME/.local/bin:$PATH"
 ```
 
-## First 3 Minutes
+Full-color chiptune sound needs a PipeWire or PulseAudio session
+(`pw-play` / `paplay` / `aplay` — one of them, no extra setup on modern
+distros). Mute anytime with `[U]`.
+
+### NixOS
+
+Two ways that both work. Each has a reason.
+
+**Imperative, permanent install** — build once and let NixOS's flat home
+toolchain pick it up:
+
+```bash
+nix-shell -p cargo rustc          # or use rustup if you prefer
+git clone https://github.com/NojinNojs/komo.git
+cd komo && cargo build --release
+cp target/release/mochigotchi ~/.local/bin/komo
+```
+
+Then make `~/.local/bin` part of your declared `PATH` (NixOS does not assume
+it). With home-manager, add to `home-manager.users.<you>.home.sessionPath`:
+
+```nix
+home.sessionPath = [ "$HOME/.local/bin" ];
+```
+
+Or, without home-manager, inject it at shell level in `configuration.nix`:
+
+```nix
+environment.shellInit = ''
+  export PATH="$HOME/.local/bin:$PATH"
+'';
+```
+
+then `sudo nixos-rebuild switch`. After that, `komo` is callable in every tty,
+tmux pane, and `nix shell` alike.
+
+**Declarative, pinned to your system** — treat it like any other package. This
+route is heavier to set up: a tiny `flake.nix` wrapping `buildRustPackage`
+would let `nix build` and `nix profile install .#komo` do the plumbing. One
+is not shipped in this repo yet; open an issue if you want it.
+
+### macOS
+
+```bash
+brew install rust          # or https://rustup.rs
+git clone https://github.com/NojinNojs/komo.git
+cd komo && cargo install --path .
+```
+
+`cargo install` puts the binary into `~/.cargo/bin`, which the rustup/brew
+toolchains already place on `PATH` for `zsh`/`bash`. Piece of cake — but
+two caveats:
+
+1. Terminal.app and iTerm2 both render the TrueColor half-block sprites
+   correctly. Ghostty, Kitty and Alacritty are also known-good.
+2. Chiptune audio is currently Linux-first (`pw-play` / `paplay` / `aplay`
+   palette). On macOS the game runs fully but stays silent. This is on us,
+   not on your Mac.
+
+### Windows
+
+```powershell
+winget install Rustlang.Rustup
+git clone https://github.com/NojinNojs/komo.git
+cd komo
+cargo build --release
+cargo install --path .    # installs as 'mochigotchi' in %USERPROFILE%\.cargo\bin
+```
+
+`rustup` adds `%USERPROFILE%\.cargo\bin` to `PATH` for you on install, so
+`mochigotchi` is callable from any new shell without further setup. Prefer
+aliasing to the short name in PowerShell:
+
+```powershell
+New-Alias komo $env:USERPROFILE\.cargo\bin\mochigotchi.exe
+```
+
+(Add that line to `$PROFILE` to make the alias permanent.)
+
+Two Windows caveats:
+
+1. Use **Windows Terminal** (not the legacy conhost) — the retro LCD needs
+   TrueColor ANSI escape passthrough, and the terminal must be at least
+   68 columns × 24 rows tall for the handheld frame to fit.
+2. Chiptune audio is currently Linux-first. On Windows the game runs fully
+   but stays silent, just like macOS.
+
+### Calling it from any terminal (the `komo` short name)
+
+The built binary is `mochigotchi` (that's its Cargo `name`). If you want the
+short `komo` alias across platforms:
+
+| OS | Command |
+|:---|:---|
+| Linux / NixOS | `cp target/release/mochigotchi ~/.local/bin/komo` (as above) |
+| macOS | `cp target/release/mochigotchi /usr/local/bin/komo` (or `~/.local/bin` on PATH) |
+| Windows (PowerShell, permanent) | `New-Alias komo $env:USERPROFILE\.cargo\bin\mochigotchi.exe` + add that line to `$PROFILE` |
+
+After that, `komo`, `mochi`, and `mochigotchi` all launch the same handheld
+LCD interface from any directory, any shell.
+
+### First 3 Minutes
 
 ```bash
 komo                       # Launch the handheld LCD interface
