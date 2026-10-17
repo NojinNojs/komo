@@ -1,13 +1,8 @@
-//! # Mochigotchi v0.5.0
+//! # Mochigotchi v0.5.1
 //!
 //! A cozy, collectible pocket-pet simulator for your terminal with
-//! reverse-engineered authentic Bandai Tamagotchi mechanics:
-//! - 8-Icon LCD Bezel (`🍙 Food`, `💡 Light`, `🎮 Game`, `💉 Meds`, `🚽 Bath`,
-//!   `📏 Meter`, `📢 Scold`, `🔔 Call`) with 3-button hardware navigation
-//! - 4 Hungry Hearts (`♥♥♥♥`) & 4 Happy Hearts (`♥♥♥♥`)
-//! - Meal vs. Sweet Snack weight (`g`) & 3-snack Toothache (`🦷`) system
-//! - Room Light switch (`💡`), Attention Calls (`🔔`), Discipline (`📢`), and Care Mistakes
-//! - 10 collectible companions in a multi-pet [`Sanctuary`] with TrueColor ASCII art
+//! reverse-engineered authentic Bandai Tamagotchi mechanics, a minimum
+//! viewport size guard (`90 × 26`), and precision-aligned TrueColor ASCII art.
 
 pub mod minigame;
 pub mod pet;
@@ -32,4 +27,7 @@ pub use storage::{
     save_dual, save_json, save_sanctuary, save_sqlite, StoragePaths, DEFAULT_JSON_PATH,
     DEFAULT_SQLITE_PATH,
 };
-pub use tui::{draw_ui, run_tui, run_tui_with_report, App, AppScreen, LayoutTier, OnboardingStep};
+pub use tui::{
+    draw_ui, run_tui, run_tui_with_report, App, AppScreen, LayoutTier, OnboardingStep,
+    MIN_TERM_HEIGHT, MIN_TERM_WIDTH,
+};

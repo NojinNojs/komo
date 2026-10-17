@@ -1,7 +1,11 @@
-//! Core pet model for **Mochigotchi v0.5.0** — reverse-engineered authentic
-//! Bandai Tamagotchi mechanics (8 LCD bezel icons, 4 Hungry/Happy Hearts,
-//! Meal vs. Snack weight & toothache system, Room Light switch, Attention Calls,
+//! Core pet model for **Mochigotchi** — reverse-engineered authentic Bandai
+//! Tamagotchi mechanics (8 LCD bezel icons, 4 Hungry/Happy Hearts, Meal vs.
+//! Sweet Snack weight & toothache system, Room Light switch, Attention Calls,
 //! Discipline scold/praise, Care Mistakes, and the multi-pet [`Sanctuary`]).
+//!
+//! All emoji icons use single-codepoint East_Asian_Width=Wide glyphs (zero ZWJ
+//! or U+FE0F variation selectors) so terminal column widths match 100% across
+//! Ghostty, Kitty, WezTerm, Alacritty, and Ratatui.
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -18,8 +22,6 @@ pub const TRAIN_COOLDOWN_SECS: i64 = 240;
 pub const PET_COOLDOWN_SECS: i64 = 45;
 
 /// The 8 classic LCD bezel icons of an authentic Bandai Tamagotchi.
-/// Icons 0..=6 are selectable with Button A (`←`/`→`); Icon 7 (`Attention`)
-/// is the status call indicator on the bottom-right of the bezel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub enum LcdIcon {
     #[default]
@@ -73,11 +75,8 @@ impl LcdIcon {
 pub enum AttentionCall {
     #[default]
     None,
-    /// Calling because of a real physical need (0 hearts, poop, sick, or light left ON while asleep).
     NeedsCare,
-    /// Calling out of stubbornness/mischief even though vitals are fine — needs `Scold [D]`!
     Misbehaving,
-    /// Calling because of loneliness/tears — needs `Praise / Pat [T]`!
     Crying,
 }
 
@@ -90,14 +89,13 @@ impl AttentionCall {
         match self {
             Self::None => "🔔 Quiet",
             Self::NeedsCare => "🔔 CALL: Needs Care!",
-            Self::Misbehaving => "🔔 CALL: Acting Spoiled! (Scold [D])",
-            Self::Crying => "🔔 CALL: Crying! (Praise [T])",
+            Self::Misbehaving => "🔔 CALL: Spoiled! [D]",
+            Self::Crying => "🔔 CALL: Crying! [T]",
         }
     }
 }
 
-/// Life stages of every companion. Eggs hatch, then grow across days of care
-/// before reaching the Starlight Elder form.
+/// Life stages of every companion.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Default,
 )]
@@ -145,8 +143,6 @@ impl EvolutionStage {
         }
     }
 
-    /// Minimum healthy base weight (in grams) for this life stage, just like
-    /// the original Bandai Tamagotchi ROM tables.
     pub fn base_weight_grams(&self) -> u16 {
         match self {
             Self::Egg => 5,
@@ -157,7 +153,6 @@ impl EvolutionStage {
         }
     }
 
-    /// Total XP required to *reach* this stage.
     pub fn min_xp(&self) -> u32 {
         match self {
             Self::Egg => 0,
@@ -168,7 +163,6 @@ impl EvolutionStage {
         }
     }
 
-    /// Bond required to *reach* this stage.
     pub fn min_bond(&self) -> u8 {
         match self {
             Self::Egg => 0,
@@ -179,8 +173,6 @@ impl EvolutionStage {
         }
     }
 
-    /// Time you must have spent together (real seconds, including offline time)
-    /// to *reach* this stage: Teen = 6h, Adult = 24h, Elder = 72h.
     pub fn min_age_seconds(&self) -> u64 {
         match self {
             Self::Egg => 0,
@@ -268,7 +260,7 @@ impl PetSpecies {
             Self::IgnisDragon => "🐉 Ignis Drake",
             Self::AzureWyrm => "🐲 Azure Wyrm",
             Self::EmberFox => "🦊 Kitsune Nine",
-            Self::PhoenixChick => "🐦‍🔥 Sol Phoenix",
+            Self::PhoenixChick => "🦅 Sol Phoenix",
             Self::CrystalUni => "🦄 Astra Unicorn",
             Self::SlimeKing => "👑 Royal Jelly",
         }
@@ -278,6 +270,13 @@ impl PetSpecies {
         match self {
             Self::MochiCat | Self::BobaPup | Self::CloudBun | Self::StarPengu => "Cozy Classics",
             _ => "Mythical & Fantasy",
+        }
+    }
+
+    pub fn short_family(&self) -> &'static str {
+        match self {
+            Self::MochiCat | Self::BobaPup | Self::CloudBun | Self::StarPengu => "Cozy",
+            _ => "Mythical",
         }
     }
 
@@ -291,17 +290,27 @@ impl PetSpecies {
         }
     }
 
+    pub fn star_bar(&self) -> &'static str {
+        match self {
+            Self::MochiCat | Self::BobaPup | Self::CloudBun => "★☆☆☆☆",
+            Self::StarPengu | Self::SlimeKing => "★★☆☆☆",
+            Self::EmberFox | Self::CrystalUni => "★★★☆☆",
+            Self::AzureWyrm => "★★★★☆",
+            Self::IgnisDragon | Self::PhoenixChick => "★★★★★",
+        }
+    }
+
     pub fn element_badge(&self) -> &'static str {
         match self {
             Self::MochiCat => "🍡 Sweet",
             Self::BobaPup => "🧋 Tapioca",
-            Self::CloudBun => "☁️ Sky",
-            Self::StarPengu => "❄️ Aurora",
+            Self::CloudBun => "🌈 Sky",
+            Self::StarPengu => "🌌 Aurora",
             Self::IgnisDragon => "🔥 Dragonfire",
             Self::AzureWyrm => "🌊 Celestial Tide",
             Self::EmberFox => "🦊 Spirit Foxfire",
-            Self::PhoenixChick => "☀️ Sunburst",
-            Self::CrystalUni => "✨ Starlight",
+            Self::PhoenixChick => "🌞 Sunburst",
+            Self::CrystalUni => "🌟 Starlight",
             Self::SlimeKing => "💧 Mystic Slime",
         }
     }
@@ -344,11 +353,11 @@ impl PetSpecies {
             Self::BobaPup => "Honey Biscuit 🦴",
             Self::CloudBun => "Sweet Carrot 🥕",
             Self::StarPengu => "Snowberry 🫐",
-            Self::IgnisDragon => "Flame Chili 🌶️",
+            Self::IgnisDragon => "Flame Chili 🔥",
             Self::AzureWyrm => "Moon Pearl 🫧",
             Self::EmberFox => "Inari Tofu 🦊",
-            Self::PhoenixChick => "Sunfire Berry ☀️",
-            Self::CrystalUni => "Starlight Sugar ✨",
+            Self::PhoenixChick => "Sunfire Berry 🌞",
+            Self::CrystalUni => "Starlight Sugar 🌟",
             Self::SlimeKing => "Crystal Dew 💧",
         }
     }
@@ -384,9 +393,9 @@ impl ShellTheme {
         match self {
             Self::StrawberryPink => "🍓 Strawberry Pink",
             Self::MatchaGreen => "🍵 Matcha Green",
-            Self::SkyBlue => "☁️ Sky Blue",
-            Self::LavenderDream => "💜 Lavender Dream",
-            Self::SunsetGold => "✨ Sunset Gold",
+            Self::SkyBlue => "💎 Sky Blue",
+            Self::LavenderDream => "🔮 Lavender Dream",
+            Self::SunsetGold => "🌟 Sunset Gold",
         }
     }
 
@@ -436,7 +445,7 @@ impl PetMood {
 
     pub fn emoji(&self) -> &'static str {
         match self {
-            Self::Idle => "🌤️",
+            Self::Idle => "🌈",
             Self::Eating => "🍡",
             Self::Sleeping => "💤",
             Self::Happy => "💖",
@@ -447,9 +456,6 @@ impl PetMood {
 }
 
 /// Five foods available in the Pantry (`[M]`): Meals vs. Sweet Snacks!
-/// In authentic Tamagotchi fashion, Meals fill Hungry Hearts (+1g weight) while
-/// Sweet Snacks fill Happy Hearts (+2g weight, and 3 snacks in a row cause a
-/// Toothache `🦷`!).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum FoodChoice {
     FavoriteSnack,
@@ -689,7 +695,6 @@ impl Pet {
         }
     }
 
-    /// Classic Bandai 0..=4 Hungry Hearts scale.
     pub fn hungry_hearts(&self) -> u8 {
         match self.hunger {
             0..=14 => 0,
@@ -700,7 +705,6 @@ impl Pet {
         }
     }
 
-    /// Classic Bandai 0..=4 Happy Hearts scale.
     pub fn happy_hearts(&self) -> u8 {
         match self.happiness {
             0..=14 => 0,
@@ -711,7 +715,6 @@ impl Pet {
         }
     }
 
-    /// Classic Bandai 0..=4 Discipline blocks.
     pub fn discipline_blocks(&self) -> u8 {
         (self.discipline / 25).min(4)
     }
@@ -724,7 +727,7 @@ impl Pet {
         let trimmed = new_name.trim();
         if !trimmed.is_empty() {
             self.name = trimmed.to_string();
-            self.log_action(format!("🏷️ Renamed to {}!", self.name));
+            self.log_action(format!("🔖 Renamed to {}!", self.name));
         }
     }
 
@@ -784,7 +787,6 @@ impl Pet {
             return;
         }
 
-        // Keep Misbehaving / Crying calls until addressed unless an urgent physical need overrides
         let urgent_need = self.is_sick
             || self.has_toothache
             || self.hungry_hearts() == 0
@@ -862,7 +864,7 @@ impl Pet {
                 self.happiness = (self.happiness + 12).min(100);
                 self.health = (self.health + 10).min(100);
                 self.log_action(format!(
-                    "✨ Evolution! {} grew into a {} (Weight {}g)! (+25 coins)",
+                    "🌟 Evolution! {} grew into a {} (Weight {}g)! (+25 coins)",
                     self.name,
                     self.stage.badge(),
                     self.weight_grams
@@ -902,7 +904,7 @@ impl Pet {
         }
         match self.stage.next_stage() {
             Some(next) => format!(
-                "Next: {} • XP {}/{} • Bond {}/{} • Age {}/{} • Discipline {}%",
+                "Next: {} • XP {}/{} • Bond {}/{} • Age {}/{} • Disc {}%",
                 next.badge(),
                 self.xp,
                 next.min_xp(),
@@ -916,7 +918,6 @@ impl Pet {
         }
     }
 
-    /// Context-aware hint explaining what your companion needs most right now.
     pub fn advisor_tip(&self, now: DateTime<Utc>) -> String {
         if self.stage == EvolutionStage::Egg {
             let rem = self.warm_cooldown_remaining(now);
@@ -927,7 +928,7 @@ impl Pet {
                     .to_string();
             } else {
                 return format!(
-                    "🕯️ Egg is absorbing warmth ({}%). Next manual warm in {} (passive warmth active).",
+                    "🔥 Egg is absorbing warmth ({}%). Next manual warm in {} (passive warmth active).",
                     self.incubation,
                     format_duration_human(rem)
                 );
@@ -954,7 +955,7 @@ impl Pet {
         }
         if self.attention_call == AttentionCall::Misbehaving {
             return format!(
-                "📢 {} is calling for attention just to be mischievous! Press [D] to Scold (Discipline)!",
+                "📢 {} is calling for attention just to be mischievous! Press [D] to Scold!",
                 self.name
             );
         }
@@ -966,14 +967,14 @@ impl Pet {
         }
         if self.poop_count > 0 || self.cleanliness < 45 {
             return format!(
-                "🚽 Mess on floor (Poop {}, Clean {}%)! Press [C] to Flush & Bath before sickness hits!",
+                "🚽 Mess on floor (Poop {}, Clean {}%)! Press [C] to Flush & Bath!",
                 self.poop_count, self.cleanliness
             );
         }
         if self.is_sleeping {
             if self.energy >= 95 {
                 return format!(
-                    "☀️ {} is fully rested ({}% Energy)! Press [S] to wake them up.",
+                    "🌞 {} is fully rested ({}% Energy)! Press [S] to wake them up.",
                     self.name, self.energy
                 );
             }
@@ -990,7 +991,7 @@ impl Pet {
         }
         if self.is_overweight() {
             return format!(
-                "⚖️ {} is getting chubby ({}g)! Play [P] or Train [E] to burn weight!",
+                "🏋 {} is getting chubby ({}g)! Play [P] or Train [E] to burn weight!",
                 self.name, self.weight_grams
             );
         }
@@ -1006,7 +1007,7 @@ impl Pet {
                 format_hearts(self.happy_hearts())
             );
         }
-        "✨ All Tamagotchi meters healthy! Use ←/→ + Enter on the 8 LCD icons, [I] Meter, or [?] Help."
+        "🌟 All Tamagotchi meters healthy! Use ←/→ + Enter on the 8 LCD icons, [I] Meter, or [?] Help."
             .to_string()
     }
 
@@ -1096,8 +1097,6 @@ impl Pet {
         }
     }
 
-    /// Toggle the room light (`💡` Icon #2 / `[K]`), an authentic Tamagotchi
-    /// mechanic required when the companion goes to sleep.
     pub fn toggle_light(&mut self) -> String {
         if let Some(msg) = self.egg_guard() {
             return self.refuse(msg);
@@ -1115,7 +1114,7 @@ impl Pet {
                 )
             } else {
                 format!(
-                    "🕶️ Switched room light OFF while {} is awake (dim sanctuary mode).",
+                    "🌙 Switched room light OFF while {} is awake (dim sanctuary mode).",
                     self.name
                 )
             }
@@ -1127,9 +1126,6 @@ impl Pet {
         msg
     }
 
-    /// Authentic Tamagotchi Discipline / Scold (`📢` Icon #7 / `[D]`).
-    /// Rewards +25% Discipline when the pet is making a fake `Misbehaving` call,
-    /// or lowers Happiness if scolded unfairly!
     pub fn discipline_scold(&mut self) -> String {
         if let Some(msg) = self.egg_guard() {
             return self.refuse(msg);
@@ -1188,9 +1184,8 @@ impl Pet {
 
         let is_snack = choice.is_sweet_snack();
         if !is_snack && self.hunger >= 95 {
-            // If they refuse food while Discipline < 100 and not actually hungry, classic head-shake!
             return self.refuse(format!(
-                "🍽️ {} shakes their head: tummy is already completely full (4/4 ♥)!",
+                "🍱 {} shakes their head: tummy is already completely full (4/4 ♥)!",
                 self.name
             ));
         }
@@ -1262,11 +1257,12 @@ impl Pet {
             self.name, food_name, weight_gain, self.weight_grams, xp_gain
         );
 
-        // Authentic Bandai Tamagotchi Toothache trigger after 3 sweet snacks in a row!
         if self.snacks_in_a_row >= 3 {
             self.has_toothache = true;
             self.mood = PetMood::Sick;
-            msg.push_str(" — 🦷 OH NO! Too many sweets caused a Toothache! Press [H] for Medicine!");
+            msg.push_str(
+                " — 🦷 OH NO! Too many sweets caused a Toothache! Press [H] for Medicine!",
+            );
         }
 
         self.refresh_attention();
@@ -1415,7 +1411,7 @@ impl Pet {
         }
         if self.hunger < 20 {
             return self.refuse(format!(
-                "🍽️ {} is too hungry to focus on training!",
+                "🍱 {} is too hungry to focus on training!",
                 self.name
             ));
         }
@@ -1478,7 +1474,7 @@ impl Pet {
             self.energy = (self.energy + 15).min(100);
             self.refresh_mood();
             let msg = format!(
-                "☀️ {} woke up refreshed and turned the room light ON! (+15 Energy)",
+                "🌞 {} woke up refreshed and turned the room light ON! (+15 Energy)",
                 self.name
             );
             self.log_action(msg.clone());
@@ -1491,7 +1487,7 @@ impl Pet {
             return self.refuse(msg);
         }
         if self.cleanliness >= 100 && self.poop_count == 0 {
-            return self.refuse("✨ The habitat floor is already sparkling clean!".to_string());
+            return self.refuse("🌟 The habitat floor is already sparkling clean!".to_string());
         }
 
         self.poop_count = 0;
@@ -1565,7 +1561,6 @@ impl Pet {
         msg
     }
 
-    /// One in-session heartbeat (called gradually by the TUI).
     pub fn tick_decay(&mut self) {
         self.age_seconds = self.age_seconds.saturating_add(1);
         self.last_updated = Utc::now();
@@ -1576,7 +1571,6 @@ impl Pet {
         }
 
         if self.is_sleeping {
-            // Sleeping with light ON is less restful and counts as a care mistake!
             if self.light_on {
                 self.energy = (self.energy + 2).min(100);
                 self.happiness = self.happiness.saturating_sub(1);
@@ -1593,7 +1587,6 @@ impl Pet {
             self.happiness = self.happiness.saturating_sub(1);
             self.energy = self.energy.saturating_sub(1 + weight_penalty);
 
-            // Periodic authentic Tamagotchi Discipline Call when vitals are fine
             if self.attention_call == AttentionCall::None
                 && self.discipline < 100
                 && self.age_seconds.is_multiple_of(40)
@@ -1630,7 +1623,6 @@ impl Pet {
             self.is_sick = true;
         }
 
-        // If an attention call has been ignored for >15 minutes, record a Care Mistake.
         if let Some(since) = self.attention_since {
             if Utc::now().signed_duration_since(since).num_minutes() >= 15 {
                 self.care_mistakes = self.care_mistakes.saturating_add(1);
@@ -1642,8 +1634,6 @@ impl Pet {
         self.refresh_mood();
     }
 
-    /// Apply realistic offline progression while the terminal was closed, and
-    /// generate a rich [`OfflineReport`] when away for at least 2 minutes.
     pub fn apply_offline_decay_with_report(
         &mut self,
         now: DateTime<Utc>,
@@ -1741,7 +1731,7 @@ impl Pet {
                 self.is_sleeping = false;
                 self.light_on = true;
                 events.push(format!(
-                    "☀️ {} slept soundly while you were away and woke up at {}% Energy!",
+                    "🌞 {} slept soundly while you were away and woke up at {}% Energy!",
                     self.name, self.energy
                 ));
             } else {
@@ -1830,7 +1820,7 @@ impl Pet {
 
     pub fn status_summary(&self) -> String {
         format!(
-            "{} — {} {} | Stage: {} | Lv.{} ({} XP) | Weight: {}g | Hungry: {} ({}%) • Happy: {} ({}%) • Discipline: {}% • Energy: {}% • Health: {}% • Clean: {}% • Bond: {}% | Care Mistakes: {} | Coins: {}",
+            "{} — {} {} | Stage: {} | Lv.{} ({} XP) | Weight: {}g | Hungry: {} ({}%) • Happy: {} ({}%) • Discipline: {}% • Energy: {}% • Health: {}% • Clean: {}% • Bond: {}% | Mistakes: {} | Coins: {}",
             self.name,
             self.species.display_name(),
             self.species.rarity(),

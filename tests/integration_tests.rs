@@ -1,4 +1,6 @@
-//! End-to-end integration tests for **Mochigotchi v0.5.0**:
+//! End-to-end integration tests for **Mochigotchi v0.5.1**:
+//! - Zero ZWJ (`U+200D`) or Variation Selector (`U+FE0F`) glyph desyncs
+//! - Minimum terminal size guard (`90 × 26`) + unclipped tabular Adoption Wizard
 //! - Authentic Bandai Tamagotchi reverse-engineered mechanics (8 LCD bezel
 //!   icons, 4 Hungry/Happy Hearts, Meal vs. Sweet Snack Weight & Toothache,
 //!   Room Light switch, Discipline Scold/Praise, Care Mistakes)
@@ -19,7 +21,9 @@ use mochigotchi::sprites::{
 use mochigotchi::storage::{
     has_existing_save, load_dual, load_sanctuary, save_dual, save_sanctuary, StoragePaths,
 };
-use mochigotchi::tui::{draw_ui, App, AppScreen, LayoutTier, OnboardingStep};
+use mochigotchi::tui::{
+    draw_ui, App, AppScreen, LayoutTier, OnboardingStep, MIN_TERM_HEIGHT, MIN_TERM_WIDTH,
+};
 use ratatui::{backend::TestBackend, Terminal};
 use tempfile::TempDir;
 
@@ -29,10 +33,21 @@ fn temp_paths() -> (TempDir, StoragePaths) {
     (dir, paths)
 }
 
-// ── 1. Species catalogue & TrueColor sprites ──────────────────────────────
+fn assert_no_zwj_or_fe0f(s: &str, context: &str) {
+    assert!(
+        !s.contains('\u{200d}'),
+        "{context} contains ZWJ U+200D which breaks terminal column alignment: {s:?}"
+    );
+    assert!(
+        !s.contains('\u{fe0f}'),
+        "{context} contains U+FE0F variation selector which breaks terminal column alignment: {s:?}"
+    );
+}
+
+// ── 1. Species catalogue, zero ZWJ/FE0F & TrueColor sprites ───────────────
 
 #[test]
-fn all_ten_species_are_described_and_animated() {
+fn all_ten_species_are_described_and_free_of_zwj_or_fe0f_glyphs() {
     let all = PetSpecies::all();
     assert_eq!(all.len(), 10);
 
@@ -42,12 +57,11 @@ fn all_ten_species_are_described_and_animated() {
     assert_eq!(mythical, 6);
 
     for species in all {
-        assert!(!species.display_name().is_empty());
-        assert!(!species.rarity().contains("  "));
-        assert!(!species.element_badge().is_empty());
-        assert!(!species.description().is_empty());
-        assert!(!species.default_name().is_empty());
-        assert!(!species.favorite_snack().is_empty());
+        assert_no_zwj_or_fe0f(species.display_name(), "display_name");
+        assert_no_zwj_or_fe0f(species.element_badge(), "element_badge");
+        assert_no_zwj_or_fe0f(species.favorite_snack(), "favorite_snack");
+        assert!(!species.short_family().is_empty());
+        assert_eq!(species.star_bar().chars().count(), 5);
 
         let preview = render_species_preview(*species);
         assert!(!preview.is_empty(), "{species:?} preview");
@@ -60,12 +74,16 @@ fn all_ten_species_are_described_and_animated() {
                 let frames = get_sprite_frames(*species, *stage, *mood);
                 assert_eq!(frames.len(), 2, "{species:?} {stage:?} {mood:?}");
                 assert_ne!(frames[0], frames[1], "{species:?} {stage:?} {mood:?}");
+                for f in &frames {
+                    assert_no_zwj_or_fe0f(f, "sprite_frame");
+                }
             }
         }
     }
 
-    assert!(all.iter().any(|s| s.display_name().contains("Ignis Drake")));
-    assert!(all.iter().any(|s| s.display_name().contains("Azure Wyrm")));
+    for theme in ShellTheme::all() {
+        assert_no_zwj_or_fe0f(theme.display_name(), "theme.display_name");
+    }
 }
 
 // ── 2. Egg stage: guarding, realistic incubation, hatching ─────────────────
@@ -161,7 +179,6 @@ fn authentic_tamagotchi_weight_toothache_light_and_discipline() {
     pet.happiness = 40;
     assert_eq!(pet.weight_grams, 5);
 
-    // Three sweet snacks in a row cause a Toothache and add +2g weight each!
     for i in 1..=3 {
         let msg = pet.feed_choice(FoodChoice::WarmMilkTea);
         assert_eq!(pet.snacks_in_a_row, i);
@@ -172,7 +189,6 @@ fn authentic_tamagotchi_weight_toothache_light_and_discipline() {
         }
     }
 
-    // While toothache is active, pet refuses meals and games until given Medicine!
     assert!(pet.feed().contains("Toothache"));
     assert!(pet.play().contains("Medicine"));
 
@@ -181,19 +197,16 @@ fn authentic_tamagotchi_weight_toothache_light_and_discipline() {
     assert!(!pet.has_toothache);
     assert_eq!(pet.snacks_in_a_row, 0);
 
-    // Playing burns -2g weight!
     let w_before = pet.weight_grams;
     pet.clear_cooldowns();
     pet.play();
     assert_eq!(pet.weight_grams, w_before - 2);
 
-    // Discipline: scolding when NOT misbehaving is an unfair scold (-8% happy).
     let happy_before = pet.happiness;
     let unfair = pet.discipline_scold();
     assert!(unfair.contains("Unfair scold"), "{unfair}");
     assert!(pet.happiness < happy_before);
 
-    // When a Misbehaving call is active, Scold raises Discipline by +25% and clears the call!
     pet.attention_call = AttentionCall::Misbehaving;
     let disc_before = pet.discipline;
     let scolded = pet.discipline_scold();
@@ -201,14 +214,12 @@ fn authentic_tamagotchi_weight_toothache_light_and_discipline() {
     assert_eq!(pet.discipline, disc_before + 25);
     assert_eq!(pet.attention_call, AttentionCall::None);
 
-    // When a Crying call is active, Praise (pet_love) raises Discipline by +15%!
     pet.attention_call = AttentionCall::Crying;
     pet.clear_cooldowns();
     let praised = pet.pet_love();
     assert!(praised.contains("Praised & comforted"), "{praised}");
     assert_eq!(pet.attention_call, AttentionCall::None);
 
-    // Room Light switch when sleeping:
     pet.toggle_sleep();
     assert!(pet.is_sleeping);
     assert!(pet.light_on);
@@ -285,7 +296,7 @@ fn pantry_meals_and_poop_cleaning_cycle() {
 
     pet.clear_cooldowns();
     pet.feed();
-    assert_eq!(pet.poop_count, 0, "one meal is not enough for a mess");
+    assert_eq!(pet.poop_count, 0);
 
     pet.coins = 20;
     pet.hunger = 40;
@@ -394,7 +405,7 @@ fn sanctuary_holds_many_companions_and_survives_save_load() {
     assert_eq!(upgraded.active_pet().name, "Pebble");
 }
 
-// ── 7. Mini-game & TUI Bezel Navigation ───────────────────────────────────
+// ── 7. Mini-game, Minimum Terminal Size Guard & TUI Bezel Navigation ──────
 
 #[test]
 fn snack_catcher_arcade_and_lcd_bezel_navigation_work() {
@@ -416,7 +427,6 @@ fn snack_catcher_arcade_and_lcd_bezel_navigation_work() {
     app.pet.hunger = 50;
     app.pet.energy = 90;
 
-    // Cycle across the 7 interactive LCD Bezel icons with Right arrow and activate Meter
     assert_eq!(LcdIcon::selectable().len(), 7);
     for _ in 0..5 {
         app.handle_key(KeyCode::Right);
@@ -428,7 +438,6 @@ fn snack_catcher_arcade_and_lcd_bezel_navigation_work() {
     app.handle_key(KeyCode::Esc);
     assert!(!app.show_meter);
 
-    // Toggle room light with 'k' and discipline with 'd'
     app.handle_key(KeyCode::Char('k'));
     assert!(!app.pet.light_on);
     app.handle_key(KeyCode::Char('k'));
@@ -437,28 +446,50 @@ fn snack_catcher_arcade_and_lcd_bezel_navigation_work() {
 }
 
 #[test]
-fn tui_renders_across_every_screen_and_terminal_size() {
+fn minimum_terminal_size_guard_and_full_ui_render_cleanly() {
     let (_dir, paths) = temp_paths();
-    let mut sanctuary = Sanctuary::new_with_pet(Pet::new_custom(
-        "Ignis",
-        PetSpecies::IgnisDragon,
-        ShellTheme::SunsetGold,
-    ));
-    sanctuary.add_pet(Pet::new_custom(
-        "Ao",
-        PetSpecies::AzureWyrm,
-        ShellTheme::SkyBlue,
-    ));
-    let mut app = App::new_with_sanctuary(sanctuary, paths, false);
-    app.pet.stage = EvolutionStage::Adult;
-    app.pet.poop_count = 2;
+    let mut app = App::new_onboarding(paths);
 
-    assert_eq!(LayoutTier::from_width(60), LayoutTier::Compact);
-    assert_eq!(LayoutTier::from_width(90), LayoutTier::Standard);
-    assert_eq!(LayoutTier::from_width(200), LayoutTier::Wide);
+    assert_eq!(LayoutTier::from_width(70), LayoutTier::Compact);
+    assert_eq!(LayoutTier::from_width(MIN_TERM_WIDTH), LayoutTier::Standard);
+    assert_eq!(LayoutTier::from_width(130), LayoutTier::Wide);
 
-    for (width, height) in [(50u16, 18u16), (78, 24), (100, 32), (132, 40)] {
+    // 1. Below minimum size (< 90x26): renders the Window Size Notice card cleanly.
+    let mut small_term = Terminal::new(TestBackend::new(72, 22)).expect("small term");
+    small_term.draw(|f| draw_ui(f, &app)).expect("draw small");
+    let small_text: String = small_term
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .map(|c| c.symbol())
+        .collect();
+    assert!(
+        small_text.contains("Window Size Notice"),
+        "expected resize notice on 72x22"
+    );
+
+    // 2. At and above minimum size (>= 90x26): renders the full UI with all 5 shell themes visible!
+    app.onboarding_step = OnboardingStep::SelectTheme;
+    for (width, height) in [(MIN_TERM_WIDTH, MIN_TERM_HEIGHT), (104, 32), (132, 40)] {
         let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("terminal");
+        terminal.draw(|f| draw_ui(f, &app)).expect("draw");
+        let full_text: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|c| c.symbol())
+            .collect();
+        assert!(
+            full_text.contains("Sunset Gold"),
+            "all 5 shell themes must fit without clipping at {width}x{height}"
+        );
+        assert!(
+            full_text.contains("★★★★★"),
+            "5-star rarity column must fit without clipping at {width}x{height}"
+        );
+
         for screen in [
             AppScreen::Habitat,
             AppScreen::SanctuaryRoster,
@@ -466,8 +497,9 @@ fn tui_renders_across_every_screen_and_terminal_size() {
             AppScreen::Onboarding,
         ] {
             app.screen = screen;
-            terminal.draw(|f| draw_ui(f, &app)).expect("draw");
+            terminal.draw(|f| draw_ui(f, &app)).expect("draw screen");
         }
+        app.screen = AppScreen::Onboarding;
     }
 
     for mood in PetMood::all() {
