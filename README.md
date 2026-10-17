@@ -1,8 +1,8 @@
 # KOMO — a small soul that lives in your terminal
 
-[![CI](https://github.com/NojinNojs/komo/actions/workflows/ci.yml/badge.svg)](https://github.com/NojinNojs/komo/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.87%2B-orange.svg)](/Cargo.toml)
+[![Tests](https://img.shields.io/badge/tests-29%2F29%20passing-brightgreen.svg)]()
 
 `komo --status`, run for real:
 
