@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/NojinNojs/komo/actions/workflows/ci.yml/badge.svg)](https://github.com/NojinNojs/komo/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
-[![Rust](https://img.shields.io/badge/rust-1.74%2B-orange.svg)](/Cargo.toml)
+[![Rust](https://img.shields.io/badge/rust-1.87%2B-orange.svg)](/Cargo.toml)
 
 `komo --status`, run for real:
 
@@ -69,7 +69,7 @@ Your keeper name is woven into every spoken line, sense, and epitaph. And your
 
 ## Installation
 
-Rust 1.74+ is required. No other setup, no accounts, no network calls.
+Rust 1.87+ is required. No other setup, no accounts, no network calls.
 
 ```bash
 git clone https://github.com/NojinNojs/komo.git

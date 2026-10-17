@@ -2,7 +2,7 @@
 name = "mochigotchi"
 version = "1.0.0"
 edition = "2021"
-rust-version = "1.74"
+rust-version = "1.87"
 description = "KOMO — Pocket Soul & Living Terminal Companion (40x22 TrueColor Pixel Art, 4 Senses, Real Consequences)"
 authors = ["Muhammad Raffi Aqsan (NojinNojs)"]
 license = "MIT"
