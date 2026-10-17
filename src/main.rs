@@ -1,9 +1,8 @@
-//! Command-line entry point for **Mochigotchi**.
+//! Command-line entry point for **Mochigotchi v0.5.0**.
 //!
-//! Running it with no arguments drops you straight into the LCD habitat (with
-//! a Welcome Back report if you were away for 2+ minutes). Flags let you script
-//! care actions, inspect a companion, or adopt a specific species without the
-//! wizard.
+//! Running `mochigotchi` (or `mochi` / `tamagotchi`) with no arguments from any
+//! directory in your terminal opens the interactive LCD habitat (stored under
+//! `~/.local/share/mochigotchi/`).
 
 use std::env;
 use std::error::Error;
@@ -16,10 +15,10 @@ use mochigotchi::sprites::{render_animated_sprite, speech_bubble};
 use mochigotchi::storage::{has_existing_save, load_sanctuary, save_sanctuary, StoragePaths};
 
 fn print_help() {
-    println!("🍡 Mochigotchi v0.4.0 — Sanctuary, TrueColor Sprites & Real-Time Life Edition");
+    println!("🍡 Mochigotchi v0.5.0 — Authentic Bandai Tamagotchi Hardware & Sanctuary Edition");
     println!();
     println!("USAGE:");
-    println!("  mochigotchi [OPTIONS]");
+    println!("  mochigotchi [OPTIONS]   (also available as `mochi` or `tamagotchi`)");
     println!();
     println!("OPTIONS:");
     println!("  -h, --help            Show this help message");
@@ -28,22 +27,25 @@ fn print_help() {
     println!("                          Mythical:  dragon, wyrm, fox, phoenix, unicorn, slime");
     println!("  --theme <THEME>       Shell colorway: pink, matcha, blue, lavender, gold");
     println!("  --name <NAME>         Name your companion");
-    println!("  --status              Print the active companion, then exit");
+    println!("  --status              Print the active companion (hearts, weight, discipline), then exit");
     println!("  --roster              Print every companion in the Sanctuary, then exit");
     println!("  --warm                Warm the egg (+20% incubation, 3m cooldown)");
-    println!("  --feed                Feed the active companion");
-    println!("  --play                Play together");
-    println!("  --pet                 Give headpats");
-    println!("  --train               Run a training session (4m cooldown)");
+    println!("  --feed                Feed a Meal (+1 Hungry Heart, +1g weight)");
+    println!("  --snack               Feed a Sweet Snack (+1 Happy Heart, +2g weight; 3 in a row = Toothache!)");
+    println!("  --light               Toggle the room light ON / OFF");
+    println!("  --scold               Discipline (Scold) during a mischievous Attention Call");
+    println!("  --play                Play Left/Right game (-2g weight, +Happy)");
+    println!("  --pet                 Praise / give headpats");
+    println!("  --train               Run a training session (-2g weight, +Discipline, 4m cooldown)");
     println!("  --sleep               Toggle sleep");
-    println!("  --clean               Tidy the habitat");
-    println!("  --heal                Give medicine");
+    println!("  --clean               Flush mess & bubble bath");
+    println!("  --heal                Give Medicine (cures sickness & toothache)");
     println!("  --reset               Delete existing saves and start over");
     println!();
-    println!("KEYBOARD (in-game):");
-    println!("  [W] warm/cuddle  [F] quick feed  [M] pantry menu  [P] play  [E] train  [S] sleep");
-    println!("  [C] clean  [H] heal  [G] arcade  [L] Sanctuary roster  [N] adopt  [?] help");
-    println!("  [[ / ]] switch companion  [Tab] shell color  [R] rename  [Q] quit");
+    println!("IN-GAME CONTROLS:");
+    println!("  Button A (←/→) select LCD Bezel Icon • Button B (Enter) confirm • Button C (Esc) cancel");
+    println!("  [F] Meal  [M] Pantry  [K] Light  [P] Play  [D] Scold  [T] Praise  [E] Train  [S] Sleep");
+    println!("  [C] Bath  [H] Meds  [I] 4-Page Health Meter  [G] Arcade  [L] Sanctuary  [N] Adopt  [?] Help");
 }
 
 fn parse_species(value: &str) -> Option<PetSpecies> {
@@ -137,6 +139,9 @@ fn parse_args(raw: &[String]) -> Result<CliArgs, String> {
             }
             "--warm" => args.actions.push(PetAction::WarmEgg),
             "--feed" => args.actions.push(PetAction::Feed),
+            "--snack" => args.actions.push(PetAction::FeedSnack),
+            "--light" => args.actions.push(PetAction::ToggleLight),
+            "--scold" => args.actions.push(PetAction::DisciplineScold),
             "--play" => args.actions.push(PetAction::Play),
             "--pet" => args.actions.push(PetAction::PetLove),
             "--train" => args.actions.push(PetAction::Train),
@@ -223,12 +228,13 @@ fn main() -> Result<(), Box<dyn Error>> {
                 " "
             };
             println!(
-                "{marker} {}. {} — {} · {} · Lv.{} · hunger {}% · incubation {}%",
+                "{marker} {}. {} — {} · {} · Lv.{} · {}g · hunger {}% · incubation {}%",
                 idx + 1,
                 pet.name,
                 pet.species.display_name(),
                 pet.stage.badge(),
                 pet.level,
+                pet.weight_grams,
                 pet.hunger,
                 pet.incubation
             );

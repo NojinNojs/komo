@@ -1,6 +1,7 @@
-//! Core pet model for **Mochigotchi** — collectible species, realistic
-//! multi-hour/day lifecycle, cooldowns, offline care report, food pantry,
-//! and the multi-pet [`Sanctuary`] roster.
+//! Core pet model for **Mochigotchi v0.5.0** — reverse-engineered authentic
+//! Bandai Tamagotchi mechanics (8 LCD bezel icons, 4 Hungry/Happy Hearts,
+//! Meal vs. Snack weight & toothache system, Room Light switch, Attention Calls,
+//! Discipline scold/praise, Care Mistakes, and the multi-pet [`Sanctuary`]).
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -15,6 +16,85 @@ pub const PLAY_COOLDOWN_SECS: i64 = 150;
 pub const TRAIN_COOLDOWN_SECS: i64 = 240;
 /// Seconds you must wait between two headpat sessions (45 seconds).
 pub const PET_COOLDOWN_SECS: i64 = 45;
+
+/// The 8 classic LCD bezel icons of an authentic Bandai Tamagotchi.
+/// Icons 0..=6 are selectable with Button A (`←`/`→`); Icon 7 (`Attention`)
+/// is the status call indicator on the bottom-right of the bezel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+pub enum LcdIcon {
+    #[default]
+    Food,
+    Lights,
+    Play,
+    Medicine,
+    Bath,
+    Meter,
+    Discipline,
+    Attention,
+}
+
+impl LcdIcon {
+    pub fn selectable() -> &'static [LcdIcon] {
+        &[
+            Self::Food,
+            Self::Lights,
+            Self::Play,
+            Self::Medicine,
+            Self::Bath,
+            Self::Meter,
+            Self::Discipline,
+        ]
+    }
+
+    pub fn top_row() -> &'static [LcdIcon] {
+        &[Self::Food, Self::Lights, Self::Play, Self::Medicine]
+    }
+
+    pub fn bottom_row() -> &'static [LcdIcon] {
+        &[Self::Bath, Self::Meter, Self::Discipline, Self::Attention]
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Food => "🍙 Food",
+            Self::Lights => "💡 Light",
+            Self::Play => "🎮 Game",
+            Self::Medicine => "💉 Meds",
+            Self::Bath => "🚽 Bath",
+            Self::Meter => "📏 Meter",
+            Self::Discipline => "📢 Scold",
+            Self::Attention => "🔔 Call",
+        }
+    }
+}
+
+/// Authentic Tamagotchi Attention Call state (`🔔`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+pub enum AttentionCall {
+    #[default]
+    None,
+    /// Calling because of a real physical need (0 hearts, poop, sick, or light left ON while asleep).
+    NeedsCare,
+    /// Calling out of stubbornness/mischief even though vitals are fine — needs `Scold [D]`!
+    Misbehaving,
+    /// Calling because of loneliness/tears — needs `Praise / Pat [T]`!
+    Crying,
+}
+
+impl AttentionCall {
+    pub fn is_active(&self) -> bool {
+        !matches!(self, Self::None)
+    }
+
+    pub fn badge(&self) -> &'static str {
+        match self {
+            Self::None => "🔔 Quiet",
+            Self::NeedsCare => "🔔 CALL: Needs Care!",
+            Self::Misbehaving => "🔔 CALL: Acting Spoiled! (Scold [D])",
+            Self::Crying => "🔔 CALL: Crying! (Praise [T])",
+        }
+    }
+}
 
 /// Life stages of every companion. Eggs hatch, then grow across days of care
 /// before reaching the Starlight Elder form.
@@ -62,6 +142,18 @@ impl EvolutionStage {
             Self::Teen => "🌱 Teen",
             Self::Adult => "🌸 Adult",
             Self::CyberElder => "🌟 Starlight Elder",
+        }
+    }
+
+    /// Minimum healthy base weight (in grams) for this life stage, just like
+    /// the original Bandai Tamagotchi ROM tables.
+    pub fn base_weight_grams(&self) -> u16 {
+        match self {
+            Self::Egg => 5,
+            Self::Baby => 5,
+            Self::Teen => 15,
+            Self::Adult => 30,
+            Self::CyberElder => 40,
         }
     }
 
@@ -354,7 +446,10 @@ impl PetMood {
     }
 }
 
-/// Five foods available in the Pantry (`[F]`).
+/// Five foods available in the Pantry (`[M]`): Meals vs. Sweet Snacks!
+/// In authentic Tamagotchi fashion, Meals fill Hungry Hearts (+1g weight) while
+/// Sweet Snacks fill Happy Hearts (+2g weight, and 3 snacks in a row cause a
+/// Toothache `🦷`!).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum FoodChoice {
     FavoriteSnack,
@@ -375,31 +470,38 @@ impl FoodChoice {
         ]
     }
 
+    pub fn is_sweet_snack(&self) -> bool {
+        matches!(self, Self::WarmMilkTea | Self::StarlightDelight)
+    }
+
     pub fn title(&self, species: PetSpecies) -> String {
         match self {
-            Self::FavoriteSnack => format!("{} (Favorite)", species.favorite_snack()),
-            Self::HeartyBento => "🍱 Hearty Bento Box".to_string(),
-            Self::WarmMilkTea => "🧋 Warm Boba Milk Tea".to_string(),
-            Self::HerbalSoup => "🍲 Soothing Herbal Soup".to_string(),
-            Self::StarlightDelight => "🌟 Starlight Delight".to_string(),
+            Self::FavoriteSnack => format!("🍙 {} [Meal]", species.favorite_snack()),
+            Self::HeartyBento => "🍱 Hearty Bento Box [Meal]".to_string(),
+            Self::WarmMilkTea => "🧋 Sweet Boba Milk Tea [Snack]".to_string(),
+            Self::HerbalSoup => "🍲 Soothing Herbal Soup [Meal]".to_string(),
+            Self::StarlightDelight => "🍮 Starlight Candy Tart [Snack]".to_string(),
         }
     }
 
     pub fn summary(&self) -> &'static str {
         match self {
-            Self::FavoriteSnack => "Free • +20 Hunger, +6 Happy, +3 Bond",
-            Self::HeartyBento => "8 coins • +38 Hunger, +8 Happy, +5 Energy",
-            Self::WarmMilkTea => "5 coins • +14 Hunger, +14 Happy, +12 Energy",
-            Self::HerbalSoup => "10 coins • +22 Hunger, +20 Health, cures mild chills",
-            Self::StarlightDelight => "18 coins • +30 Hunger, +20 Happy, +8 Bond, +25 XP",
+            Self::FavoriteSnack => "Free • +1 Hungry ♥ (+25%), +1g weight, resets sweet streak",
+            Self::HeartyBento => "8 coins • +2 Hungry ♥ (+40%), +2g weight, +5 Energy",
+            Self::WarmMilkTea => {
+                "Free • +1 Happy ♥ (+25%), +2g weight (3 snacks in a row = Toothache 🦷!)"
+            }
+            Self::HerbalSoup => "10 coins • +1 Hungry ♥, +20 Health, calms mild chills",
+            Self::StarlightDelight => {
+                "18 coins • +2 Happy ♥ (+35%), +8 Bond, +25 XP, +3g weight (Sweet Snack)"
+            }
         }
     }
 
     pub fn cost(&self) -> u32 {
         match self {
-            Self::FavoriteSnack => 0,
+            Self::FavoriteSnack | Self::WarmMilkTea => 0,
             Self::HeartyBento => 8,
-            Self::WarmMilkTea => 5,
             Self::HerbalSoup => 10,
             Self::StarlightDelight => 18,
         }
@@ -411,10 +513,13 @@ impl FoodChoice {
 pub enum PetAction {
     WarmEgg,
     Feed,
+    FeedSnack,
     Play,
     PetLove,
     Train,
     ToggleSleep,
+    ToggleLight,
+    DisciplineScold,
     Clean,
     Heal,
 }
@@ -423,13 +528,16 @@ impl PetAction {
     pub fn label(&self) -> &'static str {
         match self {
             Self::WarmEgg => "Warm / Cuddle",
-            Self::Feed => "Feed",
-            Self::Play => "Play",
-            Self::PetLove => "Headpat",
+            Self::Feed => "Feed Meal",
+            Self::FeedSnack => "Feed Snack",
+            Self::Play => "Play Game",
+            Self::PetLove => "Praise / Pat",
             Self::Train => "Train",
             Self::ToggleSleep => "Sleep",
-            Self::Clean => "Clean",
-            Self::Heal => "Heal",
+            Self::ToggleLight => "Light Switch",
+            Self::DisciplineScold => "Discipline (Scold)",
+            Self::Clean => "Clean / Flush",
+            Self::Heal => "Medicine",
         }
     }
 }
@@ -465,6 +573,20 @@ pub fn format_duration_human(secs: u64) -> String {
     }
 }
 
+/// Render 0..=4 classic Tamagotchi hearts (`♥ ♥ ♥ ♡`).
+pub fn format_hearts(filled: u8) -> String {
+    let clamped = filled.min(4);
+    let mut parts = Vec::with_capacity(4);
+    for i in 0..4 {
+        if i < clamped {
+            parts.push("♥");
+        } else {
+            parts.push("♡");
+        }
+    }
+    parts.join(" ")
+}
+
 /// A single companion: everything about one creature in your Sanctuary.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -480,6 +602,13 @@ pub struct Pet {
     pub energy: u8,
     pub health: u8,
     pub cleanliness: u8,
+    pub discipline: u8,
+    pub weight_grams: u16,
+    pub snacks_in_a_row: u8,
+    pub has_toothache: bool,
+    pub light_on: bool,
+    pub attention_call: AttentionCall,
+    pub attention_since: Option<DateTime<Utc>>,
     pub poop_count: u8,
     pub meals_since_poop: u8,
     pub bond: u8,
@@ -530,6 +659,13 @@ impl Pet {
             energy: 90,
             health: 100,
             cleanliness: 100,
+            discipline: 25,
+            weight_grams: EvolutionStage::Egg.base_weight_grams(),
+            snacks_in_a_row: 0,
+            has_toothache: false,
+            light_on: true,
+            attention_call: AttentionCall::None,
+            attention_since: None,
             poop_count: 0,
             meals_since_poop: 0,
             bond: 10,
@@ -551,6 +687,37 @@ impl Pet {
                 species.display_name()
             )],
         }
+    }
+
+    /// Classic Bandai 0..=4 Hungry Hearts scale.
+    pub fn hungry_hearts(&self) -> u8 {
+        match self.hunger {
+            0..=14 => 0,
+            15..=39 => 1,
+            40..=64 => 2,
+            65..=84 => 3,
+            _ => 4,
+        }
+    }
+
+    /// Classic Bandai 0..=4 Happy Hearts scale.
+    pub fn happy_hearts(&self) -> u8 {
+        match self.happiness {
+            0..=14 => 0,
+            15..=39 => 1,
+            40..=64 => 2,
+            65..=84 => 3,
+            _ => 4,
+        }
+    }
+
+    /// Classic Bandai 0..=4 Discipline blocks.
+    pub fn discipline_blocks(&self) -> u8 {
+        (self.discipline / 25).min(4)
+    }
+
+    pub fn is_overweight(&self) -> bool {
+        self.weight_grams >= self.stage.base_weight_grams() + 18
     }
 
     pub fn rename(&mut self, new_name: &str) {
@@ -610,9 +777,40 @@ impl Pet {
         Self::remaining_secs(self.last_petted_at, PET_COOLDOWN_SECS, now)
     }
 
+    pub fn refresh_attention(&mut self) {
+        if self.stage == EvolutionStage::Egg {
+            self.attention_call = AttentionCall::None;
+            self.attention_since = None;
+            return;
+        }
+
+        // Keep Misbehaving / Crying calls until addressed unless an urgent physical need overrides
+        let urgent_need = self.is_sick
+            || self.has_toothache
+            || self.hungry_hearts() == 0
+            || self.happy_hearts() == 0
+            || self.poop_count >= 2
+            || (self.is_sleeping && self.light_on);
+
+        if urgent_need {
+            if self.attention_call != AttentionCall::NeedsCare {
+                self.attention_call = AttentionCall::NeedsCare;
+                self.attention_since = Some(Utc::now());
+            }
+        } else if self.attention_call == AttentionCall::NeedsCare {
+            self.attention_call = AttentionCall::None;
+            self.attention_since = None;
+        }
+    }
+
     pub fn refresh_mood(&mut self) {
-        if self.is_sick || self.health <= 35 {
-            self.is_sick = true;
+        if self.weight_grams < self.stage.base_weight_grams() {
+            self.weight_grams = self.stage.base_weight_grams();
+        }
+        if self.is_sick || self.has_toothache || self.health <= 35 {
+            if self.health <= 35 {
+                self.is_sick = true;
+            }
             self.mood = PetMood::Sick;
         } else if self.is_sleeping {
             self.mood = PetMood::Sleeping;
@@ -621,6 +819,7 @@ impl Pet {
         } else {
             self.mood = PetMood::Idle;
         }
+        self.refresh_attention();
     }
 
     pub fn update_mood(&mut self) {
@@ -641,6 +840,9 @@ impl Pet {
         if self.stage == EvolutionStage::Egg {
             if self.incubation >= 100 {
                 self.stage = EvolutionStage::Baby;
+                self.weight_grams = self
+                    .weight_grams
+                    .max(EvolutionStage::Baby.base_weight_grams());
                 self.xp = self.xp.max(EvolutionStage::Baby.min_xp());
                 self.level = self.level.max(2);
                 return true;
@@ -655,13 +857,15 @@ impl Pet {
                 && self.age_seconds >= next.min_age_seconds()
             {
                 self.stage = next;
+                self.weight_grams = self.weight_grams.max(next.base_weight_grams());
                 self.coins = self.coins.saturating_add(25);
                 self.happiness = (self.happiness + 12).min(100);
                 self.health = (self.health + 10).min(100);
                 self.log_action(format!(
-                    "✨ Evolution! {} grew into a {}! (+25 coins)",
+                    "✨ Evolution! {} grew into a {} (Weight {}g)! (+25 coins)",
                     self.name,
-                    self.stage.badge()
+                    self.stage.badge(),
+                    self.weight_grams
                 ));
                 evolved = true;
             } else {
@@ -698,14 +902,15 @@ impl Pet {
         }
         match self.stage.next_stage() {
             Some(next) => format!(
-                "Next: {} • XP {}/{} • Bond {}/{} • Age {}/{}",
+                "Next: {} • XP {}/{} • Bond {}/{} • Age {}/{} • Discipline {}%",
                 next.badge(),
                 self.xp,
                 next.min_xp(),
                 self.bond,
                 next.min_bond(),
                 format_duration_human(self.age_seconds),
-                format_duration_human(next.min_age_seconds())
+                format_duration_human(next.min_age_seconds()),
+                self.discipline
             ),
             None => "Max evolution reached — Starlight Elder 🌟".to_string(),
         }
@@ -729,16 +934,40 @@ impl Pet {
             }
         }
 
+        if self.has_toothache {
+            return format!(
+                "🦷 {} has a Toothache from eating too many sweets! Press [H] for Medicine 💉!",
+                self.name
+            );
+        }
         if self.is_sick {
             return format!(
-                "🤒 {} feels unwell! Press [H] to give herbal medicine right away.",
+                "🤒 {} feels unwell! Press [H] to give Medicine 💉 right away.",
+                self.name
+            );
+        }
+        if self.is_sleeping && self.light_on {
+            return format!(
+                "💡 {} is sleeping with the room light ON! Press [K] to turn the Light OFF 🌙!",
+                self.name
+            );
+        }
+        if self.attention_call == AttentionCall::Misbehaving {
+            return format!(
+                "📢 {} is calling for attention just to be mischievous! Press [D] to Scold (Discipline)!",
+                self.name
+            );
+        }
+        if self.attention_call == AttentionCall::Crying {
+            return format!(
+                "🥺 {} is sniffling and wants reassurance! Press [T] to Praise & Headpat!",
                 self.name
             );
         }
         if self.poop_count > 0 || self.cleanliness < 45 {
             return format!(
-                "🫧 Room is getting messy (Clean {}%, Poop {}). Press [C] for a bubble bath!",
-                self.cleanliness, self.poop_count
+                "🚽 Mess on floor (Poop {}, Clean {}%)! Press [C] to Flush & Bath before sickness hits!",
+                self.poop_count, self.cleanliness
             );
         }
         if self.is_sleeping {
@@ -749,29 +978,35 @@ impl Pet {
                 );
             }
             return format!(
-                "💤 {} is sleeping peacefully ({}% Energy). Let them rest or press [S] to wake.",
+                "🌙 {} is sleeping peacefully in the dark ({}% Energy).",
                 self.name, self.energy
             );
         }
-        if self.hunger <= 35 {
+        if self.hungry_hearts() <= 1 {
             return format!(
-                "🍙 {}'s tummy is rumbling ({}% Full)! Press [F] to open the Pantry.",
-                self.name, self.hunger
+                "🍙 Hungry Hearts low ({})! Press [F] for a Meal or [M] for Pantry.",
+                format_hearts(self.hungry_hearts())
+            );
+        }
+        if self.is_overweight() {
+            return format!(
+                "⚖️ {} is getting chubby ({}g)! Play [P] or Train [E] to burn weight!",
+                self.name, self.weight_grams
             );
         }
         if self.energy <= 25 {
             return format!(
-                "🥱 {} is getting sleepy ({}% Energy). Press [S] to tuck them into bed.",
+                "🥱 {} is sleepy ({}% Energy). Press [S] to sleep, then [K] to turn off the light!",
                 self.name, self.energy
             );
         }
-        if self.happiness <= 50 {
+        if self.happy_hearts() <= 1 {
             return format!(
-                "🎾 {} looks a bit lonely ({}% Happy). Press [P] to play or [T] for headpats!",
-                self.name, self.happiness
+                "🎾 Happy Hearts low ({})! Press [P] to play or [M] for a Snack.",
+                format_hearts(self.happy_hearts())
             );
         }
-        "✨ Everything is cozy! Press [G] for Snack Arcade, [N] to adopt another pet, or [?] for Help."
+        "✨ All Tamagotchi meters healthy! Use ←/→ + Enter on the 8 LCD icons, [I] Meter, or [?] Help."
             .to_string()
     }
 
@@ -779,10 +1014,13 @@ impl Pet {
         match action {
             PetAction::WarmEgg => self.warm_egg(),
             PetAction::Feed => self.feed(),
+            PetAction::FeedSnack => self.feed_choice(FoodChoice::WarmMilkTea),
             PetAction::Play => self.play(),
             PetAction::PetLove => self.pet_love(),
             PetAction::Train => self.train(),
             PetAction::ToggleSleep => self.toggle_sleep(),
+            PetAction::ToggleLight => self.toggle_light(),
+            PetAction::DisciplineScold => self.discipline_scold(),
             PetAction::Clean => self.clean(),
             PetAction::Heal => self.heal(),
         }
@@ -830,6 +1068,7 @@ impl Pet {
 
         if self.incubation >= 100 {
             self.stage = EvolutionStage::Baby;
+            self.weight_grams = EvolutionStage::Baby.base_weight_grams();
             self.xp = self.xp.max(EvolutionStage::Baby.min_xp());
             self.level = 2;
             self.hunger = 70;
@@ -838,10 +1077,11 @@ impl Pet {
             self.mood = PetMood::Happy;
             self.coins = self.coins.saturating_add(20);
             let msg = format!(
-                "🐣 CRACK! {} hatched into a precious {} ({})! (+20 coins)",
+                "🐣 CRACK! {} hatched into a precious {} ({}, {}g)! (+20 coins)",
                 self.name,
                 self.species.display_name(),
-                self.stage.badge()
+                self.stage.badge(),
+                self.weight_grams
             );
             self.log_action(msg.clone());
             msg
@@ -850,6 +1090,75 @@ impl Pet {
             let msg = format!(
                 "🤲 You gently warm {}'s egg... Incubation at {}% (+4 Bond)",
                 self.name, self.incubation
+            );
+            self.log_action(msg.clone());
+            msg
+        }
+    }
+
+    /// Toggle the room light (`💡` Icon #2 / `[K]`), an authentic Tamagotchi
+    /// mechanic required when the companion goes to sleep.
+    pub fn toggle_light(&mut self) -> String {
+        if let Some(msg) = self.egg_guard() {
+            return self.refuse(msg);
+        }
+        self.light_on = !self.light_on;
+        self.last_updated = Utc::now();
+
+        let msg = if !self.light_on {
+            if self.is_sleeping {
+                self.bond = (self.bond + 3).min(100);
+                self.add_xp(5);
+                format!(
+                    "🌙 Switched room light OFF. {} sleeps soundly in the cozy dark! (+3 Bond, +5 XP)",
+                    self.name
+                )
+            } else {
+                format!(
+                    "🕶️ Switched room light OFF while {} is awake (dim sanctuary mode).",
+                    self.name
+                )
+            }
+        } else {
+            "💡 Switched room light ON! Bright and sunny in the habitat.".to_string()
+        };
+        self.refresh_mood();
+        self.log_action(msg.clone());
+        msg
+    }
+
+    /// Authentic Tamagotchi Discipline / Scold (`📢` Icon #7 / `[D]`).
+    /// Rewards +25% Discipline when the pet is making a fake `Misbehaving` call,
+    /// or lowers Happiness if scolded unfairly!
+    pub fn discipline_scold(&mut self) -> String {
+        if let Some(msg) = self.egg_guard() {
+            return self.refuse(msg);
+        }
+        if self.is_sleeping {
+            return self.refuse(format!("💤 {} is sleeping — don't scold them in bed!", self.name));
+        }
+
+        self.last_updated = Utc::now();
+        if self.attention_call == AttentionCall::Misbehaving {
+            self.discipline = (self.discipline + 25).min(100);
+            self.bond = (self.bond + 3).min(100);
+            self.attention_call = AttentionCall::None;
+            self.attention_since = None;
+            self.add_xp(12);
+            self.refresh_mood();
+            let msg = format!(
+                "📢 Scolded {} for the fake attention call! Discipline rose to {}% (+12 XP)!",
+                self.name, self.discipline
+            );
+            self.log_action(msg.clone());
+            msg
+        } else {
+            self.happiness = self.happiness.saturating_sub(8);
+            self.bond = self.bond.saturating_sub(2);
+            self.refresh_mood();
+            let msg = format!(
+                "🥺 {} wasn't misbehaving! Unfair scold lowered Happiness (-8%). Only scold during a Spoiled Call!",
+                self.name
             );
             self.log_action(msg.clone());
             msg
@@ -870,16 +1179,25 @@ impl Pet {
                 self.name
             ));
         }
-        if self.hunger >= 95 {
+        if self.has_toothache {
             return self.refuse(format!(
-                "🍽️ {}'s tummy is already completely full!",
+                "🦷 {} has a Toothache and refuses to eat! Give Medicine [H] first!",
+                self.name
+            ));
+        }
+
+        let is_snack = choice.is_sweet_snack();
+        if !is_snack && self.hunger >= 95 {
+            // If they refuse food while Discipline < 100 and not actually hungry, classic head-shake!
+            return self.refuse(format!(
+                "🍽️ {} shakes their head: tummy is already completely full (4/4 ♥)!",
                 self.name
             ));
         }
 
         let now = Utc::now();
         let remaining = self.feed_cooldown_remaining(now);
-        if remaining > 0 && self.hunger >= 60 {
+        if !is_snack && remaining > 0 && self.hunger >= 60 {
             return self.refuse(format!(
                 "⏳ {} is still digesting their last meal! Wait {}.",
                 self.name,
@@ -890,7 +1208,7 @@ impl Pet {
         let cost = choice.cost();
         if self.coins < cost {
             return self.refuse(format!(
-                "💰 Not enough coins for {} (need {} coins, have {}). Try Favorite Snack (Free)!",
+                "💰 Not enough coins for {} (need {} coins, have {}). Try a Free Meal/Snack!",
                 choice.title(self.species),
                 cost,
                 self.coins
@@ -898,38 +1216,60 @@ impl Pet {
         }
         self.coins -= cost;
 
-        let (hunger_gain, happy_gain, energy_gain, health_gain, bond_gain, xp_gain) = match choice {
-            FoodChoice::FavoriteSnack => (22, 6, 0, 0, 3, 10),
-            FoodChoice::HeartyBento => (38, 8, 5, 2, 3, 14),
-            FoodChoice::WarmMilkTea => (14, 14, 12, 0, 4, 12),
-            FoodChoice::HerbalSoup => {
-                self.is_sick = false;
-                (22, 5, 4, 20, 3, 14)
-            }
-            FoodChoice::StarlightDelight => (30, 20, 10, 5, 8, 25),
-        };
+        let (hunger_gain, happy_gain, energy_gain, health_gain, bond_gain, xp_gain, weight_gain) =
+            match choice {
+                FoodChoice::FavoriteSnack => (25, 6, 0, 0, 3, 10, 1),
+                FoodChoice::HeartyBento => (40, 8, 5, 2, 3, 14, 2),
+                FoodChoice::WarmMilkTea => (5, 25, 8, 0, 4, 10, 2),
+                FoodChoice::HerbalSoup => {
+                    self.is_sick = false;
+                    (25, 5, 4, 20, 3, 14, 1)
+                }
+                FoodChoice::StarlightDelight => (15, 35, 10, 5, 8, 25, 3),
+            };
 
         self.hunger = (self.hunger + hunger_gain).min(100);
         self.happiness = (self.happiness + happy_gain).min(100);
         self.energy = (self.energy + energy_gain).min(100);
         self.health = (self.health + health_gain).min(100);
         self.bond = (self.bond + bond_gain).min(100);
+        self.weight_grams = (self.weight_grams + weight_gain).min(99);
+
+        if is_snack {
+            self.snacks_in_a_row = self.snacks_in_a_row.saturating_add(1);
+        } else {
+            self.snacks_in_a_row = 0;
+        }
+
         self.meals_since_poop = self.meals_since_poop.saturating_add(1);
         if self.meals_since_poop >= 2 {
             self.meals_since_poop = 0;
             self.poop_count = (self.poop_count + 1).min(5);
             self.cleanliness = self.cleanliness.saturating_sub(15);
+            if self.poop_count >= 4 {
+                self.is_sick = true;
+            }
         }
+
         self.mood = PetMood::Eating;
         self.last_fed_at = Some(now);
         self.last_updated = now;
         self.add_xp(xp_gain);
 
         let food_name = choice.title(self.species);
-        let msg = format!(
-            "🍡 Fed {} {}! (+{} Fullness, +{} XP)",
-            self.name, food_name, hunger_gain, xp_gain
+        let mut msg = format!(
+            "🍡 Fed {} {}! (+{}g weight -> {}g, +{} XP)",
+            self.name, food_name, weight_gain, self.weight_grams, xp_gain
         );
+
+        // Authentic Bandai Tamagotchi Toothache trigger after 3 sweet snacks in a row!
+        if self.snacks_in_a_row >= 3 {
+            self.has_toothache = true;
+            self.mood = PetMood::Sick;
+            msg.push_str(" — 🦷 OH NO! Too many sweets caused a Toothache! Press [H] for Medicine!");
+        }
+
+        self.refresh_attention();
         self.log_action(msg.clone());
         msg
     }
@@ -941,9 +1281,9 @@ impl Pet {
         if self.is_sleeping {
             return self.refuse(format!("💤 {} is sleeping! Wake them first.", self.name));
         }
-        if self.is_sick {
+        if self.is_sick || self.has_toothache {
             return self.refuse(format!(
-                "🤒 {} feels sick and needs medicine [H] before playing!",
+                "🤒 {} feels sick and needs Medicine [H] before playing!",
                 self.name
             ));
         }
@@ -976,14 +1316,18 @@ impl Pet {
         self.cleanliness = self.cleanliness.saturating_sub(5);
         self.bond = (self.bond + 4).min(100);
         self.coins = self.coins.saturating_add(5);
+        self.snacks_in_a_row = 0;
+        let base_w = self.stage.base_weight_grams();
+        self.weight_grams = self.weight_grams.saturating_sub(2).max(base_w);
         self.mood = PetMood::Happy;
         self.last_played_at = Some(now);
         self.last_updated = now;
         self.add_xp(15);
+        self.refresh_attention();
 
         let msg = format!(
-            "🎾 Played joyfully with {}! (+18 Happy, +5 coins, +15 XP)",
-            self.name
+            "🎾 Played Left/Right Game with {}! (+18 Happy, Weight {}g, +5 coins, +15 XP)",
+            self.name, self.weight_grams
         );
         self.log_action(msg.clone());
         msg
@@ -998,6 +1342,24 @@ impl Pet {
         }
 
         let now = Utc::now();
+        if self.attention_call == AttentionCall::Crying {
+            self.attention_call = AttentionCall::None;
+            self.attention_since = None;
+            self.discipline = (self.discipline + 15).min(100);
+            self.happiness = (self.happiness + 14).min(100);
+            self.bond = (self.bond + 6).min(100);
+            self.last_petted_at = Some(now);
+            self.last_updated = now;
+            self.mood = PetMood::Happy;
+            self.add_xp(10);
+            let msg = format!(
+                "💖 Praised & comforted crying {}! (+15% Discipline, +14 Happy, +10 XP)",
+                self.name
+            );
+            self.log_action(msg.clone());
+            return msg;
+        }
+
         let remaining = self.pet_cooldown_remaining(now);
         if remaining > 0 {
             return self.refuse(format!(
@@ -1039,7 +1401,7 @@ impl Pet {
                 self.name
             ));
         }
-        if self.is_sick {
+        if self.is_sick || self.has_toothache {
             return self.refuse(format!(
                 "🤒 {} is unwell! Heal them [H] before training.",
                 self.name
@@ -1072,15 +1434,19 @@ impl Pet {
         self.energy = self.energy.saturating_sub(20);
         self.hunger = self.hunger.saturating_sub(12);
         self.happiness = (self.happiness + 8).min(100);
+        self.discipline = (self.discipline + 8).min(100);
         self.bond = (self.bond + 4).min(100);
         self.coins = self.coins.saturating_add(10);
+        self.snacks_in_a_row = 0;
+        let base_w = self.stage.base_weight_grams();
+        self.weight_grams = self.weight_grams.saturating_sub(2).max(base_w);
         self.mood = PetMood::Training;
         self.last_updated = now;
         self.add_xp(22);
 
         let msg = format!(
-            "🥋 {} finished a focus training session! (+22 XP, +10 coins)",
-            self.name
+            "🥋 {} finished a focus training session! (Weight {}g, +8% Discipline, +22 XP, +10 coins)",
+            self.name, self.weight_grams
         );
         self.log_action(msg.clone());
         msg
@@ -1095,13 +1461,26 @@ impl Pet {
 
         if self.is_sleeping {
             self.mood = PetMood::Sleeping;
-            let msg = format!("🌙 Tucked {} into a cozy blanket. Goodnight!", self.name);
+            self.refresh_attention();
+            let light_hint = if self.light_on {
+                " (Don't forget to turn the Light OFF with [K]!)"
+            } else {
+                ""
+            };
+            let msg = format!(
+                "🌙 Tucked {} into a cozy blanket. Goodnight!{}",
+                self.name, light_hint
+            );
             self.log_action(msg.clone());
             msg
         } else {
+            self.light_on = true;
             self.energy = (self.energy + 15).min(100);
             self.refresh_mood();
-            let msg = format!("☀️ {} woke up refreshed! (+15 Energy)", self.name);
+            let msg = format!(
+                "☀️ {} woke up refreshed and turned the room light ON! (+15 Energy)",
+                self.name
+            );
             self.log_action(msg.clone());
             msg
         }
@@ -1112,7 +1491,7 @@ impl Pet {
             return self.refuse(msg);
         }
         if self.cleanliness >= 100 && self.poop_count == 0 {
-            return self.refuse("✨ The habitat is already sparkling clean!".to_string());
+            return self.refuse("✨ The habitat floor is already sparkling clean!".to_string());
         }
 
         self.poop_count = 0;
@@ -1126,7 +1505,7 @@ impl Pet {
         self.refresh_mood();
 
         let msg = format!(
-            "🫧 Gave {} a warm bubble bath and tidied up! (+8 XP)",
+            "🚽 Flushed the mess and gave {} a warm bubble bath! (+8 XP)",
             self.name
         );
         self.log_action(msg.clone());
@@ -1137,11 +1516,14 @@ impl Pet {
         if let Some(msg) = self.egg_guard() {
             return self.refuse(msg);
         }
-        if !self.is_sick && self.health >= 95 {
+        if !self.is_sick && !self.has_toothache && self.health >= 95 {
             return self.refuse(format!("💚 {} is already in tip-top health!", self.name));
         }
 
+        let was_toothache = self.has_toothache;
         self.is_sick = false;
+        self.has_toothache = false;
+        self.snacks_in_a_row = 0;
         self.health = 100;
         self.happiness = (self.happiness + 10).min(100);
         self.bond = (self.bond + 3).min(100);
@@ -1149,10 +1531,17 @@ impl Pet {
         self.add_xp(10);
         self.refresh_mood();
 
-        let msg = format!(
-            "💊 Gave {} sweet herbal medicine. Fully recovered! (+10 XP)",
-            self.name
-        );
+        let msg = if was_toothache {
+            format!(
+                "💉 Treated {}'s Toothache and restored full health! (+10 XP)",
+                self.name
+            )
+        } else {
+            format!(
+                "💉 Gave {} herbal medicine. Sickness cured! (+10 XP)",
+                self.name
+            )
+        };
         self.log_action(msg.clone());
         msg
     }
@@ -1162,11 +1551,14 @@ impl Pet {
         self.happiness = (self.happiness + 12).min(100);
         self.bond = (self.bond + 3).min(100);
         self.energy = self.energy.saturating_sub(5);
+        self.snacks_in_a_row = 0;
+        let base_w = self.stage.base_weight_grams();
+        self.weight_grams = self.weight_grams.saturating_sub(1).max(base_w);
         self.add_xp(xp_earned);
         self.refresh_mood();
 
         let msg = format!(
-            "🎮 Star Catcher scored {}! Earned +{} coins & +{} XP!",
+            "🎮 Star Catcher scored {}! Earned +{} coins, +{} XP & burned -1g weight!",
             score, coins_earned, xp_earned
         );
         self.log_action(msg.clone());
@@ -1184,16 +1576,51 @@ impl Pet {
         }
 
         if self.is_sleeping {
-            self.energy = (self.energy + 5).min(100);
+            // Sleeping with light ON is less restful and counts as a care mistake!
+            if self.light_on {
+                self.energy = (self.energy + 2).min(100);
+                self.happiness = self.happiness.saturating_sub(1);
+                if self.age_seconds.is_multiple_of(30) {
+                    self.care_mistakes = self.care_mistakes.saturating_add(1);
+                }
+            } else {
+                self.energy = (self.energy + 5).min(100);
+            }
             self.hunger = self.hunger.saturating_sub(1);
         } else {
+            let weight_penalty = u8::from(self.is_overweight());
             self.hunger = self.hunger.saturating_sub(2);
             self.happiness = self.happiness.saturating_sub(1);
-            self.energy = self.energy.saturating_sub(1);
+            self.energy = self.energy.saturating_sub(1 + weight_penalty);
+
+            // Periodic authentic Tamagotchi Discipline Call when vitals are fine
+            if self.attention_call == AttentionCall::None
+                && self.discipline < 100
+                && self.age_seconds.is_multiple_of(40)
+            {
+                if self.age_seconds.is_multiple_of(80) {
+                    self.attention_call = AttentionCall::Misbehaving;
+                    self.attention_since = Some(Utc::now());
+                    self.log_action(format!(
+                        "🔔 {} is beeping for attention just to be mischievous! Press [D] to Scold!",
+                        self.name
+                    ));
+                } else {
+                    self.attention_call = AttentionCall::Crying;
+                    self.attention_since = Some(Utc::now());
+                    self.log_action(format!(
+                        "🔔 {} is sniffling and calling for you! Press [T] to Praise & Pat!",
+                        self.name
+                    ));
+                }
+            }
         }
 
         if self.poop_count > 0 {
             self.cleanliness = self.cleanliness.saturating_sub(self.poop_count * 2);
+            if self.poop_count >= 4 {
+                self.is_sick = true;
+            }
         }
         if self.hunger <= 15 || self.cleanliness <= 25 {
             self.health = self.health.saturating_sub(3);
@@ -1201,6 +1628,14 @@ impl Pet {
         }
         if self.health <= 35 {
             self.is_sick = true;
+        }
+
+        // If an attention call has been ignored for >15 minutes, record a Care Mistake.
+        if let Some(since) = self.attention_since {
+            if Utc::now().signed_duration_since(since).num_minutes() >= 15 {
+                self.care_mistakes = self.care_mistakes.saturating_add(1);
+                self.attention_since = Some(Utc::now());
+            }
         }
 
         self.check_evolution();
@@ -1291,12 +1726,20 @@ impl Pet {
         let old_energy = self.energy;
 
         if self.is_sleeping {
+            if self.light_on && minutes >= 30 {
+                self.care_mistakes = self.care_mistakes.saturating_add(1);
+                events.push(format!(
+                    "💡 The room light was left ON while {} slept (+1 Care Mistake)!",
+                    self.name
+                ));
+            }
             self.energy = self.energy.saturating_add(energy_delta).min(100);
             self.hunger = self.hunger.saturating_sub(hunger_drop).max(5);
             self.happiness = self.happiness.saturating_sub(happy_drop).max(15);
             self.cleanliness = self.cleanliness.saturating_sub(clean_drop).max(20);
             if self.energy >= 95 && minutes >= 45 {
                 self.is_sleeping = false;
+                self.light_on = true;
                 events.push(format!(
                     "☀️ {} slept soundly while you were away and woke up at {}% Energy!",
                     self.name, self.energy
@@ -1314,17 +1757,19 @@ impl Pet {
             self.cleanliness = self.cleanliness.saturating_sub(clean_drop).max(15);
 
             events.push(format!(
-                "🍙 Appetite grew over {} (Fullness {}% -> {}%).",
+                "🍙 Appetite grew over {} (Fullness {}% -> {}% / {}).",
                 format_duration_human(elapsed),
                 old_hunger,
-                self.hunger
+                self.hunger,
+                format_hearts(self.hungry_hearts())
             ));
 
             if self.energy <= 20 && minutes >= 120 {
                 self.is_sleeping = true;
+                self.light_on = false;
                 self.energy = 55;
                 events.push(format!(
-                    "🌙 {} got sleepy waiting for you and curled up for a nap.",
+                    "🌙 {} got sleepy waiting for you, turned off the light, and curled up for a nap.",
                     self.name
                 ));
             }
@@ -1334,7 +1779,7 @@ impl Pet {
         if offline_poops > 0 {
             self.poop_count = (self.poop_count + offline_poops).min(5);
             events.push(format!(
-                "💩 {} left {} mess(es) in the habitat — time for a bubble bath [C]!",
+                "🚽 {} left {} mess(es) on the floor — press [C] to Flush & Bath!",
                 self.name, offline_poops
             ));
         }
@@ -1349,14 +1794,14 @@ impl Pet {
             ));
         }
 
-        if self.hunger <= 15 || self.cleanliness <= 20 {
+        if self.hunger <= 15 || self.cleanliness <= 20 || self.poop_count >= 4 {
             let dmg = ((minutes / 30) as u8).clamp(5, 35);
             self.health = self.health.saturating_sub(dmg).max(20);
             self.care_mistakes = self.care_mistakes.saturating_add(1);
-            if self.health <= 35 {
+            if self.health <= 35 || self.poop_count >= 4 {
                 self.is_sick = true;
                 events.push(format!(
-                    "🤒 {} caught a chill from low hunger/cleanliness and needs medicine [H]!",
+                    "🤒 {} caught a chill from low hunger/cleanliness and needs Medicine [H]!",
                     self.name
                 ));
             }
@@ -1379,27 +1824,30 @@ impl Pet {
         (elapsed, report)
     }
 
-    /// Apply everything that happened while you were away.
-    /// Eggs only absorb *passive* warmth (up to 99%) and never starve.
     pub fn apply_offline_decay(&mut self, now: DateTime<Utc>) -> u64 {
         self.apply_offline_decay_with_report(now).0
     }
 
     pub fn status_summary(&self) -> String {
         format!(
-            "{} — {} {} | Stage: {} | Lv.{} ({} XP) | Hunger {}% • Happy {}% • Energy {}% • Health {}% • Clean {}% • Bond {}% | Coins {}",
+            "{} — {} {} | Stage: {} | Lv.{} ({} XP) | Weight: {}g | Hungry: {} ({}%) • Happy: {} ({}%) • Discipline: {}% • Energy: {}% • Health: {}% • Clean: {}% • Bond: {}% | Care Mistakes: {} | Coins: {}",
             self.name,
             self.species.display_name(),
             self.species.rarity(),
             self.stage.badge(),
             self.level,
             self.xp,
+            self.weight_grams,
+            format_hearts(self.hungry_hearts()),
             self.hunger,
+            format_hearts(self.happy_hearts()),
             self.happiness,
+            self.discipline,
             self.energy,
             self.health,
             self.cleanliness,
             self.bond,
+            self.care_mistakes,
             self.coins
         )
     }

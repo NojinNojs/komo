@@ -1,10 +1,11 @@
 //! Dual persistence for **Mochigotchi**.
 //!
 //! Every save is written twice: a human-readable JSON file *and* a SQLite
-//! database. The active companion is always mirrored into the classic
-//! single-pet tables so older tooling (and `load_dual`) keeps working, while
-//! the full [`Sanctuary`] roster lives in its own table.
+//! database. By default, saves live under `~/.local/share/mochigotchi/` so you
+//! can launch `mochigotchi` (or `mochi` / `tamagotchi`) from any working
+//! directory in your terminal and always reach the same Sanctuary.
 
+use std::env;
 use std::error::Error;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -31,8 +32,18 @@ impl StoragePaths {
         }
     }
 
+    /// Global user-level save directory (`~/.local/share/mochigotchi/`) so the
+    /// CLI/TUI works identically from any directory in the terminal.
     pub fn default_paths() -> Self {
-        Self::new(DEFAULT_JSON_PATH, DEFAULT_SQLITE_PATH)
+        let base_dir = env::var_os("XDG_DATA_HOME")
+            .map(PathBuf::from)
+            .or_else(|| env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))
+            .map(|dir| dir.join("mochigotchi"));
+
+        match base_dir {
+            Some(dir) => Self::new(dir.join(DEFAULT_JSON_PATH), dir.join(DEFAULT_SQLITE_PATH)),
+            None => Self::new(DEFAULT_JSON_PATH, DEFAULT_SQLITE_PATH),
+        }
     }
 }
 

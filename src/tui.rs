@@ -1,6 +1,11 @@
-//! The Ratatui interface: Adoption Wizard with stage-cycler & TrueColor art,
-//! LCD Habitat with Care Advisor, Pantry Menu, Help Overlay, Offline Welcome-Back
-//! Modal, Sanctuary Roster, and Snack Catcher Arcade.
+//! The Ratatui interface for **Mochigotchi v0.5.0**:
+//! - Authentic 8-Icon Bandai Tamagotchi LCD Bezel (`🍙 Food`, `💡 Light`,
+//!   `🎮 Game`, `💉 Meds`, `🚽 Bath`, `📏 Meter`, `📢 Scold`, `🔔 Call`)
+//!   navigable via Button A (`←`/`→` or `,`/`.`), Button B (`Enter`), and
+//!   Button C (`Esc`), plus single-key shortcuts.
+//! - 4-Screen Tamagotchi Health Meter Modal (`[I]`), Pantry Menu (`[M]`),
+//!   Welcome-Back Offline Report, Care Guide (`[?]`), Adoption Wizard, and
+//!   Multi-Pet Sanctuary Roster (`[L]`).
 
 use std::io;
 use std::time::{Duration, Instant};
@@ -22,8 +27,8 @@ use ratatui::{
 
 use crate::minigame::MiniGame;
 use crate::pet::{
-    format_duration_human, EvolutionStage, FoodChoice, OfflineReport, Pet, PetSpecies, Sanctuary,
-    ShellTheme,
+    format_duration_human, format_hearts, AttentionCall, EvolutionStage, FoodChoice, LcdIcon,
+    OfflineReport, Pet, PetSpecies, Sanctuary, ShellTheme,
 };
 use crate::sprites::{
     mood_color, render_colored_preview, render_colored_sprite, sky_scene, speech_bubble,
@@ -80,8 +85,11 @@ pub struct App {
     pub selected_theme_idx: usize,
     pub preview_stage_idx: usize,
     pub roster_selected_idx: usize,
+    pub selected_icon_idx: usize,
     pub pantry_open: bool,
     pub pantry_selected_idx: usize,
+    pub show_meter: bool,
+    pub meter_page: usize,
     pub show_help: bool,
     pub offline_report: Option<OfflineReport>,
     pub onboarding_name_input: String,
@@ -124,10 +132,13 @@ impl App {
             onboarding_step: OnboardingStep::SelectSpecies,
             selected_species_idx,
             selected_theme_idx,
-            preview_stage_idx: 3, // Adult form by default in preview
+            preview_stage_idx: 3,
             roster_selected_idx: 0,
+            selected_icon_idx: 0,
             pantry_open: false,
             pantry_selected_idx: 0,
+            show_meter: false,
+            meter_page: 0,
             show_help: false,
             offline_report: None,
             onboarding_name_input: String::new(),
@@ -178,6 +189,7 @@ impl App {
     fn start_adopting(&mut self) {
         self.adopting_new = true;
         self.pantry_open = false;
+        self.show_meter = false;
         self.show_help = false;
         self.screen = AppScreen::Onboarding;
         self.onboarding_step = OnboardingStep::SelectSpecies;
@@ -192,6 +204,11 @@ impl App {
             Some("🥚 The egg can't play yet — warm it first!".to_string())
         } else if self.pet.is_sleeping {
             Some(format!("💤 {} is asleep — wake them first!", self.pet.name))
+        } else if self.pet.has_toothache || self.pet.is_sick {
+            Some(format!(
+                "🤒 {} needs Medicine [H] before playing games!",
+                self.pet.name
+            ))
         } else if self.pet.energy < 15 {
             Some(format!("⚡ {} is too tired for the arcade.", self.pet.name))
         } else {
@@ -204,6 +221,49 @@ impl App {
                 self.minigame = Some(MiniGame::new(38, 12, 120));
                 self.screen = AppScreen::MiniGame;
             }
+        }
+    }
+
+    fn activate_selected_lcd_icon(&mut self) {
+        let icon = LcdIcon::selectable()[self.selected_icon_idx % LcdIcon::selectable().len()];
+        match icon {
+            LcdIcon::Food => {
+                if self.pet.stage == EvolutionStage::Egg {
+                    let _ = self.pet.warm_egg();
+                    self.save_now();
+                } else {
+                    self.pantry_open = true;
+                }
+            }
+            LcdIcon::Lights => {
+                let _ = self.pet.toggle_light();
+                self.save_now();
+            }
+            LcdIcon::Play => {
+                let _ = self.pet.play();
+                self.save_now();
+            }
+            LcdIcon::Medicine => {
+                let _ = self.pet.heal();
+                self.save_now();
+            }
+            LcdIcon::Bath => {
+                let _ = self.pet.clean();
+                self.save_now();
+            }
+            LcdIcon::Meter => {
+                self.show_meter = true;
+                self.meter_page = 0;
+            }
+            LcdIcon::Discipline => {
+                if self.pet.attention_call == AttentionCall::Crying {
+                    let _ = self.pet.pet_love();
+                } else {
+                    let _ = self.pet.discipline_scold();
+                }
+                self.save_now();
+            }
+            LcdIcon::Attention => {}
         }
     }
 
@@ -228,6 +288,26 @@ impl App {
                     | KeyCode::Char(' ')
             ) {
                 self.show_help = false;
+            }
+            return;
+        }
+
+        if self.show_meter {
+            match code {
+                KeyCode::Right
+                | KeyCode::Down
+                | KeyCode::Char(' ')
+                | KeyCode::Enter
+                | KeyCode::Tab => {
+                    self.meter_page = (self.meter_page + 1) % 4;
+                }
+                KeyCode::Left | KeyCode::Up => {
+                    self.meter_page = (self.meter_page + 3) % 4;
+                }
+                KeyCode::Esc | KeyCode::Char('i') | KeyCode::Char('I') | KeyCode::Char('q') => {
+                    self.show_meter = false;
+                }
+                _ => {}
             }
             return;
         }
@@ -454,13 +534,37 @@ impl App {
     }
 
     fn handle_habitat_key(&mut self, code: KeyCode) {
+        let icon_count = LcdIcon::selectable().len();
         match code {
             KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => {
                 self.save_now();
                 self.should_quit = true;
             }
+            // Button A (Select Icon on the 8-icon Tamagotchi LCD Bezel)
+            KeyCode::Left | KeyCode::Char(',') => {
+                self.selected_icon_idx = (self.selected_icon_idx + icon_count - 1) % icon_count;
+            }
+            KeyCode::Right | KeyCode::Char('.') | KeyCode::Char('a') | KeyCode::Char('A') => {
+                self.selected_icon_idx = (self.selected_icon_idx + 1) % icon_count;
+            }
+            // Button B (Confirm selected LCD Bezel Icon)
+            KeyCode::Enter | KeyCode::Char('b') | KeyCode::Char('B') => {
+                self.activate_selected_lcd_icon();
+            }
             KeyCode::Char('?') => {
                 self.show_help = true;
+            }
+            KeyCode::Char('i') | KeyCode::Char('I') => {
+                self.show_meter = true;
+                self.meter_page = 0;
+            }
+            KeyCode::Char('k') | KeyCode::Char('K') => {
+                let _ = self.pet.toggle_light();
+                self.save_now();
+            }
+            KeyCode::Char('d') | KeyCode::Char('D') => {
+                let _ = self.pet.discipline_scold();
+                self.save_now();
             }
             KeyCode::Char('w') | KeyCode::Char('W') | KeyCode::Char(' ') => {
                 if self.pet.stage == EvolutionStage::Egg {
@@ -619,11 +723,56 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
         .split(popup_layout[1])[1]
 }
 
+fn render_bezel_row(icons: &[LcdIcon], selected: LcdIcon, pet: &Pet) -> Line<'static> {
+    let mut spans = vec![Span::styled(
+        " 📟 LCD Bezel: ",
+        Style::default().fg(Color::DarkGray),
+    )];
+    for &icon in icons {
+        if icon == LcdIcon::Attention {
+            let active = pet.attention_call.is_active();
+            let style = if active {
+                Style::default()
+                    .fg(Color::LightRed)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::DarkGray)
+            };
+            spans.push(Span::styled(
+                format!(" [{}] ", pet.attention_call.badge()),
+                style,
+            ));
+        } else {
+            let is_sel = icon == selected;
+            let label = if icon == LcdIcon::Lights {
+                if pet.light_on {
+                    "💡 Light:ON"
+                } else {
+                    "🌙 Light:OFF"
+                }
+            } else {
+                icon.label()
+            };
+            let style = if is_sel {
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::LightYellow)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::Cyan)
+            };
+            spans.push(Span::styled(format!(" {label} "), style));
+            spans.push(Span::raw("  "));
+        }
+    }
+    Line::from(spans)
+}
+
 fn habitat_areas(area: Rect, tier: LayoutTier) -> (Rect, Rect, Vec<Rect>, Rect) {
     let vertical = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),
+            Constraint::Length(4),
             Constraint::Min(8),
             Constraint::Length(7),
             Constraint::Length(5),
@@ -657,6 +806,9 @@ pub fn draw_ui(f: &mut Frame, app: &App) {
 
     if app.pantry_open {
         draw_pantry_modal(f, app);
+    }
+    if app.show_meter {
+        draw_meter_modal(f, app);
     }
     if let Some(report) = app.offline_report.as_ref() {
         draw_offline_report_modal(f, app, report);
@@ -892,14 +1044,16 @@ fn draw_habitat(f: &mut Frame, app: &App) {
     let pet = &app.pet;
     let now = Utc::now();
     let (sp_primary, _, sp_accent) = species_palette(pet.species);
+    let selected_icon = LcdIcon::selectable()[app.selected_icon_idx % LcdIcon::selectable().len()];
 
     let title = format!(
-        " 🍡 {} · {} · {} · {} ·Lv.{} ",
+        " 🍡 {} · {} · {} · {} ·Lv.{} · ⚖️ {}g ",
         pet.name,
         pet.species.display_name(),
         pet.species.rarity(),
         pet.stage.badge(),
-        pet.level
+        pet.level,
+        pet.weight_grams
     );
     let block = shell_block(&title, pet);
     let inner = block.inner(area);
@@ -924,6 +1078,7 @@ fn draw_habitat(f: &mut Frame, app: &App) {
 
     let advisor = pet.advisor_tip(now);
     let header_lines = vec![
+        render_bezel_row(LcdIcon::top_row(), selected_icon, pet),
         Line::from(vec![
             Span::styled(
                 format!("{sky} {mood_name}  "),
@@ -963,20 +1118,34 @@ fn draw_habitat(f: &mut Frame, app: &App) {
             .fg(mood_color(pet.mood))
             .add_modifier(Modifier::ITALIC),
     ))];
+    if !pet.light_on {
+        sprite_lines.push(Line::from(Span::styled(
+            "   🌙 [Room Light OFF — Cozy Night Mode]",
+            Style::default().fg(Color::LightBlue),
+        )));
+    }
+    if pet.has_toothache {
+        sprite_lines.push(Line::from(Span::styled(
+            "   🦷 [TOOTHACHE! Needs Medicine 💉 [H]!]",
+            Style::default()
+                .fg(Color::LightRed)
+                .add_modifier(Modifier::BOLD),
+        )));
+    }
     sprite_lines.extend(render_colored_sprite(pet, app.tick_count));
     sprite_lines.push(Line::from(vec![
-        Span::styled("Mood: ", Style::default().fg(Color::DarkGray)),
         Span::styled(
-            format!("{} {}  ", pet.mood.emoji(), pet.mood.label()),
-            Style::default()
-                .fg(mood_color(pet.mood))
-                .add_modifier(Modifier::BOLD),
+            format!("🍙 {}  ", format_hearts(pet.hungry_hearts())),
+            Style::default().fg(Color::LightGreen),
+        ),
+        Span::styled(
+            format!("💖 {}  ", format_hearts(pet.happy_hearts())),
+            Style::default().fg(Color::LightMagenta),
         ),
         Span::styled(
             format!(
-                "• Age: {} • Snack: {}",
-                format_duration_human(pet.age_seconds),
-                pet.species.favorite_snack()
+                "⚖️ {}g  📢 Disc {}%  ⚠️ Mistakes {}",
+                pet.weight_grams, pet.discipline, pet.care_mistakes
             ),
             Style::default().fg(Color::Gray),
         ),
@@ -1032,24 +1201,32 @@ fn draw_habitat(f: &mut Frame, app: &App) {
         );
     }
     f.render_widget(
-        stat_gauge("🍙 Fullness (Hunger)", pet.hunger, Color::LightGreen),
+        stat_gauge(
+            &format!("🍙 Hungry ({})", format_hearts(pet.hungry_hearts())),
+            pet.hunger,
+            Color::LightGreen,
+        ),
         gauges[1],
     );
     f.render_widget(
-        stat_gauge("💖 Happiness", pet.happiness, Color::LightMagenta),
+        stat_gauge(
+            &format!("💖 Happy ({})", format_hearts(pet.happy_hearts())),
+            pet.happiness,
+            Color::LightMagenta,
+        ),
         gauges[2],
     );
     f.render_widget(
-        stat_gauge("⚡ Energy", pet.energy, Color::LightYellow),
+        stat_gauge("📢 Discipline", pet.discipline, Color::LightYellow),
         gauges[3],
     );
     f.render_widget(
-        stat_gauge("❤️ Health", pet.health, Color::LightRed),
+        stat_gauge("⚡ Energy", pet.energy, Color::Yellow),
         gauges[4],
     );
     f.render_widget(
         stat_gauge(
-            &format!("🫧 Cleanliness (Poop: {})", pet.poop_count),
+            &format!("🚽 Cleanliness (Poop: {})", pet.poop_count),
             pet.cleanliness,
             Color::LightCyan,
         ),
@@ -1061,10 +1238,13 @@ fn draw_habitat(f: &mut Frame, app: &App) {
     );
 
     let egg = pet.stage == EvolutionStage::Egg;
-    let mut dock_lines = vec![Line::from(Span::styled(
-        pet.next_evolution_requirements(),
-        Style::default().fg(Color::LightYellow),
-    ))];
+    let mut dock_lines = vec![
+        render_bezel_row(LcdIcon::bottom_row(), selected_icon, pet),
+        Line::from(Span::styled(
+            pet.next_evolution_requirements(),
+            Style::default().fg(Color::LightYellow),
+        )),
+    ];
     let keys = if let Some(buffer) = app.rename_buffer.as_ref() {
         vec![Line::from(Span::styled(
             format!("🏷️ Rename companion to: {buffer}▏  (Press [Enter] to save, [Esc] to cancel)"),
@@ -1090,7 +1270,7 @@ fn draw_habitat(f: &mut Frame, app: &App) {
             ]),
             Line::from(vec![
                 Span::styled(
-                    "[Tab] Shell Color  [R] Rename  [?] Help Guide  [Q] Save & Quit   ",
+                    "←/→ Select Bezel Icon • [Enter] Confirm • [I] Meter • [?] Help • [Q] Quit   ",
                     Style::default().fg(Color::DarkGray),
                 ),
                 Span::styled(
@@ -1103,23 +1283,26 @@ fn draw_habitat(f: &mut Frame, app: &App) {
         vec![
             Line::from(vec![
                 Span::styled(
-                    "[F] Quick Feed  ",
+                    "[F] Meal  ",
                     Style::default()
                         .fg(Color::LightGreen)
                         .add_modifier(Modifier::BOLD),
                 ),
-                Span::styled("[M] Pantry Menu  ", Style::default().fg(Color::LightYellow)),
+                Span::styled("[M] Pantry  ", Style::default().fg(Color::LightYellow)),
+                Span::styled("[K] Light  ", Style::default().fg(Color::Cyan)),
                 Span::styled("[P] Play  ", Style::default().fg(Color::LightMagenta)),
-                Span::styled("[T] Headpat  ", Style::default().fg(Color::LightCyan)),
+                Span::styled("[D] Scold  ", Style::default().fg(Color::LightRed)),
+                Span::styled("[T] Praise  ", Style::default().fg(Color::LightCyan)),
                 Span::styled("[E] Train  ", Style::default().fg(Color::Yellow)),
                 Span::styled("[S] Sleep  ", Style::default().fg(Color::LightBlue)),
-                Span::styled("[C] Clean  ", Style::default().fg(Color::Cyan)),
-                Span::styled("[H] Heal  ", Style::default().fg(Color::LightRed)),
+                Span::styled("[C] Bath  ", Style::default().fg(Color::Cyan)),
+                Span::styled("[H] Meds  ", Style::default().fg(Color::Red)),
+                Span::styled("[I] Meter  ", Style::default().fg(Color::White)),
                 Span::styled("[G] Arcade", Style::default().fg(Color::Green)),
             ]),
             Line::from(vec![
                 Span::styled(
-                    "[N] Adopt Pet  [L] Sanctuary  [[/]] Switch Pet  [Tab] Shell  [R] Rename  [?] Help  [Q] Quit  ",
+                    "←/→ Bezel Icon + [Enter] • [N] Adopt • [L] Sanctuary • [[/]] Switch • [?] Help • [Q] Quit  ",
                     Style::default().fg(Color::DarkGray),
                 ),
                 Span::styled(
@@ -1138,7 +1321,7 @@ fn draw_habitat(f: &mut Frame, app: &App) {
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded)
                     .border_style(Style::default().fg(theme_color(pet.theme)))
-                    .title(" Care Console "),
+                    .title(" Tamagotchi Bezel & Care Console (Button A: ←/→ • Button B: Enter • Button C: Esc) "),
             )
             .wrap(Wrap { trim: false }),
         dock_area,
@@ -1165,6 +1348,134 @@ fn draw_habitat(f: &mut Frame, app: &App) {
     );
 }
 
+fn draw_meter_modal(f: &mut Frame, app: &App) {
+    let area = centered_rect(66, 56, f.area());
+    f.render_widget(Clear, area);
+    let pet = &app.pet;
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(Color::LightCyan))
+        .title(Span::styled(
+            format!(
+                " 📏 Tamagotchi Health Meter — Page {}/4 (←/→ or Space to flip) ",
+                app.meter_page + 1
+            ),
+            Style::default()
+                .fg(Color::LightCyan)
+                .add_modifier(Modifier::BOLD),
+        ));
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let page_lines = match app.meter_page % 4 {
+        0 => vec![
+            Line::from(Span::styled(
+                "📄 PAGE 1: AGE, WEIGHT & STAGE",
+                Style::default()
+                    .fg(Color::LightYellow)
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::from(""),
+            Line::from(format!(" • Companion: {} ({})", pet.name, pet.species.display_name())),
+            Line::from(format!(" • Stage:     {} (Lv.{} • {} XP)", pet.stage.badge(), pet.level, pet.xp)),
+            Line::from(format!(" • Real Age:  {}", format_duration_human(pet.age_seconds))),
+            Line::from(format!(
+                " • Weight:    {}g (Healthy Base Weight: {}g{})",
+                pet.weight_grams,
+                pet.stage.base_weight_grams(),
+                if pet.is_overweight() {
+                    " — ⚠️ Overweight! Exercise with [P] or [E]"
+                } else {
+                    " — Healthy!"
+                }
+            )),
+        ],
+        1 => {
+            let blocks = pet.discipline_blocks() as usize;
+            let bar = format!(
+                "{}{}",
+                "■ ".repeat(blocks),
+                "□ ".repeat(4usize.saturating_sub(blocks))
+            );
+            vec![
+                Line::from(Span::styled(
+                    "📄 PAGE 2: DISCIPLINE & CARE MISTAKES",
+                    Style::default()
+                        .fg(Color::LightYellow)
+                        .add_modifier(Modifier::BOLD),
+                )),
+                Line::from(""),
+                Line::from(format!(" • Discipline:    [{}] ({}%)", bar.trim(), pet.discipline)),
+                Line::from(format!(" • Care Mistakes: {} recorded", pet.care_mistakes)),
+                Line::from(format!(" • Attention Call: {}", pet.attention_call.badge())),
+                Line::from(""),
+                Line::from(" 💡 Tip: Scold [D] when calling mischievously; Praise [T] when crying!"),
+            ]
+        }
+        2 => vec![
+            Line::from(Span::styled(
+                "📄 PAGE 3: HUNGRY HEARTS & DIGESTION",
+                Style::default()
+                    .fg(Color::LightGreen)
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::from(""),
+            Line::from(format!(
+                " • Hungry Hearts: {}  ({}%)",
+                format_hearts(pet.hungry_hearts()),
+                pet.hunger
+            )),
+            Line::from(format!(
+                " • Sweet Streak:  {}/3 snacks in a row {}",
+                pet.snacks_in_a_row,
+                if pet.has_toothache {
+                    "(🦷 TOOTHACHE ACTIVE!)"
+                } else {
+                    "(Safe)"
+                }
+            )),
+            Line::from(format!(
+                " • Floor Hygiene: {}% Clean (Poop count: {}/4)",
+                pet.cleanliness, pet.poop_count
+            )),
+        ],
+        _ => vec![
+            Line::from(Span::styled(
+                "📄 PAGE 4: HAPPY HEARTS, BOND & SLEEP",
+                Style::default()
+                    .fg(Color::LightMagenta)
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::from(""),
+            Line::from(format!(
+                " • Happy Hearts:  {}  ({}%)",
+                format_hearts(pet.happy_hearts()),
+                pet.happiness
+            )),
+            Line::from(format!(" • Companion Bond: {}%", pet.bond)),
+            Line::from(format!(
+                " • Room Light:     {}",
+                if pet.light_on { "💡 ON" } else { "🌙 OFF" }
+            )),
+            Line::from(format!(" • Coins Purse:    {} 💰", pet.coins)),
+        ],
+    };
+
+    let mut lines = page_lines;
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "Press [Space/→] for next page • [Esc] or [I] to close Health Meter",
+        Style::default().fg(Color::Cyan),
+    )));
+
+    f.render_widget(
+        Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false }),
+        inner,
+    );
+}
+
 fn draw_pantry_modal(f: &mut Frame, app: &App) {
     let area = centered_rect(68, 56, f.area());
     f.render_widget(Clear, area);
@@ -1174,7 +1485,10 @@ fn draw_pantry_modal(f: &mut Frame, app: &App) {
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(Color::LightYellow))
         .title(Span::styled(
-            format!(" 🍱 Sanctuary Pantry — Coins: {} 💰 ", app.pet.coins),
+            format!(
+                " 🍱 Tamagotchi Pantry (Meals vs. Sweet Snacks) — Coins: {} 💰 ",
+                app.pet.coins
+            ),
             Style::default()
                 .fg(Color::LightYellow)
                 .add_modifier(Modifier::BOLD),
@@ -1213,7 +1527,7 @@ fn draw_pantry_modal(f: &mut Frame, app: &App) {
     f.render_widget(List::new(items), rows[0]);
     f.render_widget(
         Paragraph::new(Line::from(Span::styled(
-            "↑/↓ or [1-5] Select Meal • [Enter] Feed • [Esc] Close Pantry",
+            "↑/↓ or [1-5] Select Meal/Snack • [Enter] Feed • [Esc] Close Pantry",
             Style::default().fg(Color::Cyan),
         )))
         .alignment(Alignment::Center),
@@ -1277,7 +1591,7 @@ fn draw_offline_report_modal(f: &mut Frame, app: &App, report: &OfflineReport) {
 }
 
 fn draw_help_modal(f: &mut Frame, _app: &App) {
-    let area = centered_rect(76, 72, f.area());
+    let area = centered_rect(78, 76, f.area());
     f.render_widget(Clear, area);
 
     let block = Block::default()
@@ -1285,7 +1599,7 @@ fn draw_help_modal(f: &mut Frame, _app: &App) {
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(Color::LightMagenta))
         .title(Span::styled(
-            " 📖 Mochigotchi Care Guide & Real-Time Rules ",
+            " 📖 Authentic Tamagotchi Hardware & Care Guide ",
             Style::default()
                 .fg(Color::LightMagenta)
                 .add_modifier(Modifier::BOLD),
@@ -1295,33 +1609,34 @@ fn draw_help_modal(f: &mut Frame, _app: &App) {
 
     let lines = vec![
         Line::from(Span::styled(
-            "🥚 1. Egg Incubation",
+            "📟 1. 8-Icon LCD Bezel & 3-Button Hardware Controls",
             Style::default()
                 .fg(Color::LightYellow)
                 .add_modifier(Modifier::BOLD),
         )),
-        Line::from("   • Eggs cannot eat, play, or train until hatched."),
-        Line::from("   • Press [W] (+20% warmth, 3m cooldown) or let passive warmth build to 99%."),
+        Line::from("   • Button A (←/→ or A): Cycle across the 7 interactive LCD Bezel Icons."),
+        Line::from("   • Button B (Enter or B): Open/activate the highlighted Bezel Icon."),
+        Line::from("   • Button C (Esc): Cancel out of any menu or modal."),
         Line::from(""),
         Line::from(Span::styled(
-            "🍡 2. Daily Care & Pantry",
+            "🍙 2. Meals vs. Sweet Snacks, Weight (g) & Toothache (🦷)",
             Style::default()
                 .fg(Color::LightGreen)
                 .add_modifier(Modifier::BOLD),
         )),
-        Line::from("   • [F] feeds your companion's Favorite Snack for free."),
-        Line::from("   • [M] opens the Pantry (Bento, Boba Tea, Herbal Soup, Starlight Delight)."),
-        Line::from("   • Every 2 meals creates a mess (💩) — press [C] for a bubble bath!"),
+        Line::from("   • Meals ([F] or Pantry #1/#2/#4) fill Hungry Hearts (+1..2g weight) and refuse when 4/4 full."),
+        Line::from("   • Sweet Snacks (Pantry #3 Boba Tea / #5 Tart) fill Happy Hearts (+2..3g), but 3 snacks in a row cause a Toothache 🦷!"),
+        Line::from("   • Play [P] or Train [E] to burn weight (-2g) and keep your companion fit!"),
         Line::from(""),
         Line::from(Span::styled(
-            "🌟 3. Long-Term Evolution & Offline Life",
+            "💡 3. Room Light Switch ([K]), Discipline ([D]/[T]) & Care Mistakes",
             Style::default()
                 .fg(Color::LightCyan)
                 .add_modifier(Modifier::BOLD),
         )),
-        Line::from("   • Evolution requires XP + Bond + Real Companion Age (Teen 6h, Adult 24h, Elder 72h)."),
-        Line::from("   • While closed, your pet sleeps, gets hungry, and explores for coins."),
-        Line::from("   • Press [N] to adopt more pets and [L] or [[ / ]] to switch between them!"),
+        Line::from("   • When your pet sleeps [S], press [K] to turn the Room Light OFF! Leaving it on causes a Care Mistake."),
+        Line::from("   • If 🔔 CALL says 'Acting Spoiled', press [D] to Scold (+25% Discipline). If 'Crying', press [T] to Praise!"),
+        Line::from("   • Press [I] anytime to flip through the 4-Screen Bandai Health Meter!"),
         Line::from(""),
         Line::from(Span::styled(
             "Press [Esc], [Enter], or [?] to close this guide",
@@ -1375,13 +1690,14 @@ fn draw_roster(f: &mut Frame, app: &App) {
             };
             ListItem::new(Line::from(Span::styled(
                 format!(
-                    "{marker} {}. {} [{}] {} Lv.{} · Full {}% · Incub {}%",
+                    "{marker} {}. {} [{}] {} Lv.{} · {}g · {} · Incub {}%",
                     idx + 1,
                     pet.name,
                     pet.species.display_name(),
                     pet.stage.badge(),
                     pet.level,
-                    pet.hunger,
+                    pet.weight_grams,
+                    format_hearts(pet.hungry_hearts()),
                     pet.incubation
                 ),
                 style,
@@ -1618,6 +1934,12 @@ mod tests {
             app.pantry_open = true;
             terminal.draw(|f| draw_ui(f, &app)).unwrap();
             app.pantry_open = false;
+            app.show_meter = true;
+            for page in 0..4 {
+                app.meter_page = page;
+                terminal.draw(|f| draw_ui(f, &app)).unwrap();
+            }
+            app.show_meter = false;
             app.show_help = true;
             terminal.draw(|f| draw_ui(f, &app)).unwrap();
         }
