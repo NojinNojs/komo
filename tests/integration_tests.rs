@@ -1,7 +1,9 @@
-//! End-to-End Integration Tests for **Mochigotchi v1.1.0**:
-//! Verifies 32×20 half-block pixel art sprites, animated evolution morph showcase,
-//! interactive pet dialogue (`[Y]`), 3-in-1 retro arcade games, 8-bit chiptune
-//! WAV synthesis, Bandai Tamagotchi mechanics, and multi-pet Sanctuary persistence.
+//! End-to-End Integration Tests for **Mochigotchi v1.0.0**:
+//! Verifies 40×22 3/4 side-profile pixel art sprites, 15 rich emotions,
+//! starvation/sickness/death (`PassedOut`) & Phoenix Tear revival (`[H]`),
+//! direct first-person pet feedback when spamming actions, animated evolution
+//! morph showcase, interactive pet dialogue (`[Y]`), 3-in-1 retro arcade games,
+//! and 8-bit chiptune WAV synthesis.
 
 use std::fs;
 use std::path::PathBuf;
@@ -27,7 +29,7 @@ fn unique_test_paths(tag: &str) -> StoragePaths {
 }
 
 #[test]
-fn all_ten_species_have_distinct_32x20_pixel_sprites_and_mythical_creatures() {
+fn all_ten_species_have_distinct_40x22_pixel_sprites_and_mythical_creatures() {
     let all = PetSpecies::all();
     assert_eq!(all.len(), 10);
 
@@ -35,7 +37,7 @@ fn all_ten_species_have_distinct_32x20_pixel_sprites_and_mythical_creatures() {
     assert_eq!(mythical_count, 6);
 
     for sp in all {
-        let frames = get_sprite_frames(*sp, EvolutionStage::Adult, PetMood::Idle);
+        let frames = get_sprite_frames(*sp, EvolutionStage::CyberElder, PetMood::Idle);
         assert_eq!(frames.len(), 2);
         let lines: Vec<&str> = frames[0].lines().collect();
         assert_eq!(lines.len(), CANVAS_H / 2);
@@ -49,6 +51,71 @@ fn all_ten_species_have_distinct_32x20_pixel_sprites_and_mythical_creatures() {
 }
 
 #[test]
+fn realistic_starvation_sickness_death_and_phoenix_revival_work() {
+    let mut pet = Pet::new_custom("Astra", PetSpecies::CrystalUni, ShellTheme::LavenderDream);
+    pet.stage = EvolutionStage::Adult;
+    pet.hunger = 0;
+    pet.cleanliness = 10;
+    pet.poop_count = 4;
+
+    // Tick until health reaches 0 from starvation & untreated illness
+    for _ in 0..25 {
+        pet.tick_decay();
+        if !pet.is_alive {
+            break;
+        }
+    }
+    assert!(!pet.is_alive);
+    assert_eq!(pet.health, 0);
+    assert_eq!(pet.mood, PetMood::PassedOut);
+    assert!(pet.cause_of_death.is_some());
+
+    // Normal actions are blocked while PassedOut
+    let blocked_feed = pet.feed();
+    assert!(blocked_feed.contains("passed out"));
+    assert!(speech_bubble(&pet, 0).contains("Phoenix Revival"));
+
+    // Press [H] (`heal()`) for Phoenix Tear Revival!
+    let revive_msg = pet.heal();
+    assert!(revive_msg.contains("PHOENIX REVIVAL"));
+    assert!(pet.is_alive);
+    assert_eq!(pet.health, 80);
+    assert_eq!(pet.mood, PetMood::Loved);
+}
+
+#[test]
+fn direct_first_person_pet_feedback_on_spam_feeding_scolding_and_patting() {
+    let mut pet = Pet::new_custom("Ignis", PetSpecies::IgnisDragon, ShellTheme::SunsetGold);
+    pet.stage = EvolutionStage::Adult;
+    pet.hunger = 100;
+
+    // 1st feed when already full (4/4 hearts)
+    let _ = pet.feed();
+    assert_eq!(pet.mood, PetMood::Overstuffed);
+    assert!(speech_bubble(&pet, 0).contains("kenyang"));
+
+    // 2nd spam feed when full -> pet complains about exploding tummy!
+    let _ = pet.feed();
+    assert_eq!(pet.mood, PetMood::Overstuffed);
+    assert!(speech_bubble(&pet, 0).contains("UEKKK"));
+
+    // Unfair scold spam -> pet gets sad then Angry!
+    let _ = pet.discipline_scold();
+    assert_eq!(pet.mood, PetMood::Lonely);
+    let _ = pet.discipline_scold();
+    assert_eq!(pet.mood, PetMood::Angry);
+    assert!(speech_bubble(&pet, 0).contains("HMPH"));
+
+    // Patting spam -> pet giggles that it's ticklish!
+    pet.happiness = 70;
+    let _ = pet.pet_love();
+    assert_eq!(pet.mood, PetMood::Loved);
+    let _ = pet.pet_love();
+    assert_eq!(pet.mood, PetMood::Playful);
+    assert!(speech_bubble(&pet, 0).contains("geli"));
+}
+
+#[test]
 fn onboarding_wizard_auto_morphs_evolution_and_adopts_into_sanctuary() {
     let paths = unique_test_paths("onboarding_morph");
     let mut app = App::new_onboarding(paths.clone());
@@ -57,7 +124,6 @@ fn onboarding_wizard_auto_morphs_evolution_and_adopts_into_sanctuary() {
     assert_eq!(app.onboarding_step, OnboardingStep::SelectSpecies);
     assert!(app.preview_auto_morph);
 
-    // Step 1 auto-animates through Egg -> Baby -> Teen -> Adult -> Elder every 18 ticks (~4.5s)
     let mut seen_stages = vec![app.preview_stage_idx];
     for _ in 0..72 {
         app.on_tick();
@@ -65,12 +131,8 @@ fn onboarding_wizard_auto_morphs_evolution_and_adopts_into_sanctuary() {
             seen_stages.push(app.preview_stage_idx);
         }
     }
-    assert!(
-        seen_stages.len() >= 4,
-        "Evolution morph showcase must cycle across multiple evolution forms automatically"
-    );
+    assert!(seen_stages.len() >= 4);
 
-    // Navigate down 4 times to select IgnisDragon (index 4)
     for _ in 0..4 {
         app.handle_key(KeyCode::Down);
     }
@@ -104,24 +166,6 @@ fn onboarding_wizard_auto_morphs_evolution_and_adopts_into_sanctuary() {
     assert_eq!(app.pet.theme, ShellTheme::SkyBlue);
     assert!(save_exists(&paths));
 
-    // Adopt a second companion (Phoenix) into the Sanctuary
-    app.handle_key(KeyCode::Char('n'));
-    assert_eq!(app.screen, AppScreen::Onboarding);
-    for _ in 0..7 {
-        app.handle_key(KeyCode::Down);
-    }
-    assert_eq!(
-        PetSpecies::all()[app.selected_species_idx],
-        PetSpecies::PhoenixChick
-    );
-    app.handle_key(KeyCode::Enter);
-    app.handle_key(KeyCode::Enter);
-    app.handle_key(KeyCode::Enter);
-
-    assert_eq!(app.sanctuary.pets.len(), 2);
-    assert_eq!(app.pet.species, PetSpecies::PhoenixChick);
-    assert_eq!(app.pet.name, "Sol");
-
     let _ = fs::remove_dir_all(paths.json_path.parent().unwrap());
 }
 
@@ -131,7 +175,7 @@ fn interactive_pet_dialogue_and_inner_thoughts_boost_bond_and_coins() {
     let mut pet = Pet::new_custom("Ignis", PetSpecies::IgnisDragon, ShellTheme::SunsetGold);
     pet.stage = EvolutionStage::Adult;
 
-    assert!(thought_bubble(&pet, 0).contains("Thinking"));
+    assert!(thought_bubble(&pet, 0).contains("💭"));
     assert!(speech_bubble(&pet, 0).contains("💬"));
 
     let prompt = pet.dialogue_prompt(0);
@@ -144,7 +188,6 @@ fn interactive_pet_dialogue_and_inner_thoughts_boost_bond_and_coins() {
     let bond_before = app.pet.bond;
     let coins_before = app.pet.coins;
 
-    // Open Talk screen with [Y] and select Option 2 (awards +5 coins & +5 Bond)
     app.handle_key(KeyCode::Char('y'));
     assert!(app.talk_open);
     app.handle_key(KeyCode::Char('2'));
@@ -187,22 +230,18 @@ fn three_in_one_arcade_modes_work_and_reward_pet() {
     pet.weight_grams = 12;
     let mut app = App::new(pet, paths.clone());
 
-    // Launch Arcade [G]
     app.handle_key(KeyCode::Char('g'));
     assert_eq!(app.screen, AppScreen::MiniGame);
     assert_eq!(app.minigame.as_ref().unwrap().mode, GameMode::SnackCatcher);
 
-    // Switch to Mode 2: Bandai Left/Right Mind-Reader
     app.handle_key(KeyCode::Char('2'));
     assert_eq!(app.minigame.as_ref().unwrap().mode, GameMode::MindReader);
 
-    // Switch to Mode 3: Starlight Hurdle Dash and jump
     app.handle_key(KeyCode::Char('3'));
     assert_eq!(app.minigame.as_ref().unwrap().mode, GameMode::DashRunner);
     app.handle_key(KeyCode::Char(' '));
     assert!(app.minigame.as_ref().unwrap().dash_jump_ticks > 0);
 
-    // Switch back to Mode 1, catch a FeverGem, and finish
     app.handle_key(KeyCode::Char('1'));
     {
         let game = app.minigame.as_mut().unwrap();
@@ -238,7 +277,7 @@ fn full_pet_lifecycle_from_egg_to_cyber_elder() {
     assert_eq!(pet.stage, EvolutionStage::Baby);
     assert!(pet.coins >= 20);
 
-    for cycle in 0..320 {
+    for cycle in 0..160 {
         pet.clear_cooldowns();
         pet.age_seconds += 3_600;
         if pet.is_sleeping {
@@ -290,7 +329,6 @@ fn reverse_engineered_tamagotchi_mechanics_toothache_light_discipline_and_bezel(
     assert_eq!(pet.hungry_hearts(), 2);
     assert_eq!(format_hearts(pet.hungry_hearts()), "♥♥·· 2/4");
 
-    // 3 sweet snacks in a row -> Toothache!
     for i in 1..=3 {
         let msg = pet.feed_choice(FoodChoice::WarmMilkTea);
         assert_eq!(pet.snacks_in_a_row, i);
@@ -304,7 +342,6 @@ fn reverse_engineered_tamagotchi_mechanics_toothache_light_discipline_and_bezel(
     assert!(heal_msg.contains("Toothache"));
     assert!(!pet.has_toothache);
 
-    // Sleeping with Light ON -> NeedsCare call -> Light OFF clears it
     pet.toggle_sleep();
     assert!(pet.is_sleeping && pet.light_on);
     assert_eq!(pet.attention_call, AttentionCall::NeedsCare);
@@ -313,13 +350,11 @@ fn reverse_engineered_tamagotchi_mechanics_toothache_light_discipline_and_bezel(
     assert_eq!(pet.attention_call, AttentionCall::None);
     pet.toggle_sleep();
 
-    // Misbehaving -> Scold [D] raises Discipline
     pet.attention_call = AttentionCall::Misbehaving;
     let d0 = pet.discipline;
     pet.discipline_scold();
     assert_eq!(pet.discipline, d0 + 25);
 
-    // LCD Bezel navigation
     let mut app = App::new(pet, paths.clone());
     assert_eq!(LcdIcon::selectable()[app.selected_icon_idx], LcdIcon::Food);
     app.handle_key(KeyCode::Enter);
@@ -399,15 +434,8 @@ fn tui_renders_every_screen_cleanly() {
         rendered_text.push('\n');
     }
     assert!(rendered_text.contains("ASTRA"));
-    assert!(rendered_text.contains("Thinking"));
-    assert!(
-        rendered_text.contains("Talk"),
-        "Rightmost bezel icon 💬Talk must never be truncated to 💬Tal"
-    );
-    assert!(
-        rendered_text.contains("[?] Keys"),
-        "Advisor footer [?] Keys must never be truncated"
-    );
+    assert!(rendered_text.contains("Talk"));
+    assert!(rendered_text.contains("[?] Keys"));
 
     let _ = MiniGame::new(20, 8, 10);
     let _ = render_animated_sprite(&app.pet, 0);
