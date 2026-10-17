@@ -1,7 +1,8 @@
-//! Core pet model for **Mochigotchi** — reverse-engineered authentic Bandai
-//! Tamagotchi mechanics (8 LCD bezel icons, 4 Hungry/Happy Hearts, Meal vs.
-//! Sweet Snack weight & toothache system, Room Light switch, Attention Calls,
-//! Discipline scold/praise, Care Mistakes, and the multi-pet [`Sanctuary`]).
+//! Core pet model for **Mochigotchi v1.0.0** — reverse-engineered authentic
+//! Bandai Tamagotchi mechanics (8 LCD bezel icons, 4 Hungry/Happy Hearts,
+//! Meal vs. Sweet Snack weight & toothache system, Room Light switch,
+//! Attention Calls, Discipline scold/praise, Care Mistakes, Care Ranks, and
+//! the multi-pet [`Sanctuary`]).
 //!
 //! All emoji icons use single-codepoint East_Asian_Width=Wide glyphs (zero ZWJ
 //! or U+FE0F variation selectors) so terminal column widths match 100% across
@@ -91,6 +92,26 @@ impl AttentionCall {
             Self::NeedsCare => "🔔 CALL: Care!",
             Self::Misbehaving => "🔔 CALL: Scold [D]",
             Self::Crying => "🔔 CALL: Praise [T]",
+        }
+    }
+}
+
+/// Tamagotchi Care Rank earned from your Care Mistakes and Discipline score.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum CareRank {
+    PerfectKeeper,
+    StarGuardian,
+    CozyFriend,
+    MischievousRascal,
+}
+
+impl CareRank {
+    pub fn badge(&self) -> &'static str {
+        match self {
+            Self::PerfectKeeper => "👑 S-Rank (Perfect Keeper)",
+            Self::StarGuardian => "🌟 A-Rank (Star Guardian)",
+            Self::CozyFriend => "🌱 B-Rank (Cozy Friend)",
+            Self::MischievousRascal => "🩹 C-Rank (Rascal)",
         }
     }
 }
@@ -490,17 +511,14 @@ impl FoodChoice {
         }
     }
 
+    /// Concise 1-line summary (`<= 52` chars) so it never clips inside a 68-col LCD.
     pub fn summary(&self) -> &'static str {
         match self {
-            Self::FavoriteSnack => "Free • +1 Hungry ♥ (+25%), +1g weight, resets sweet streak",
-            Self::HeartyBento => "8 coins • +2 Hungry ♥ (+40%), +2g weight, +5 Energy",
-            Self::WarmMilkTea => {
-                "Free • +1 Happy ♥ (+25%), +2g weight (3 snacks in a row = Toothache 🦷!)"
-            }
-            Self::HerbalSoup => "10 coins • +1 Hungry ♥, +20 Health, calms mild chills",
-            Self::StarlightDelight => {
-                "18 coins • +2 Happy ♥ (+35%), +8 Bond, +25 XP, +3g weight (Sweet Snack)"
-            }
+            Self::FavoriteSnack => "Free • +1 Hungry ♥, +1g, resets sweet streak",
+            Self::HeartyBento => "8 coins • +2 Hungry ♥, +2g weight, +5 Energy",
+            Self::WarmMilkTea => "Free • +1 Happy ♥, +2g (3 sweets = Toothache!)",
+            Self::HerbalSoup => "10 coins • +1 Hungry ♥, +20 Health, cures chill",
+            Self::StarlightDelight => "18 coins • +2 Happy ♥, +8 Bond, +25 XP, +3g",
         }
     }
 
@@ -579,9 +597,8 @@ pub fn format_duration_human(secs: u64) -> String {
     }
 }
 
-/// Render 0..=4 classic Tamagotchi hearts (`♥ ♥ ♥ · 3/4`) using consistent
-/// single-cell glyphs (`♥` and `·`) so Nerd Fonts never mix two different
-/// heart glyph sizes.
+/// Render 0..=4 classic Tamagotchi hearts (`♥♥♥· 3/4`) using consistent
+/// single-cell glyphs (`♥` and `·`).
 pub fn format_hearts(filled: u8) -> String {
     let clamped = filled.min(4);
     let mut out = String::with_capacity(8);
@@ -725,6 +742,19 @@ impl Pet {
         self.weight_grams >= self.stage.base_weight_grams() + 18
     }
 
+    /// Compute the companion's Tamagotchi Care Rank from `care_mistakes` and `discipline`.
+    pub fn care_rank(&self) -> CareRank {
+        if self.care_mistakes == 0 && self.discipline >= 75 {
+            CareRank::PerfectKeeper
+        } else if self.care_mistakes <= 2 && self.discipline >= 50 {
+            CareRank::StarGuardian
+        } else if self.care_mistakes <= 5 {
+            CareRank::CozyFriend
+        } else {
+            CareRank::MischievousRascal
+        }
+    }
+
     pub fn rename(&mut self, new_name: &str) {
         let trimmed = new_name.trim();
         if !trimmed.is_empty() {
@@ -862,14 +892,22 @@ impl Pet {
             {
                 self.stage = next;
                 self.weight_grams = self.weight_grams.max(next.base_weight_grams());
-                self.coins = self.coins.saturating_add(25);
+                let bonus = u32::from(next.max_stat_bonus());
+                let rank_bonus = if self.care_mistakes <= 2 && self.discipline >= 50 {
+                    bonus
+                } else {
+                    0
+                };
+                let reward = 25 + rank_bonus;
+                self.coins = self.coins.saturating_add(reward);
                 self.happiness = (self.happiness + 12).min(100);
                 self.health = (self.health + 10).min(100);
                 self.log_action(format!(
-                    "🌟 Evolution! {} grew into a {} (Weight {}g)! (+25 coins)",
+                    "🌟 Evolution! {} grew into {} ({}, +{} coins)!",
                     self.name,
                     self.stage.badge(),
-                    self.weight_grams
+                    self.care_rank().badge(),
+                    reward
                 ));
                 evolved = true;
             } else {
@@ -980,7 +1018,7 @@ impl Pet {
         if self.happy_hearts() <= 1 {
             return "🎾 Happy Hearts low! Press [P] Play or [M] Snack.".to_string();
         }
-        "🌟 All meters healthy! Use ←/→ + Enter on Bezel, [I] Meter, or [?] Help.".to_string()
+        "🌟 All meters healthy! Use ←/→ + Enter on Bezel, [I] Meter, or [?] Keys.".to_string()
     }
 
     pub fn perform_action(&mut self, action: PetAction) -> String {
@@ -1284,7 +1322,6 @@ impl Pet {
         self.cleanliness = self.cleanliness.saturating_sub(5);
         self.bond = (self.bond + 4).min(100);
         self.coins = self.coins.saturating_add(5);
-        self.snacks_in_a_row = 0;
         let base_w = self.stage.base_weight_grams();
         self.weight_grams = self.weight_grams.saturating_sub(2).max(base_w);
         self.mood = PetMood::Happy;
@@ -1405,7 +1442,6 @@ impl Pet {
         self.discipline = (self.discipline + 8).min(100);
         self.bond = (self.bond + 4).min(100);
         self.coins = self.coins.saturating_add(10);
-        self.snacks_in_a_row = 0;
         let base_w = self.stage.base_weight_grams();
         self.weight_grams = self.weight_grams.saturating_sub(2).max(base_w);
         self.mood = PetMood::Training;
@@ -1464,6 +1500,7 @@ impl Pet {
 
         self.poop_count = 0;
         self.meals_since_poop = 0;
+        self.snacks_in_a_row = 0;
         self.cleanliness = 100;
         self.happiness = (self.happiness + 6).min(100);
         self.health = (self.health + 5).min(100);
@@ -1473,7 +1510,7 @@ impl Pet {
         self.refresh_mood();
 
         let msg = format!(
-            "🚽 Flushed the mess and gave {} a warm bubble bath! (+8 XP)",
+            "🚽 Flushed the mess, brushed teeth & gave {} a warm bubble bath! (+8 XP)",
             self.name
         );
         self.log_action(msg.clone());
@@ -1519,7 +1556,6 @@ impl Pet {
         self.happiness = (self.happiness + 12).min(100);
         self.bond = (self.bond + 3).min(100);
         self.energy = self.energy.saturating_sub(5);
-        self.snacks_in_a_row = 0;
         let base_w = self.stage.base_weight_grams();
         self.weight_grams = self.weight_grams.saturating_sub(1).max(base_w);
         self.add_xp(xp_earned);
@@ -1602,6 +1638,27 @@ impl Pet {
             }
         }
 
+        self.check_evolution();
+        self.refresh_mood();
+    }
+
+    /// Gentle standby heartbeat for inactive companions resting in the Sanctuary.
+    pub fn tick_standby(&mut self) {
+        self.age_seconds = self.age_seconds.saturating_add(1);
+        self.last_updated = Utc::now();
+        if self.stage == EvolutionStage::Egg {
+            self.incubation = (self.incubation + 1).min(99);
+            return;
+        }
+        if self.age_seconds.is_multiple_of(2) {
+            if self.is_sleeping {
+                self.energy = (self.energy + 4).min(100);
+            } else {
+                self.hunger = self.hunger.saturating_sub(1).max(20);
+                self.happiness = self.happiness.saturating_sub(1).max(25);
+                self.energy = self.energy.saturating_sub(1).max(25);
+            }
+        }
         self.check_evolution();
         self.refresh_mood();
     }
@@ -1792,13 +1849,14 @@ impl Pet {
 
     pub fn status_summary(&self) -> String {
         format!(
-            "{} — {} {} | Stage: {} | Lv.{} ({} XP) | Weight: {}g | Hungry: {} ({}%) • Happy: {} ({}%) • Discipline: {}% • Energy: {}% • Health: {}% • Clean: {}% • Bond: {}% | Mistakes: {} | Coins: {}",
+            "{} — {} {} | Stage: {} | Lv.{} ({} XP) | Rank: {} | Weight: {}g | Hungry: {} ({}%) • Happy: {} ({}%) • Discipline: {}% • Energy: {}% • Health: {}% • Clean: {}% • Bond: {}% | Mistakes: {} | Coins: {}",
             self.name,
             self.species.display_name(),
             self.species.rarity(),
             self.stage.badge(),
             self.level,
             self.xp,
+            self.care_rank().badge(),
             self.weight_grams,
             format_hearts(self.hungry_hearts()),
             self.hunger,
@@ -1874,6 +1932,27 @@ impl Sanctuary {
         }
     }
 
+    /// Switch active companion by 1-based index (`"1"`, `"2"`) or case-insensitive name.
+    pub fn switch_by_query(&mut self, query: &str) -> Option<usize> {
+        let trimmed = query.trim();
+        if let Ok(one_based) = trimmed.parse::<usize>() {
+            if one_based >= 1 && one_based <= self.pets.len() {
+                self.active_index = one_based - 1;
+                return Some(self.active_index);
+            }
+        }
+        let lower = trimmed.to_lowercase();
+        if let Some(pos) = self
+            .pets
+            .iter()
+            .position(|p| p.name.to_lowercase() == lower)
+        {
+            self.active_index = pos;
+            return Some(pos);
+        }
+        None
+    }
+
     pub fn next_pet(&mut self) {
         if !self.pets.is_empty() {
             self.active_index = (self.active_index + 1) % self.pets.len();
@@ -1912,20 +1991,34 @@ impl Sanctuary {
         let active_idx = self.active_index.min(self.pets.len().saturating_sub(1));
 
         for (idx, pet) in self.pets.iter_mut().enumerate() {
+            let mistakes_before = pet.care_mistakes;
             let (elapsed, report) = pet.apply_offline_decay_with_report(now);
             if elapsed > max_elapsed {
                 max_elapsed = elapsed;
             }
             if idx == active_idx {
                 active_report = report;
+            } else {
+                // Inactive companions in the Sanctuary are tended by Sanctuary keepers
+                // so they don't accumulate unfair care mistakes while on standby.
+                pet.care_mistakes = mistakes_before;
+                pet.hunger = pet.hunger.max(30);
+                pet.cleanliness = pet.cleanliness.max(40);
+                pet.is_sick = false;
+                pet.refresh_mood();
             }
         }
         (max_elapsed, active_report)
     }
 
     pub fn tick_decay_all(&mut self) {
-        for pet in &mut self.pets {
-            pet.tick_decay();
+        let active_idx = self.active_index.min(self.pets.len().saturating_sub(1));
+        for (idx, pet) in self.pets.iter_mut().enumerate() {
+            if idx == active_idx {
+                pet.tick_decay();
+            } else {
+                pet.tick_standby();
+            }
         }
     }
 

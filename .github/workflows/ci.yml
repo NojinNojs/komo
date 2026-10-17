@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check-test-clippy:
+    name: Cargo Check, Test & Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check all targets
+        run: cargo check --all-targets
+
+      - name: Run unit and integration tests
+        run: cargo test --all-targets
+
+      - name: Run Clippy with zero warnings
+        run: cargo clippy --all-targets -- -D warnings

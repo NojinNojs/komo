@@ -1,8 +1,12 @@
 /target/
 mochigotchi_save.json
 mochigotchi_save.db
+mochigotchi.json
+mochigotchi.db
 save.json
 rustagotchi.db
+*.tmp
+*.bak
 *.db-journal
 *.db-wal
 *.db-shm

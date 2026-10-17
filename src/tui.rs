@@ -1,16 +1,15 @@
-//! Minimalist, Retro, Step-by-Step Handheld LCD Interface for **Mochigotchi**.
+//! Minimalist, Retro, Step-by-Step Handheld LCD Interface for **Mochigotchi v1.0.0**.
 //!
-//! Designed around a single centered **66×22 Retro Handheld V-Pet Frame**
+//! Designed around a single centered **74×25 Retro Handheld V-Pet Frame**
 //! (`BorderType::Double` outer shell + `BorderType::Rounded` inner LCD):
 //! - **Step-by-step Onboarding**: Step 1 (Select Companion with 24×16 Half-Block
 //!   Pixel Art) -> press Enter -> switches screen to Step 2 (Select Shell Color)
 //!   -> press Enter -> switches screen to Step 3 (Name Companion).
 //! - **Minimalist LCD Habitat**: Displays only the 7-icon Tamagotchi Bezel, the
 //!   centered 24×16 TrueColor Pixel Art Sprite, and a 2-line retro status ticker.
-//! - **Step-by-step Subscreens**: Opening the Status Meter (`[I]` / `📏Meter`),
-//!   Pantry (`[M]` / `🍙Food`), Sanctuary Roster (`[L]`), Arcade (`[G]`), or
-//!   Keys Guide (`[?]`) cleanly replaces the inner LCD screen instead of
-//!   cluttering the main view with side-by-side panels.
+//! - **Step-by-step Subscreens**: Opening the 4-Page Status Meter (`[I]` /
+//!   `📏Meter`), Pantry (`[M]` / `🍙Food`), Sanctuary Roster (`[L]`), Arcade
+//!   (`[G]`), or Keys Guide (`[?]`) cleanly replaces the inner LCD screen.
 
 use std::io;
 use std::time::{Duration, Instant};
@@ -493,7 +492,7 @@ impl App {
             KeyCode::Up | KeyCode::Left | KeyCode::Char('k') | KeyCode::Char('h') => {
                 self.roster_selected_idx = (self.roster_selected_idx + count - 1) % count;
             }
-            KeyCode::Down | KeyCode::Right | KeyCode::Char('j') | KeyCode::Char('l') => {
+            KeyCode::Down | KeyCode::Right | KeyCode::Char('j') | KeyCode::Tab => {
                 self.roster_selected_idx = (self.roster_selected_idx + 1) % count;
             }
             KeyCode::Enter | KeyCode::Char(' ') => {
@@ -501,7 +500,7 @@ impl App {
                 self.screen = AppScreen::Habitat;
             }
             KeyCode::Char('n') | KeyCode::Char('N') => self.start_adopting(),
-            KeyCode::Esc | KeyCode::Char('L') | KeyCode::Char('q') => {
+            KeyCode::Esc | KeyCode::Char('l') | KeyCode::Char('L') | KeyCode::Char('q') => {
                 self.screen = AppScreen::Habitat;
             }
             _ => {}
@@ -674,7 +673,6 @@ impl App {
 
 // ── Minimalist Retro Handheld Layout Helpers ───────────────────────────────
 
-/// Compute a centered retro handheld LCD rectangle inside `area`.
 fn handheld_rect(area: Rect) -> Rect {
     let w = area.width.min(HANDHELD_MAX_W);
     let h = area.height.min(HANDHELD_MAX_H);
@@ -688,7 +686,7 @@ fn outer_shell_block(title: &str, theme: ShellTheme) -> Block<'static> {
         .borders(Borders::ALL)
         .border_type(BorderType::Double)
         .border_style(Style::default().fg(theme_color(theme)))
-        .padding(Padding::new(2, 2, 0, 0))
+        .padding(Padding::new(1, 1, 0, 0))
         .title(Span::styled(
             format!(" {title} "),
             Style::default()
@@ -703,7 +701,7 @@ fn lcd_screen_block(title: &str, accent: Color) -> Block<'static> {
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(accent))
-        .padding(Padding::new(2, 2, 0, 0))
+        .padding(Padding::new(1, 1, 0, 0))
         .title(Span::styled(
             format!(" {title} "),
             Style::default().fg(accent).add_modifier(Modifier::BOLD),
@@ -895,9 +893,8 @@ fn draw_onboarding_step_screen(f: &mut Frame, device: Rect, app: &App) {
                     Style::default().fg(Color::LightGreen),
                 ),
             ]));
-            lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
-                "[←/→ or ↑/↓] Browse   [V] Stage Preview   [Enter] Next Step",
+                "[←/→] Browse   [V] Stage Preview   [Enter] Next Step",
                 Style::default()
                     .fg(sp_accent)
                     .add_modifier(Modifier::BOLD),
@@ -952,7 +949,7 @@ fn draw_onboarding_step_screen(f: &mut Frame, device: Rect, app: &App) {
             }
 
             lines.push(Line::from(Span::styled(
-                "[↑/↓] Select Shell   [Enter] Next Step   [Esc] Back to Step 1",
+                "[↑/↓] Select Shell   [Enter] Next Step   [Esc] Back",
                 Style::default()
                     .fg(Color::LightYellow)
                     .add_modifier(Modifier::BOLD),
@@ -990,7 +987,6 @@ fn draw_onboarding_step_screen(f: &mut Frame, device: Rect, app: &App) {
                 "Enter a name for your new companion:",
                 Style::default().fg(Color::White),
             )));
-            lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
                 format!("   [  {}▏  ]   ", app.onboarding_name_input),
                 Style::default()
@@ -1000,7 +996,7 @@ fn draw_onboarding_step_screen(f: &mut Frame, device: Rect, app: &App) {
             )));
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
-                "[Enter] Adopt & Start   [Backspace] Edit   [Esc] Back to Step 2",
+                "[Enter] Adopt & Start   [Backspace] Edit   [Esc] Back",
                 Style::default()
                     .fg(Color::LightGreen)
                     .add_modifier(Modifier::BOLD),
@@ -1067,7 +1063,7 @@ fn draw_habitat_screen(f: &mut Frame, device: Rect, app: &App) {
     let lcd_inner = lcd.inner(rows[1]);
     f.render_widget(lcd, rows[1]);
 
-    let mut lcd_lines = Vec::with_capacity(16);
+    let mut lcd_lines = Vec::with_capacity(15);
     if !pet.light_on {
         lcd_lines.push(Line::from(Span::styled(
             "🌙 [ ROOM LIGHT OFF — NIGHT MODE ]",
@@ -1087,7 +1083,9 @@ fn draw_habitat_screen(f: &mut Frame, device: Rect, app: &App) {
         )));
     }
 
-    lcd_lines.extend(render_colored_sprite(pet, app.tick_count));
+    // Take the 10 core lines of render_colored_sprite (particles + 8 pixel rows + pedestal)
+    let sprite = render_colored_sprite(pet, app.tick_count);
+    lcd_lines.extend(sprite.into_iter().take(10));
 
     if pet.stage == EvolutionStage::Egg {
         let warm_sessions = (pet.incubation / 20).min(5) as usize;
@@ -1103,6 +1101,11 @@ fn draw_habitat_screen(f: &mut Frame, device: Rect, app: &App) {
                 .add_modifier(Modifier::BOLD),
         )));
     } else {
+        let poop_suffix = if pet.poop_count > 0 {
+            format!("   💩×{}", pet.poop_count)
+        } else {
+            String::new()
+        };
         lcd_lines.push(Line::from(vec![
             Span::styled(
                 format!("🍙 {}   ", format_hearts(pet.hungry_hearts())),
@@ -1113,7 +1116,7 @@ fn draw_habitat_screen(f: &mut Frame, device: Rect, app: &App) {
                 Style::default().fg(Color::LightMagenta),
             ),
             Span::styled(
-                format!("⚡ {}%", pet.energy),
+                format!("⚡ {}%{poop_suffix}", pet.energy),
                 Style::default().fg(Color::Yellow),
             ),
         ]));
@@ -1152,7 +1155,7 @@ fn draw_habitat_screen(f: &mut Frame, device: Rect, app: &App) {
                 Style::default().fg(Color::LightGreen),
             )),
             Line::from(Span::styled(
-                "[W/Space] Warm Egg  •  [I] Status Meter  •  [L] Sanctuary  •  [N] Adopt  •  [?] Keys",
+                "[W/Space] Warm  •  [I] Meter  •  [L] Pets  •  [N] Adopt  •  [?] Keys",
                 Style::default().fg(Color::DarkGray),
             )),
         ]
@@ -1163,7 +1166,7 @@ fn draw_habitat_screen(f: &mut Frame, device: Rect, app: &App) {
                 Style::default().fg(Color::LightGreen),
             )),
             Line::from(Span::styled(
-                "[←/→+Enter] Bezel  [F] Meal  [M] Pantry  [P] Play  [K] Light  [I] Meter  [L] Pets  [?] Keys",
+                "[←/→+Enter] Bezel  [F] Meal  [M] Pantry  [P] Play  [I] Meter  [L] Pets  [?] Keys",
                 Style::default().fg(Color::DarkGray),
             )),
         ]
@@ -1175,6 +1178,8 @@ fn draw_habitat_screen(f: &mut Frame, device: Rect, app: &App) {
 }
 
 /// Step-by-step Retro Status Meter Screen (`[I]` or Bezel `📏Meter`).
+/// When hatched, flipping `meter_page` (`0..=3`) cycles through 4 genuine
+/// retro status pages so nothing overflows vertically!
 fn draw_meter_screen(f: &mut Frame, device: Rect, app: &App) {
     let pet = &app.pet;
     let now = Utc::now();
@@ -1182,12 +1187,13 @@ fn draw_meter_screen(f: &mut Frame, device: Rect, app: &App) {
     let inner = shell.inner(device);
     f.render_widget(shell, device);
 
+    let page_idx = app.meter_page % 4;
     let title = if pet.stage == EvolutionStage::Egg {
-        "🥚 EGG INCUBATOR STATUS".to_string()
+        "🥚 Egg Incubator Status".to_string()
     } else {
         format!(
-            "📊 Tamagotchi Vitals  •  Page {}/4 (Space / ←/→)",
-            (app.meter_page % 4) + 1
+            "📊 Tamagotchi Vitals  •  Page {}/4 (←/→ or Space)",
+            page_idx + 1
         )
     };
     let lcd = lcd_screen_block(&title, Color::LightCyan);
@@ -1245,103 +1251,186 @@ fn draw_meter_screen(f: &mut Frame, device: Rect, app: &App) {
             Style::default().fg(Color::DarkGray),
         )));
     } else {
-        let xp_pct = (pet.xp_progress_ratio() * 100.0).round() as u8;
-        let target_xp = pet.stage.next_stage().map_or(pet.xp, |n| n.min_xp());
-        let disc_blocks = pet.discipline_blocks() as usize;
-        let disc_bar = format!(
-            "{}{}",
-            "■".repeat(disc_blocks),
-            "·".repeat(4usize.saturating_sub(disc_blocks))
-        );
-
-        lines.push(Line::from(Span::styled(
-            format!(
-                "{} ({})  •  {} Lv.{}  •  Age {}  •  Weight {}g (Base {}g)",
-                pet.name,
-                pet.species.display_name(),
-                pet.stage.badge(),
-                pet.level,
-                format_duration_human(pet.age_seconds),
-                pet.weight_grams,
-                pet.stage.base_weight_grams()
-            ),
-            Style::default()
-                .fg(Color::LightYellow)
-                .add_modifier(Modifier::BOLD),
-        )));
-        lines.push(Line::from(""));
-        lines.push(custom_meter_line(
-            "⭐ Stage XP",
-            xp_pct,
-            Color::LightMagenta,
-            &format!("{}/{} XP", pet.xp, target_xp),
-            Color::LightMagenta,
-        ));
-        lines.push(custom_meter_line(
-            "🍙 Hungry",
-            pet.hunger,
-            Color::LightGreen,
-            &format_hearts(pet.hungry_hearts()),
-            Color::LightGreen,
-        ));
-        lines.push(custom_meter_line(
-            "💖 Happy",
-            pet.happiness,
-            Color::LightMagenta,
-            &format_hearts(pet.happy_hearts()),
-            Color::LightMagenta,
-        ));
-        lines.push(custom_meter_line(
-            "📢 Discipline",
-            pet.discipline,
-            Color::LightYellow,
-            &format!("{disc_bar} {disc_blocks}/4"),
-            Color::LightYellow,
-        ));
-        lines.push(custom_meter_line(
-            "⚡ Energy",
-            pet.energy,
-            Color::Yellow,
-            if pet.is_sleeping { "Sleeping" } else { "Awake" },
-            Color::Yellow,
-        ));
-        lines.push(custom_meter_line(
-            "🚽 Hygiene",
-            pet.cleanliness,
-            Color::LightCyan,
-            &format!("Poop: {}", pet.poop_count),
-            Color::LightCyan,
-        ));
-        lines.push(custom_meter_line(
-            "💚 Health",
-            pet.health,
-            Color::LightRed,
-            if pet.has_toothache {
-                "Toothache!"
-            } else if pet.is_sick {
-                "Sick!"
-            } else {
-                "Healthy"
-            },
-            Color::LightGreen,
-        ));
-        lines.push(custom_meter_line(
-            "🤝 Bond",
-            pet.bond,
-            Color::LightBlue,
-            &format!("Mistakes: {}", pet.care_mistakes),
-            Color::Gray,
-        ));
-        lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled(
-            pet.next_evolution_requirements(),
-            Style::default().fg(Color::LightYellow),
-        )));
+        match page_idx {
+            0 => {
+                let xp_pct = (pet.xp_progress_ratio() * 100.0).round() as u8;
+                let target_xp = pet.stage.next_stage().map_or(pet.xp, |n| n.min_xp());
+                lines.push(Line::from(Span::styled(
+                    "PAGE 1/4  •  IDENTITY, WEIGHT & CARE RANK",
+                    Style::default()
+                        .fg(Color::LightYellow)
+                        .add_modifier(Modifier::BOLD),
+                )));
+                lines.push(Line::from(""));
+                lines.push(Line::from(format!(
+                    " • Companion: {} ({})",
+                    pet.name,
+                    pet.species.display_name()
+                )));
+                lines.push(Line::from(format!(
+                    " • Stage:     {} (Lv.{} • {} XP)",
+                    pet.stage.badge(),
+                    pet.level,
+                    pet.xp
+                )));
+                lines.push(Line::from(format!(
+                    " • Care Rank: {}",
+                    pet.care_rank().badge()
+                )));
+                lines.push(Line::from(format!(
+                    " • Real Age:  {}",
+                    format_duration_human(pet.age_seconds)
+                )));
+                lines.push(Line::from(format!(
+                    " • Weight:    {}g (Base {}g{})",
+                    pet.weight_grams,
+                    pet.stage.base_weight_grams(),
+                    if pet.is_overweight() {
+                        " — Overweight! Play [P]"
+                    } else {
+                        " — Healthy!"
+                    }
+                )));
+                lines.push(Line::from(""));
+                lines.push(custom_meter_line(
+                    "⭐ Stage XP",
+                    xp_pct,
+                    Color::LightMagenta,
+                    &format!("{}/{} XP", pet.xp, target_xp),
+                    Color::LightMagenta,
+                ));
+            }
+            1 => {
+                lines.push(Line::from(Span::styled(
+                    "PAGE 2/4  •  HUNGRY & HAPPY HEARTS",
+                    Style::default()
+                        .fg(Color::LightGreen)
+                        .add_modifier(Modifier::BOLD),
+                )));
+                lines.push(Line::from(""));
+                lines.push(custom_meter_line(
+                    "🍙 Hungry",
+                    pet.hunger,
+                    Color::LightGreen,
+                    &format_hearts(pet.hungry_hearts()),
+                    Color::LightGreen,
+                ));
+                lines.push(Line::from(""));
+                lines.push(custom_meter_line(
+                    "💖 Happy",
+                    pet.happiness,
+                    Color::LightMagenta,
+                    &format_hearts(pet.happy_hearts()),
+                    Color::LightMagenta,
+                ));
+                lines.push(Line::from(""));
+                lines.push(Line::from(format!(
+                    " • Sweet Streak:   {}/3 snacks {}",
+                    pet.snacks_in_a_row,
+                    if pet.has_toothache {
+                        "(🦷 TOOTHACHE!)"
+                    } else {
+                        "(Safe)"
+                    }
+                )));
+                lines.push(Line::from(format!(
+                    " • Favorite Meal:  {}",
+                    pet.species.favorite_snack()
+                )));
+                lines.push(Line::from(format!(" • Coins Purse:    {} 💰", pet.coins)));
+            }
+            2 => {
+                let disc_blocks = pet.discipline_blocks() as usize;
+                let disc_bar = format!(
+                    "{}{}",
+                    "■".repeat(disc_blocks),
+                    "·".repeat(4usize.saturating_sub(disc_blocks))
+                );
+                lines.push(Line::from(Span::styled(
+                    "PAGE 3/4  •  DISCIPLINE, HYGIENE & HEALTH",
+                    Style::default()
+                        .fg(Color::LightCyan)
+                        .add_modifier(Modifier::BOLD),
+                )));
+                lines.push(Line::from(""));
+                lines.push(custom_meter_line(
+                    "📢 Discipline",
+                    pet.discipline,
+                    Color::LightYellow,
+                    &format!("{disc_bar} {disc_blocks}/4"),
+                    Color::LightYellow,
+                ));
+                lines.push(custom_meter_line(
+                    "⚡ Energy",
+                    pet.energy,
+                    Color::Yellow,
+                    if pet.is_sleeping { "Sleeping" } else { "Awake" },
+                    Color::Yellow,
+                ));
+                lines.push(custom_meter_line(
+                    "🚽 Hygiene",
+                    pet.cleanliness,
+                    Color::LightCyan,
+                    &format!("Poop: {}", pet.poop_count),
+                    Color::LightCyan,
+                ));
+                lines.push(custom_meter_line(
+                    "💚 Health",
+                    pet.health,
+                    Color::LightRed,
+                    if pet.has_toothache {
+                        "Toothache!"
+                    } else if pet.is_sick {
+                        "Sick!"
+                    } else {
+                        "Healthy"
+                    },
+                    Color::LightGreen,
+                ));
+                lines.push(custom_meter_line(
+                    "🤝 Bond",
+                    pet.bond,
+                    Color::LightBlue,
+                    &format!("Mistakes: {}", pet.care_mistakes),
+                    Color::Gray,
+                ));
+                lines.push(Line::from(""));
+                lines.push(Line::from(format!(
+                    " • Room Light: {}   • Call: {}",
+                    if pet.light_on { "💡 ON" } else { "🌙 OFF" },
+                    pet.attention_call.badge()
+                )));
+            }
+            _ => {
+                lines.push(Line::from(Span::styled(
+                    "PAGE 4/4  •  EVOLUTION GOAL & CARE DIARY",
+                    Style::default()
+                        .fg(Color::LightMagenta)
+                        .add_modifier(Modifier::BOLD),
+                )));
+                lines.push(Line::from(""));
+                lines.push(Line::from(Span::styled(
+                    pet.next_evolution_requirements(),
+                    Style::default().fg(Color::LightYellow),
+                )));
+                lines.push(Line::from(""));
+                lines.push(Line::from(Span::styled(
+                    "Recent Care Diary:",
+                    Style::default().fg(Color::White),
+                )));
+                for entry in pet.action_log.iter().rev().take(4) {
+                    lines.push(Line::from(Span::styled(
+                        format!(" • {entry}"),
+                        Style::default().fg(Color::Gray),
+                    )));
+                }
+            }
+        }
     }
 
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "[Esc / I] Return to Habitat",
+        "[←/→ or Space] Flip Page   •   [Esc / I] Return to Habitat",
         Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
     )));
 
@@ -1355,7 +1444,10 @@ fn draw_pantry_screen(f: &mut Frame, device: Rect, app: &App) {
     f.render_widget(shell, device);
 
     let lcd = lcd_screen_block(
-        &format!("COINS: {} 💰  •  SWEET STREAK: {}/3", app.pet.coins, app.pet.snacks_in_a_row),
+        &format!(
+            "COINS: {} 💰  •  SWEET STREAK: {}/3",
+            app.pet.coins, app.pet.snacks_in_a_row
+        ),
         Color::LightYellow,
     );
     let lcd_inner = lcd.inner(inner);
@@ -1470,7 +1562,6 @@ fn draw_help_screen(f: &mut Frame, device: Rect, app: &App) {
         Line::from(" • Button A (←/→): Select icon on top bezel"),
         Line::from(" • Button B (Enter): Open highlighted icon"),
         Line::from(" • Button C (Esc): Return to main LCD Habitat"),
-        Line::from(""),
         Line::from(Span::styled(
             "🍙 Meals vs. Sweet Snacks & Weight (g)",
             Style::default()
@@ -1478,17 +1569,17 @@ fn draw_help_screen(f: &mut Frame, device: Rect, app: &App) {
                 .add_modifier(Modifier::BOLD),
         )),
         Line::from(" • [F] Meal (+1 Hungry ♥, +1g) • [M] Pantry Menu"),
-        Line::from(" • 3 Sweet Snacks in a row = Toothache 🦷 (cure with [H] Meds)"),
+        Line::from(" • 3 Sweet Snacks in a row = Toothache 🦷 ([H] Meds)"),
         Line::from(" • [P] Play / [E] Train burns -2g weight!"),
-        Line::from(""),
         Line::from(Span::styled(
             "💡 Room Light, Discipline & Sanctuary",
             Style::default()
                 .fg(Color::LightCyan)
                 .add_modifier(Modifier::BOLD),
         )),
-        Line::from(" • [S] Sleep + [K] Turn Light OFF • [C] Bath • [D] Scold • [T] Praise"),
-        Line::from(" • [I] Status Meter • [G] Arcade • [L] Sanctuary Pets • [N] Adopt New"),
+        Line::from(" • [S] Sleep + [K] Light OFF • [C] Bath • [D] Scold"),
+        Line::from(" • [T] Praise • [I] 4-Page Meter • [G] Arcade"),
+        Line::from(" • [L] Sanctuary Pets • [N] Adopt • [R] Rename"),
         Line::from(""),
         Line::from(Span::styled(
             "[Esc / Enter / ?] Return to Habitat",
@@ -1496,10 +1587,7 @@ fn draw_help_screen(f: &mut Frame, device: Rect, app: &App) {
         )),
     ];
 
-    f.render_widget(
-        Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false }),
-        lcd_inner,
-    );
+    f.render_widget(Paragraph::new(Text::from(lines)), lcd_inner);
 }
 
 /// Step-by-step Sanctuary Roster Screen (`[L]`): browse pets one card at a time!
@@ -1548,7 +1636,7 @@ fn draw_roster_screen(f: &mut Frame, device: Rect, app: &App) {
         )),
         Line::from(""),
     ];
-    lines.extend(render_colored_sprite(highlighted, app.tick_count));
+    lines.extend(render_colored_sprite(highlighted, app.tick_count).into_iter().take(10));
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
         format!(
@@ -1559,9 +1647,8 @@ fn draw_roster_screen(f: &mut Frame, device: Rect, app: &App) {
         ),
         Style::default().fg(Color::White),
     )));
-    lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "[←/→ or ↑/↓] Browse Pets   [Enter] Switch Active   [N] Adopt New   [Esc] Back",
+        "[←/→ or ↑/↓] Browse   [Enter] Switch   [N] Adopt   [Esc/L] Back",
         Style::default()
             .fg(Color::LightYellow)
             .add_modifier(Modifier::BOLD),
@@ -1748,6 +1835,7 @@ mod tests {
             let mut terminal = Terminal::new(backend).unwrap();
             let paths = tmp_paths(&format!("render{w}"));
             let mut app = App::new(Pet::new("Mochi"), paths);
+            app.pet.stage = EvolutionStage::Adult;
             app.pantry_open = true;
             terminal.draw(|f| draw_ui(f, &app)).unwrap();
             app.pantry_open = false;

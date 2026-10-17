@@ -1,10 +1,15 @@
 [package]
 name = "mochigotchi"
-version = "0.6.0"
+version = "1.0.0"
 edition = "2021"
-description = "Mochigotchi — Your Cozy Pocket Pet in the Terminal (Universal Tamagotchi Simulator with Ratatui & SQLite/JSON Persistence)"
-authors = ["Mochigotchi Contributors"]
+description = "Mochigotchi — Minimalist Retro Handheld V-Pet & 24x16 TrueColor Pixel Art Tamagotchi in the Terminal"
+authors = ["Muhammad Raffi Aqsan (NojinNojs)"]
 license = "MIT"
+readme = "README.md"
+repository = "https://github.com/NojinNojs/mochigotchi"
+homepage = "https://github.com/NojinNojs/mochigotchi"
+keywords = ["tamagotchi", "virtual-pet", "tui", "ratatui", "pixel-art"]
+categories = ["games", "command-line-utilities"]
 
 [dependencies]
 ratatui = "0.28"

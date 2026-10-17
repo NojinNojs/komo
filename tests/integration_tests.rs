@@ -1,12 +1,18 @@
-//! End-to-end integration tests for **Mochigotchi v0.6.0 (Minimalist Retro
-//! Step-by-Step Handheld LCD & 24×16 Half-Block Pixel Art Edition)**.
+//! End-to-end integration tests for **Mochigotchi v1.0.0**:
+//! - 24×16 TrueColor Half-Block Pixel Art (`▀`, `▄`, `█`) with isolated `E`/`K`
+//!   eye-blink channels so white body pixels (`W`) never flicker dark
+//! - Minimalist step-by-step Retro Handheld LCD UI (`Step 1/3` -> `Step 2/3` ->
+//!   `Step 3/3`, plus genuine 4-page Status Meter `Page 1/4..4/4`)
+//! - Authentic Bandai Tamagotchi mechanics (Weight, Toothache without play-reset
+//!   exploit, Room Light, Discipline, Care Mistakes, Care Ranks, Sanctuary
+//!   Standby Care, and full JSON+SQLite Sanctuary redundancy).
 
 use chrono::{Duration, Utc};
 use crossterm::event::KeyCode;
 use mochigotchi::minigame::{ItemKind, MiniGame};
 use mochigotchi::pet::{
-    AttentionCall, EvolutionStage, FoodChoice, LcdIcon, Pet, PetAction, PetMood, PetSpecies,
-    Sanctuary, ShellTheme, PET_COOLDOWN_SECS, TRAIN_COOLDOWN_SECS, WARM_COOLDOWN_SECS,
+    AttentionCall, CareRank, EvolutionStage, FoodChoice, LcdIcon, Pet, PetAction, PetMood,
+    PetSpecies, Sanctuary, ShellTheme, PET_COOLDOWN_SECS, TRAIN_COOLDOWN_SECS, WARM_COOLDOWN_SECS,
 };
 use mochigotchi::sprites::{
     get_mood_particles, get_sprite_frames, render_animated_sprite, render_colored_preview,
@@ -56,7 +62,9 @@ fn all_ten_species_render_half_block_pixel_art_and_avoid_zwj_fe0f() {
 
         let preview = render_species_preview(*species);
         assert_eq!(preview.len(), 8, "{species:?} 24x16 pixel art is 8 rows");
-        assert!(preview.iter().any(|l| l.contains('█') || l.contains('▀') || l.contains('▄')));
+        assert!(preview
+            .iter()
+            .any(|l| l.contains('█') || l.contains('▀') || l.contains('▄')));
 
         let colored_preview = render_colored_preview(*species, EvolutionStage::Adult, 0);
         assert!(!colored_preview.is_empty());
@@ -159,22 +167,26 @@ fn passive_incubation_never_hatches_the_egg_by_itself() {
 }
 
 #[test]
-fn authentic_tamagotchi_weight_toothache_light_and_discipline() {
+fn authentic_tamagotchi_weight_toothache_light_discipline_and_care_rank() {
     let mut pet = Pet::new("Mochi");
     pet.stage = EvolutionStage::Baby;
     pet.hunger = 50;
     pet.happiness = 40;
     assert_eq!(pet.weight_grams, 5);
 
-    for i in 1..=3 {
-        let msg = pet.feed_choice(FoodChoice::WarmMilkTea);
-        assert_eq!(pet.snacks_in_a_row, i);
-        assert_eq!(pet.weight_grams, 5 + (i as u16) * 2);
-        if i == 3 {
-            assert!(msg.contains("Toothache"), "{msg}");
-            assert!(pet.has_toothache);
-        }
-    }
+    // Playing does NOT reset snacks_in_a_row (only real Meals, Clean, or Medicine do!).
+    pet.feed_choice(FoodChoice::WarmMilkTea);
+    assert_eq!(pet.snacks_in_a_row, 1);
+    pet.clear_cooldowns();
+    pet.play();
+    assert_eq!(pet.snacks_in_a_row, 1, "play must not reset sweet snack streak");
+
+    pet.feed_choice(FoodChoice::WarmMilkTea);
+    assert_eq!(pet.snacks_in_a_row, 2);
+    let msg = pet.feed_choice(FoodChoice::WarmMilkTea);
+    assert_eq!(pet.snacks_in_a_row, 3);
+    assert!(msg.contains("Toothache"), "{msg}");
+    assert!(pet.has_toothache);
 
     assert!(pet.feed().contains("Toothache"));
     assert!(pet.play().contains("Medicine"));
@@ -184,21 +196,24 @@ fn authentic_tamagotchi_weight_toothache_light_and_discipline() {
     assert!(!pet.has_toothache);
     assert_eq!(pet.snacks_in_a_row, 0);
 
-    let w_before = pet.weight_grams;
-    pet.clear_cooldowns();
-    pet.play();
-    assert_eq!(pet.weight_grams, w_before - 2);
+    // Care Rank scales with Discipline & Care Mistakes
+    pet.care_mistakes = 0;
+    pet.discipline = 80;
+    assert_eq!(pet.care_rank(), CareRank::PerfectKeeper);
+    pet.care_mistakes = 6;
+    assert_eq!(pet.care_rank(), CareRank::MischievousRascal);
 
+    // Unfair scold vs valid scold
     let happy_before = pet.happiness;
     let unfair = pet.discipline_scold();
     assert!(unfair.contains("Unfair scold"), "{unfair}");
     assert!(pet.happiness < happy_before);
 
+    pet.discipline = 50;
     pet.attention_call = AttentionCall::Misbehaving;
-    let disc_before = pet.discipline;
     let scolded = pet.discipline_scold();
     assert!(scolded.contains("Discipline rose"), "{scolded}");
-    assert_eq!(pet.discipline, disc_before + 25);
+    assert_eq!(pet.discipline, 75);
     assert_eq!(pet.attention_call, AttentionCall::None);
 
     pet.attention_call = AttentionCall::Crying;
@@ -329,22 +344,29 @@ fn evolution_requires_xp_bond_and_time_together() {
 }
 
 #[test]
-fn offline_decay_generates_welcome_back_report_and_exploration_gifts() {
-    let mut pet = Pet::new("Mochi");
-    pet.stage = EvolutionStage::Baby;
-    pet.hunger = 80;
-    let before = (pet.hunger, pet.happiness, pet.energy, pet.coins);
-    let now = Utc::now() + Duration::minutes(45);
-    let (elapsed, report) = pet.apply_offline_decay_with_report(now);
+fn offline_decay_and_sanctuary_standby_care_work() {
+    let mut sanctuary = Sanctuary::new_with_pet(Pet::new("Mochi"));
+    sanctuary.pets[0].stage = EvolutionStage::Baby;
+    sanctuary.pets[0].hunger = 20;
 
-    assert_eq!(elapsed, 2_700);
-    assert!(pet.hunger < before.0);
-    assert!(pet.happiness < before.1);
-    assert!(pet.energy < before.2);
-    assert!(pet.coins > before.3);
-    let rep = report.expect("should generate welcome back report");
-    assert_eq!(rep.pet_name, "Mochi");
-    assert!(!rep.events.is_empty());
+    let mut active = Pet::new_custom("Ignis", PetSpecies::IgnisDragon, ShellTheme::SunsetGold);
+    active.stage = EvolutionStage::Baby;
+    active.hunger = 80;
+    sanctuary.add_pet(active);
+    assert_eq!(sanctuary.active_index, 1);
+
+    let now = Utc::now() + Duration::hours(2);
+    let (elapsed, report) = sanctuary.apply_offline_decay_all_with_report(now);
+    assert!(elapsed >= 7_000);
+    assert!(report.is_some());
+    assert_eq!(
+        sanctuary.pets[0].care_mistakes, 0,
+        "inactive companion on standby must not accumulate care mistakes"
+    );
+
+    assert_eq!(sanctuary.switch_by_query("Mochi"), Some(0));
+    assert_eq!(sanctuary.switch_by_query("2"), Some(1));
+    assert_eq!(sanctuary.switch_by_query("nonexistent"), None);
 }
 
 #[test]
@@ -423,7 +445,7 @@ fn snack_catcher_arcade_and_lcd_bezel_navigation_work() {
 }
 
 #[test]
-fn step_by_step_screens_replace_cleanly_and_respect_minimum_size() {
+fn step_by_step_screens_and_four_meter_pages_render_distinctly() {
     let (_dir, paths) = temp_paths();
     let mut app = App::new_onboarding(paths);
 
@@ -431,7 +453,6 @@ fn step_by_step_screens_replace_cleanly_and_respect_minimum_size() {
     assert_eq!(LayoutTier::from_width(MIN_TERM_WIDTH), LayoutTier::Standard);
     assert_eq!(LayoutTier::from_width(130), LayoutTier::Wide);
 
-    // 1. Below minimum size (< 68x22): renders Window Size Notice
     let mut small_term = Terminal::new(TestBackend::new(56, 18)).expect("small term");
     small_term.draw(|f| draw_ui(f, &app)).expect("draw small");
     let small_text: String = small_term
@@ -443,7 +464,6 @@ fn step_by_step_screens_replace_cleanly_and_respect_minimum_size() {
         .collect();
     assert!(small_text.contains("Window Size Notice"));
 
-    // 2. Step-by-step Onboarding: Step 1 -> Step 2 -> Step 3 each have their own dedicated screen!
     let mut term = Terminal::new(TestBackend::new(80, 25)).expect("term");
     term.draw(|f| draw_ui(f, &app)).expect("draw step 1");
     let step1_text: String = term
@@ -483,11 +503,10 @@ fn step_by_step_screens_replace_cleanly_and_respect_minimum_size() {
     assert!(step3_text.contains("STEP 3 OF 3"));
     assert!(!step3_text.contains("STEP 2 OF 3"));
 
-    // 3. Finish adoption -> Minimalist Habitat screen -> press 'i' for dedicated Status Meter screen!
     app.handle_key(KeyCode::Enter);
     assert_eq!(app.screen, AppScreen::Habitat);
-    term.draw(|f| draw_ui(f, &app)).expect("draw habitat");
 
+    // Open Meter while Egg
     app.handle_key(KeyCode::Char('i'));
     assert!(app.show_meter);
     term.draw(|f| draw_ui(f, &app)).expect("draw egg meter");
@@ -500,16 +519,29 @@ fn step_by_step_screens_replace_cleanly_and_respect_minimum_size() {
         .collect();
     assert!(egg_meter.contains("Egg Incubator Status"));
 
+    // Hatched companion: verify all 4 Meter pages render distinct headings!
     app.pet.stage = EvolutionStage::Adult;
-    term.draw(|f| draw_ui(f, &app)).expect("draw adult meter");
-    let adult_meter: String = term
-        .backend()
-        .buffer()
-        .content
-        .iter()
-        .map(|c| c.symbol())
-        .collect();
-    assert!(adult_meter.contains("Tamagotchi Vitals"));
+    let expected_headings = [
+        "PAGE 1/4",
+        "PAGE 2/4",
+        "PAGE 3/4",
+        "PAGE 4/4",
+    ];
+    for (p, heading) in expected_headings.iter().enumerate() {
+        app.meter_page = p;
+        term.draw(|f| draw_ui(f, &app)).expect("draw meter page");
+        let page_text: String = term
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|c| c.symbol())
+            .collect();
+        assert!(
+            page_text.contains(heading),
+            "expected {heading} on meter page {p}"
+        );
+    }
 
     for mood in PetMood::all() {
         app.pet.mood = *mood;

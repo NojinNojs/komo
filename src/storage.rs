@@ -1,9 +1,9 @@
-//! Dual persistence for **Mochigotchi**.
+//! Dual persistence for **Mochigotchi v1.0.0**.
 //!
-//! Every save is written twice: a human-readable JSON file *and* a SQLite
-//! database. By default, saves live under `~/.local/share/mochigotchi/` so you
-//! can launch `mochigotchi` (or `mochi` / `tamagotchi`) from any working
-//! directory in your terminal and always reach the same Sanctuary.
+//! Every save is written twice: an atomic human-readable JSON file *and* a
+//! SQLite database (`sanctuary_saves` + `pet_saves`). Both JSON and SQLite
+//! store the full multi-pet [`Sanctuary`] roster for 100% redundancy, while
+//! transparently upgrading legacy single-pet saves on load.
 
 use std::env;
 use std::error::Error;
@@ -66,20 +66,41 @@ fn ensure_parent(path: &Path) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+fn write_atomic(path: &Path, content: &str) -> Result<(), Box<dyn Error>> {
+    ensure_parent(path)?;
+    let tmp_path = path.with_extension("json.tmp");
+    fs::write(&tmp_path, content)?;
+    fs::rename(&tmp_path, path)?;
+    Ok(())
+}
+
 // ── Single-pet (legacy-compatible) API ─────────────────────────────────────
 
 pub fn save_json(pet: &Pet, path: &Path) -> Result<(), Box<dyn Error>> {
-    ensure_parent(path)?;
     let json = serde_json::to_string_pretty(pet)?;
-    fs::write(path, json)?;
-    Ok(())
+    write_atomic(path, &json)
 }
 
 pub fn load_json(path: &Path) -> Result<Pet, Box<dyn Error>> {
     let raw = fs::read_to_string(path)?;
-    let mut pet: Pet = serde_json::from_str(&raw)?;
-    pet.refresh_mood();
-    Ok(pet)
+    if let Ok(mut pet) = serde_json::from_str::<Pet>(&raw) {
+        if !pet.name.is_empty() {
+            // Also check if this JSON actually contains a full Sanctuary with pets
+            if let Ok(mut s) = serde_json::from_str::<Sanctuary>(&raw) {
+                if !s.pets.is_empty() && raw.contains("\"pets\"") {
+                    let active = s.active_pet_mut();
+                    active.refresh_mood();
+                    return Ok(active.clone());
+                }
+            }
+            pet.refresh_mood();
+            return Ok(pet);
+        }
+    }
+    let mut s: Sanctuary = serde_json::from_str(&raw)?;
+    let active = s.active_pet_mut();
+    active.refresh_mood();
+    Ok(active.clone())
 }
 
 pub fn save_sqlite(pet: &Pet, path: &Path) -> Result<(), Box<dyn Error>> {
@@ -173,17 +194,18 @@ fn ensure_sanctuary_table(conn: &Connection) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-/// Persist the whole roster: active pet into the classic dual stores, and the
-/// complete collection into `sanctuary_saves`.
+/// Persist the whole roster redundantly into both `mochigotchi_save.json`
+/// (atomic write) and SQLite (`sanctuary_saves` + active pet mirror `pet_saves`).
 pub fn save_sanctuary(sanctuary: &Sanctuary, paths: &StoragePaths) -> Result<(), Box<dyn Error>> {
     let active = sanctuary.active_pet();
-    save_dual(active, paths)?;
+    save_sqlite(active, &paths.sqlite_path)?;
+
+    let json = serde_json::to_string_pretty(sanctuary)?;
+    write_atomic(&paths.json_path, &json)?;
 
     ensure_parent(&paths.sqlite_path)?;
     let conn = Connection::open(&paths.sqlite_path)?;
     ensure_sanctuary_table(&conn)?;
-
-    let json = serde_json::to_string_pretty(sanctuary)?;
     conn.execute(
         "INSERT INTO sanctuary_saves (id, sanctuary_json, pet_count, updated_at)
          VALUES (1, ?1, ?2, ?3)
@@ -196,7 +218,8 @@ pub fn save_sanctuary(sanctuary: &Sanctuary, paths: &StoragePaths) -> Result<(),
     Ok(())
 }
 
-/// Load the roster, transparently upgrading a legacy single-pet save.
+/// Load the roster from SQLite or JSON, transparently upgrading a legacy
+/// single-pet save.
 pub fn load_sanctuary(paths: &StoragePaths) -> Result<Sanctuary, Box<dyn Error>> {
     if paths.sqlite_path.exists() {
         if let Ok(conn) = Connection::open(&paths.sqlite_path) {
@@ -214,6 +237,21 @@ pub fn load_sanctuary(paths: &StoragePaths) -> Result<Sanctuary, Box<dyn Error>>
                             }
                             return Ok(s);
                         }
+                    }
+                }
+            }
+        }
+    }
+
+    if paths.json_path.exists() {
+        if let Ok(raw) = fs::read_to_string(&paths.json_path) {
+            if raw.contains("\"pets\"") {
+                if let Ok(mut s) = serde_json::from_str::<Sanctuary>(&raw) {
+                    if !s.pets.is_empty() {
+                        for pet in &mut s.pets {
+                            pet.refresh_mood();
+                        }
+                        return Ok(s);
                     }
                 }
             }
@@ -257,7 +295,7 @@ mod tests {
     }
 
     #[test]
-    fn sanctuary_roundtrip_keeps_every_pet() {
+    fn sanctuary_roundtrip_keeps_every_pet_even_if_sqlite_is_removed() {
         let paths = temp_paths("sanctuary");
         let _ = fs::remove_dir_all(paths.json_path.parent().unwrap());
 
@@ -277,8 +315,13 @@ mod tests {
         let loaded = load_sanctuary(&paths).unwrap();
         assert_eq!(loaded.pets.len(), 3);
         assert_eq!(loaded.active_pet().name, "Mochi");
-        assert_eq!(loaded.pets[0].species, PetSpecies::IgnisDragon);
-        assert_eq!(loaded.pets[1].species, PetSpecies::AzureWyrm);
+
+        // Remove SQLite and verify JSON alone still restores all 3 companions!
+        let _ = fs::remove_file(&paths.sqlite_path);
+        let from_json = load_sanctuary(&paths).unwrap();
+        assert_eq!(from_json.pets.len(), 3);
+        assert_eq!(from_json.pets[0].species, PetSpecies::IgnisDragon);
+        assert_eq!(from_json.pets[1].species, PetSpecies::AzureWyrm);
 
         let _ = fs::remove_dir_all(paths.json_path.parent().unwrap());
     }

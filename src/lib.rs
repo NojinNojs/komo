@@ -1,8 +1,9 @@
-//! # Mochigotchi v0.5.1
+//! # Mochigotchi v1.0.0
 //!
 //! A cozy, collectible pocket-pet simulator for your terminal with
-//! reverse-engineered authentic Bandai Tamagotchi mechanics, a minimum
-//! viewport size guard (`90 × 26`), and precision-aligned TrueColor ASCII art.
+//! reverse-engineered authentic Bandai Tamagotchi mechanics, a minimalist
+//! step-by-step retro handheld LCD UI (`68 × 22` minimum viewport), and a
+//! 24×16 TrueColor half-block pixel art engine (`▀`, `▄`, `█`).
 
 pub mod minigame;
 pub mod pet;
@@ -12,8 +13,8 @@ pub mod tui;
 
 pub use minigame::{FallingItem, ItemKind, MiniGame};
 pub use pet::{
-    format_duration_human, format_hearts, AttentionCall, EvolutionStage, FoodChoice, LcdIcon,
-    OfflineReport, Pet, PetAction, PetMood, PetSpecies, PetState, Sanctuary, ShellTheme,
+    format_duration_human, format_hearts, AttentionCall, CareRank, EvolutionStage, FoodChoice,
+    LcdIcon, OfflineReport, Pet, PetAction, PetMood, PetSpecies, PetState, Sanctuary, ShellTheme,
     FEED_COOLDOWN_SECS, PET_COOLDOWN_SECS, PLAY_COOLDOWN_SECS, TRAIN_COOLDOWN_SECS,
     WARM_COOLDOWN_SECS,
 };

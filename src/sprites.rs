@@ -1,11 +1,22 @@
-//! TrueColor Half-Block Pixel Art Engine (`▀`, `▄`, `█`) for **Mochigotchi**.
+//! TrueColor Half-Block Pixel Art Engine (`▀`, `▄`, `█`) for **Mochigotchi v1.0.0**.
 //!
-//! Instead of fragile slash/parenthesis text ASCII art, every companion is
-//! rendered as a genuine **24×16 pixel bitmap** using Unicode half-blocks
-//! (`▀` upper half, `▄` lower half, `█` full block, and transparent space).
-//! Two vertical bitmap pixels pack into a single terminal cell (`1:1` square
-//! pixel aspect ratio), producing crisp 16-bit handheld V-Pet sprites that
-//! never misalign or wrap on any terminal font.
+//! Every companion is rendered as a genuine **24×16 pixel bitmap** using
+//! Unicode half-blocks (`▀` upper half, `▄` lower half, `█` full block, and
+//! transparent space). Two vertical bitmap pixels pack into a single terminal
+//! cell (`1:1` square pixel aspect ratio), producing crisp 16-bit handheld
+//! V-Pet sprites that never misalign or wrap on any terminal font.
+//!
+//! Palette codes:
+//! - `.` = Transparent background
+//! - `O` = Dark pixel outline (`#2a243e`)
+//! - `B` = Primary species body color
+//! - `S` = Secondary / belly / highlight color
+//! - `A` = Accent color (horns, flames, pearl, crown, markings)
+//! - `W` = Pure white body/belly/cloud/pearl (never affected by eye blinking!)
+//! - `E` = Eye shine white (turns into eyelid `O` when blinking/sleeping)
+//! - `K` = Eye pupil dark (turns into eyelid `O` when blinking/sleeping)
+//! - `P` = Rosy cheek / heart pink
+//! - `G` = Royal Gold
 
 use crate::pet::{EvolutionStage, Pet, PetMood, PetSpecies, ShellTheme};
 use ratatui::{
@@ -16,20 +27,11 @@ use ratatui::{
 const CANVAS_W: usize = 24;
 const CANVAS_H: usize = 16;
 
-/// Hand-crafted 24×16 pixel art bitmaps for each species (Adult base form).
-/// Palette legend:
-/// - `.` = Transparent
-/// - `O` = Dark pixel outline
-/// - `B` = Primary species body color
-/// - `S` = Secondary / belly / highlight color
-/// - `A` = Accent color (horns, flames, pearl, crown, markings)
-/// - `W` = Pure white (eye shine, teeth, clouds)
-/// - `K` = Eye pupil (replaced with blink line on frame 1 / sleeping)
-/// - `P` = Rosy cheek / heart pink
-/// - `G` = Royal Gold
+/// Hand-crafted 24×16 pixel art bitmaps for each species (Adult form).
+/// Uses `E` + `K` for eyes so white body parts (`W`) never flicker on blink!
 fn adult_bitmap(species: PetSpecies) -> [&'static str; CANVAS_H] {
     match species {
-        // 🐱 Neko Mochi — pointed ears, round mochi cheeks, bell collar, curled tail
+        // 🐱 Neko Mochi
         PetSpecies::MochiCat => [
             "........................",
             "....OO..........OO......",
@@ -37,9 +39,9 @@ fn adult_bitmap(species: PetSpecies) -> [&'static str; CANVAS_H] {
             "..OBPPBOOOOOOOOBPPBO....",
             "..OBBBBBBBBBBBBBBBBO....",
             ".OBBBBBBBBBBBBBBBBBBO...",
-            ".OBBWWKBBBBBBBBWWKBBO...",
+            ".OBBEEKBBBBBBBBEEKBBO...",
             ".OBBKKKBBBBBBBBKKKBBO...",
-            ".OBGPPBBBBAAABBBBPPBO...",
+            ".OBBPPBBBBAAABBBBPPBO...",
             "..OBBBBBBOOGGOOBBBBBO...",
             "...OOOOOBSSSSSSBOOOO....",
             "...OBBBBSSSSSSSSBBBBO...",
@@ -48,14 +50,14 @@ fn adult_bitmap(species: PetSpecies) -> [&'static str; CANVAS_H] {
             "....OOBBBOOOOOOBBBOOOBA.",
             ".....OOOO......OOOO.OO..",
         ],
-        // 🐶 Boba Pup — floppy dark ears, biscuit snout, boba pearl belly
+        // 🐶 Boba Pup
         PetSpecies::BobaPup => [
             "........................",
             "...OOOOO........OOOOO...",
             "..OSSSSSOOOOOOOOSSSSSO..",
             ".OSSSSSBBBBBBBBBBSSSSSO.",
             ".OSSSSBBBBBBBBBBBBSSSSO.",
-            ".OSSSBBWWKBBBBWWKBBSSSO.",
+            ".OSSSBBEEKBBBBEEKBBSSSO.",
             "..OOOBBKKKBBBBKKKBBOOO..",
             "...OBBBBSSSSSSSSBBBBBO..",
             "...OBBBSSSOOOOSSSBbbBO..",
@@ -67,7 +69,7 @@ fn adult_bitmap(species: PetSpecies) -> [&'static str; CANVAS_H] {
             "....OOBBBOOOOOOBBBOOOO..",
             ".....OOOO......OOOO.....",
         ],
-        // 🐰 Cloud Bun — tall bunny ears, fluffy cloud puffs, carrot charm
+        // 🐰 Cloud Bun
         PetSpecies::CloudBun => [
             ".....OOO........OOO.....",
             "....OBPBO......OBPBO....",
@@ -75,7 +77,7 @@ fn adult_bitmap(species: PetSpecies) -> [&'static str; CANVAS_H] {
             "....OBPBO......OBPBO....",
             "....OBBBOOOOOOOOBBBO....",
             "...OBBBBBBBBBBBBBBBBO...",
-            "..OBBWWKBBBBBBBBWWKBBO..",
+            "..OBBEEKBBBBBBBBEEKBBO..",
             "..OBBKKKBBBBBBBBKKKBBO..",
             "..OBBPPBBBBPPBBBBPPBBO..",
             "...OBBBBBOOOOOOBBBBBO...",
@@ -86,14 +88,14 @@ fn adult_bitmap(species: PetSpecies) -> [&'static str; CANVAS_H] {
             "....OOBBBOOOOOOBBBOO....",
             ".....OOOO......OOOO.....",
         ],
-        // 🐧 Star Pengu — aurora hood, snow white belly, golden beak & feet
+        // 🐧 Star Pengu (uses W for snow white belly, E/K for eyes!)
         PetSpecies::StarPengu => [
             "........................",
             ".......OOOOOOOOOO.......",
             ".....OOBBBBBBBBBBOO.....",
             "....OBBBBBGAAGBBBBBO....",
             "...OBBBBWWWWWWWWBBBBO...",
-            "...OBBBWWKWWWWWWKBBBO...",
+            "...OBBBEEKWWWWEEKBBBO...",
             "...OBBBKKKWWWWKKKBBBO...",
             "...OBBBWWWWGGWWWWBBBO...",
             "..OOBBWWWWGGGGWWWWBBOO..",
@@ -105,13 +107,13 @@ fn adult_bitmap(species: PetSpecies) -> [&'static str; CANVAS_H] {
             "....OOGGGOOOOOOGGGOO....",
             ".....OOOO......OOOO.....",
         ],
-        // 🐉 Ignis Drake — golden horns, crimson scales, wide dragon wings, fire tail
+        // 🐉 Ignis Drake
         PetSpecies::IgnisDragon => [
             "...AA..............AA...",
             "..GAAG....OOOO....GAAG..",
             "...OAAOOOBBBBBBOOAAO....",
             "....OOBBBBBBBBBBBBOO....",
-            ".OO..OBBWWKBBWWKBBO..OO.",
+            ".OO..OBBEEKBBEEKBBO..OO.",
             "OAAO.OBBKKKBBKKKBBO.OAAO",
             "OABBOOBBBBBAAABBBBOOBBAO",
             "OABBBOOOOBSSSSBOOOOBBBAO",
@@ -124,13 +126,13 @@ fn adult_bitmap(species: PetSpecies) -> [&'static str; CANVAS_H] {
             ".....OOOO......OOOO.....",
             "........................",
         ],
-        // 🐲 Azure Wyrm — eastern sky/sea dragon, antler crest, moon pearl, wave body
+        // 🐲 Azure Wyrm
         PetSpecies::AzureWyrm => [
             "....AA............AA....",
             "...OAOO..OOOOOO..OOAO...",
             "....OOAOBBBBBBBBOAO.....",
             ".....OBBBBBBBBBBBBO.....",
-            "....OBBWWKBBBBWWKBBO....",
+            "....OBBEEKBBBBEEKBBO....",
             "....OBBKKKBBBBKKKBBO....",
             "...OOBBBBBSSSSBBBBBOO...",
             "..OABBOOOOBWWBOOOOBBAO..",
@@ -143,14 +145,14 @@ fn adult_bitmap(species: PetSpecies) -> [&'static str; CANVAS_H] {
             "..OOOO............OOOO..",
             "........................",
         ],
-        // 🦊 Kitsune Nine — shrine fox ears, vermilion fur, fanned tails & foxfire orbs
+        // 🦊 Kitsune Nine
         PetSpecies::EmberFox => [
             "..OOO..............OOO..",
             ".OBWBO............OBWBO.",
             ".OBWWBO..OOOOOO..OBWWBO.",
             "..OBBBBOOBBBBBBOOBBBBO..",
             "...OBBBBBBBBBBBBBBBBO...",
-            "..OBBWWKBBBBBBBBWWKBBO..",
+            "..OBBEEKBBBBBBBBEEKBBO..",
             "..OBBKKKBBBBBBBBKKKBBO..",
             "..OBBPPBBBWWWWBBBPPBBO..",
             "...OOBBBBBWAAWBBBBBOO...",
@@ -158,18 +160,18 @@ fn adult_bitmap(species: PetSpecies) -> [&'static str; CANVAS_H] {
             "AWWA..OBBSSSSSSBBO..AWWA",
             ".AA..OBBBSSSSSSBBBO..AA.",
             "....OBBBBBBBBBBBBBBOOO..",
-            "...OOBBBOOOOOOBBBOOssSO.",
+            "...OOBBBOOOOOOBBBOOSSS0.",
             "....OOOO......OOOO.OSSO.",
             "....................OO..",
         ],
-        // 🦅 Sol Phoenix — solar crest, wide fiery wings, golden tail plumes
+        // 🦅 Sol Phoenix
         PetSpecies::PhoenixChick => [
             ".........GG..GG.........",
             "........OGGAAGGO........",
             "..OO...OBBBBBBBBO...OO..",
             ".OAAO.OBBBBBBBBBBO.OAAO.",
-            "OAGGGOOBBWWKWWKBBOOGGGAO",
-            "OAGBBBOOBKKKGGGKKBOOBBGAO",
+            "OAGGGOOBBEEKWEEKBBOOGGGA",
+            "OAGBBBOOBKKKGGGKKBOOBBGA",
             "OABBBBBOOBBGGGGBOOBBBBAO",
             ".OABBBBBBBBBBBBBBBBBBAO.",
             "..OOBBBBBSSSSSSBBBBBOO..",
@@ -181,14 +183,14 @@ fn adult_bitmap(species: PetSpecies) -> [&'static str; CANVAS_H] {
             "....OOOOO......OOOOO....",
             "........................",
         ],
-        // 🦄 Astra Unicorn — golden spiral horn, prism mane, celestial hooves
+        // 🦄 Astra Unicorn
         PetSpecies::CrystalUni => [
             "...........GG...........",
             "..........OGGO..........",
             "......OO..OGGO..OO......",
             ".....OBBOOOGGOOOBBO.....",
             "....OBBBBBBBBBBBBBBO....",
-            "...OBBWWKBBBBBBWWKBBO...",
+            "...OBBEEKBBBBBBEEKBBO...",
             "...OBBKKKBBBBBBKKKBBO...",
             "...OBBPPBBBBBBBBPPBBO...",
             "....OOBBBBBBBBBBBBOOAA..",
@@ -200,7 +202,7 @@ fn adult_bitmap(species: PetSpecies) -> [&'static str; CANVAS_H] {
             "....OOOO........OOOO....",
             "........................",
         ],
-        // 👑 Royal Jelly — golden monarch crown, glossy translucent slime dome
+        // 👑 Royal Jelly
         PetSpecies::SlimeKing => [
             "........................",
             "......GG...GG...GG......",
@@ -210,7 +212,7 @@ fn adult_bitmap(species: PetSpecies) -> [&'static str; CANVAS_H] {
             "...OOBBBBBBBBBBBBBBOO...",
             "..OBBWWBBBBBBBBBBBBBBBO.",
             ".OBBWWBBBBBBBBBBBBBBBBO.",
-            ".OBBBBWWKBBBBBBWWKBBBBO.",
+            ".OBBBBEEKBBBBBBEEKBBBBO.",
             ".OBBBBKKKBBBBBBKKKBBBBO.",
             ".OBBPPBBBBWWWWBBBBPPBBO.",
             ".OBBBBBBBSSSSSSBBBBBBBO.",
@@ -222,9 +224,87 @@ fn adult_bitmap(species: PetSpecies) -> [&'static str; CANVAS_H] {
     }
 }
 
-/// Egg stage 24×16 bitmap with species-colored rune spots.
-fn egg_bitmap(frame_idx: usize) -> [&'static str; CANVAS_H] {
-    if frame_idx.is_multiple_of(2) {
+/// Proper closed-outline Teen stage 24×16 bitmaps (sleeker intermediate form).
+fn teen_bitmap(species: PetSpecies) -> [&'static str; CANVAS_H] {
+    match species {
+        PetSpecies::IgnisDragon | PetSpecies::PhoenixChick => [
+            "........................",
+            ".....AA..........AA.....",
+            "....OAAO..OOOO..OAAO....",
+            ".....OOBBBBBBBBBBOO.....",
+            "...OO.OBBEEKBBEEKBBO.OO.",
+            "..OAAOOBBKKKBBKKKBBOOAAO",
+            "..OABBBBBBBBAAABBBBBBAO.",
+            "...OABBBBSSSSSSSSBBBBAO.",
+            "....OOBBBSSSSSSSSBBBOO..",
+            ".....OBBBSSSSSSSSBBBO...",
+            ".....OBBBBBBBBBBBBBBO.AA",
+            "......OOBBBOOOOBBBOOOAA.",
+            ".......OOOO....OOOO.OO..",
+            "........................",
+            "........................",
+            "........................",
+        ],
+        PetSpecies::AzureWyrm | PetSpecies::CrystalUni => [
+            "........................",
+            ".......AA......AA.......",
+            "......OAOOOOOOOAO.......",
+            ".....OBBBBBBBBBBBBO.....",
+            "....OBBEEKBBBBEEKBBO....",
+            "....OBBKKKBBBBKKKBBO....",
+            "....OBBPPBBBBBBPPBBO....",
+            ".....OOBBSSSSSSBBOO.....",
+            "....OABBBSSSSSSBBBAO....",
+            "...OABBBBSSSSSSBBBBAO...",
+            "....OOBBBBBBBBBBBBOO....",
+            ".....OOBBBOOOOBBBOO.....",
+            "......OOOO....OOOO......",
+            "........................",
+            "........................",
+            "........................",
+        ],
+        PetSpecies::SlimeKing => [
+            "........................",
+            "........................",
+            "........GG..GG..........",
+            ".......OGGGGGGO.........",
+            ".......OOOOOOOO.........",
+            ".....OOBBBBBBBBOO.......",
+            "....OBBWWBBBBBBBBBO.....",
+            "...OBBBEEKBBBBEEKBBO....",
+            "...OBBBKKKBBBBKKKBBO....",
+            "...OBBPPBBBWWBBBPPBBO...",
+            "...OBBBBBSSSSSSBBBBBO...",
+            "....OOBBBBBBBBBBBBOO....",
+            "......OOOOOOOOOOOO......",
+            "........................",
+            "........................",
+            "........................",
+        ],
+        _ => [
+            "........................",
+            ".....OOO........OOO.....",
+            "....OBBBOOOOOOOOBBBO....",
+            "...OBBBBBBBBBBBBBBBBO...",
+            "...OBBEEKBBBBBBEEKBBO...",
+            "...OBBKKKBBBBBBKKKBBO...",
+            "...OBBPPBBBAAABBBPPBO...",
+            "....OOBBBBSSSSBBBBOO....",
+            "...OOBBBBBSSSSBBBBBOO...",
+            "...OBBBBBSSSSSSBBBBBO...",
+            "....OBBBBBBBBBBBBBBO....",
+            ".....OOBBBOOOOBBBOO.....",
+            "......OOOO....OOOO......",
+            "........................",
+            "........................",
+            "........................",
+        ],
+    }
+}
+
+/// Species-customized Egg stage 24×16 bitmap with shell motifs.
+fn egg_bitmap(species: PetSpecies, frame_idx: usize) -> [&'static str; CANVAS_H] {
+    let mut base = if frame_idx.is_multiple_of(2) {
         [
             "........................",
             "........OOOOOOOO........",
@@ -244,7 +324,6 @@ fn egg_bitmap(frame_idx: usize) -> [&'static str; CANVAS_H] {
             "....OOOOOOOOOOOOOOOO....",
         ]
     } else {
-        // Gentle 1-pixel right tilt wobble on frame 1
         [
             "........................",
             ".........OOOOOOOO.......",
@@ -263,7 +342,18 @@ fn egg_bitmap(frame_idx: usize) -> [&'static str; CANVAS_H] {
             "...OAAAAAAAAAAAAAAAAO...",
             "....OOOOOOOOOOOOOOOO....",
         ]
+    };
+
+    if matches!(
+        species,
+        PetSpecies::IgnisDragon | PetSpecies::PhoenixChick | PetSpecies::SlimeKing
+    ) {
+        base[0] = ".........GG..GG.........";
+    } else if matches!(species, PetSpecies::MochiCat | PetSpecies::CloudBun | PetSpecies::EmberFox)
+    {
+        base[0] = ".......OO......OO.......";
     }
+    base
 }
 
 /// Baby stage 24×16 bitmap (cute compact chibi companion).
@@ -284,7 +374,7 @@ fn baby_bitmap(species: PetSpecies) -> [&'static str; CANVAS_H] {
             ".....OAAOOOOOOOAAO......",
             "....OBBBBBBBBBBBBBO.....",
             "...OBBBBBBBBBBBBBBBO....",
-            "...OBBWWKBBBBWWKBBBO....",
+            "...OBBEEKBBBBEEKBBBO....",
             "...OBBKKKBBBBKKKBBBO....",
             "...OBBPPBBBBBBPPBBBO....",
             "...OBBBBBSSSSBBBBBBO....",
@@ -303,7 +393,7 @@ fn baby_bitmap(species: PetSpecies) -> [&'static str; CANVAS_H] {
             "....OBBBOOOOOOOOBBBO....",
             "....OBBBBBBBBBBBBBBO....",
             "...OBBBBBBBBBBBBBBBBO...",
-            "...OBBWWKBBBBBBWWKBBO...",
+            "...OBBEEKBBBBBBEEKBBO...",
             "...OBBKKKBBBBBBKKKBBO...",
             "...OBBPPBBBBBBBBPPBBO...",
             "...OBBBBBSSSSSSBBBBBO...",
@@ -325,26 +415,16 @@ fn build_grid(
     frame_idx: usize,
 ) -> [[char; CANVAS_W]; CANVAS_H] {
     let raw = match stage {
-        EvolutionStage::Egg => egg_bitmap(frame_idx),
+        EvolutionStage::Egg => egg_bitmap(species, frame_idx),
         EvolutionStage::Baby => baby_bitmap(species),
-        EvolutionStage::Teen | EvolutionStage::Adult | EvolutionStage::CyberElder => {
-            adult_bitmap(species)
-        }
+        EvolutionStage::Teen => teen_bitmap(species),
+        EvolutionStage::Adult | EvolutionStage::CyberElder => adult_bitmap(species),
     };
 
     let mut grid = [['.'; CANVAS_W]; CANVAS_H];
     for (y, row) in raw.iter().enumerate() {
         for (x, ch) in row.chars().take(CANVAS_W).enumerate() {
             grid[y][x] = ch;
-        }
-    }
-
-    // Teen form: trim outer wingtips (cols 0..2 and 22..24) so Teen is sleeker than Adult
-    if stage == EvolutionStage::Teen {
-        for row in &mut grid {
-            for x in [0, 1, 22, 23] {
-                row[x] = '.';
-            }
         }
     }
 
@@ -364,12 +444,13 @@ fn build_grid(
         grid[11][22] = 'W';
     }
 
-    // Blink / sleeping eye transform: turn `W`/`K` eye pixels into closed eyelids
+    // Blink / sleeping eye transform: ONLY turn `E` and `K` eye pixels into closed eyelids `O`!
+    // White body/belly/cloud pixels (`W`) remain untouched!
     let blink = frame_idx % 2 == 1 || mood == PetMood::Sleeping;
     if stage != EvolutionStage::Egg && blink {
         for row in &mut grid {
             for cell in row.iter_mut() {
-                if *cell == 'W' || *cell == 'K' {
+                if *cell == 'E' || *cell == 'K' {
                     *cell = 'O';
                 }
             }
@@ -377,7 +458,7 @@ fn build_grid(
     } else if stage != EvolutionStage::Egg && mood == PetMood::Sick {
         for row in &mut grid {
             for cell in row.iter_mut() {
-                if *cell == 'W' {
+                if *cell == 'E' {
                     *cell = 'P';
                 }
             }
@@ -399,7 +480,7 @@ fn build_grid(
             PetMood::Eating => [".GG.", "GWWG", "GWWG", ".GG."],
             PetMood::Sick => [".P..", "PPP.", ".P..", "..P."],
             PetMood::Training => ["..G.", ".GGG", "GGA.", ".G.."],
-            PetMood::Idle => ["..G.", ".GWG", "..G.", "...."],
+            PetMood::Idle => ["..G.", ".GGG", "..G.", "...."],
         };
         for (by, brow) in badge.iter().enumerate() {
             for (bx, bch) in brow.chars().enumerate() {
@@ -473,11 +554,11 @@ fn pixel_color(code: char, species: PetSpecies) -> Option<Color> {
     let (primary, secondary, accent) = species_palette(species);
     match code {
         '.' => None,
-        'O' => Some(Color::Rgb(42, 36, 62)),
-        'B' => Some(primary),
+        'O' | '0' => Some(Color::Rgb(42, 36, 62)),
+        'B' | 'b' => Some(primary),
         'S' | 's' => Some(secondary),
         'A' => Some(accent),
-        'W' => Some(Color::Rgb(250, 252, 255)),
+        'W' | 'E' => Some(Color::Rgb(250, 252, 255)),
         'K' => Some(Color::Rgb(22, 18, 36)),
         'P' => Some(Color::Rgb(255, 110, 165)),
         'G' => Some(Color::Rgb(255, 220, 75)),
@@ -486,7 +567,10 @@ fn pixel_color(code: char, species: PetSpecies) -> Option<Color> {
 }
 
 /// Convert a 24×16 pixel grid into 8 half-block terminal [`Line`]s.
-fn render_grid_colored(grid: &[[char; CANVAS_W]; CANVAS_H], species: PetSpecies) -> Vec<Line<'static>> {
+fn render_grid_colored(
+    grid: &[[char; CANVAS_W]; CANVAS_H],
+    species: PetSpecies,
+) -> Vec<Line<'static>> {
     let mut lines = Vec::with_capacity(CANVAS_H / 2);
     for pair in 0..(CANVAS_H / 2) {
         let top_row = &grid[pair * 2];
@@ -510,7 +594,7 @@ fn render_grid_colored(grid: &[[char; CANVAS_W]; CANVAS_H], species: PetSpecies)
     lines
 }
 
-/// Convert a 24×16 pixel grid into 8 monochrome half-block String lines (for CLI `--status` & tests).
+/// Convert a 24×16 pixel grid into 8 monochrome half-block String lines.
 fn render_grid_plain(grid: &[[char; CANVAS_W]; CANVAS_H]) -> String {
     let mut rows = Vec::with_capacity(CANVAS_H / 2);
     for pair in 0..(CANVAS_H / 2) {
@@ -569,8 +653,10 @@ pub fn render_animated_sprite(pet: &Pet, tick: usize) -> Vec<String> {
 }
 
 /// TrueColor Half-Block Pixel Art [`Line`]s for the habitat LCD screen.
+/// Uses a natural blink cadence (`tick % 6 == 5`) instead of strobing every 250ms.
 pub fn render_colored_sprite(pet: &Pet, tick: usize) -> Vec<Line<'static>> {
-    let grid = build_grid(pet.species, pet.stage, pet.mood, tick % 2);
+    let frame_idx = usize::from(tick % 6 == 5);
+    let grid = build_grid(pet.species, pet.stage, pet.mood, frame_idx);
     let (_, secondary, accent) = species_palette(pet.species);
 
     let mut out = Vec::with_capacity(11);
@@ -601,7 +687,8 @@ pub fn render_colored_preview(
     stage: EvolutionStage,
     tick: usize,
 ) -> Vec<Line<'static>> {
-    let grid = build_grid(species, stage, PetMood::Happy, tick % 2);
+    let frame_idx = usize::from(tick % 6 == 5);
+    let grid = build_grid(species, stage, PetMood::Happy, frame_idx);
     let (_, secondary, _) = species_palette(species);
     let mut out = render_grid_colored(&grid, species);
     out.push(Line::from(Span::styled(
@@ -719,6 +806,16 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn test_white_body_pixels_do_not_turn_dark_when_blinking() {
+        // Verify StarPengu's white snow belly ('W') stays white on blink frame 1!
+        let g0 = build_grid(PetSpecies::StarPengu, EvolutionStage::Adult, PetMood::Idle, 0);
+        let g1 = build_grid(PetSpecies::StarPengu, EvolutionStage::Adult, PetMood::Idle, 1);
+        let w_count_0 = g0.iter().flatten().filter(|&&c| c == 'W').count();
+        let w_count_1 = g1.iter().flatten().filter(|&&c| c == 'W').count();
+        assert_eq!(w_count_0, w_count_1, "white body pixels 'W' must never turn into eyelid 'O'");
     }
 
     #[test]
