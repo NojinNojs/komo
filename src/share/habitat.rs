@@ -121,7 +121,9 @@ fn draw_pedestal(c: &mut NativeCanvas, well: Rect, pal: &Palette) {
             } else {
                 weave
             };
-            c.fill_rect(p.x + bx, p.y + by, 4, 4, col);
+            let w = 4.min(p.right().saturating_sub(p.x + bx));
+            let h = 4.min(p.bottom().saturating_sub(p.y + by));
+            c.fill_rect(p.x + bx, p.y + by, w, h, col);
             bx += 4;
         }
         by += 4;

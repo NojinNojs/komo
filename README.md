@@ -1,90 +1,61 @@
-# KOMO — a small soul that lives in your terminal
+# 🌿 KOMO — a small soul that lives in your terminal
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 [![Version](https://img.shields.io/badge/version-1.1.0-blueviolet.svg)](./CHANGELOG.md)
-[![Rust](https://img.shields.io/badge/rust-1.87%2B-orange.svg)](/Cargo.toml)
+[![Rust](https://img.shields.io/badge/rust-1.87%2B-orange.svg)](./Cargo.toml)
 [![Tests](https://img.shields.io/badge/tests-38%2F38%20passing-brightgreen.svg)]()
 
-`komo --status`, run for real:
-
-```
-Hoshi — 🦊 Kitsune Nine Epic ★★★ | Stage: 🥚 Egg | Mood: 💖 Joyful | Lv.1 (0 XP) |
-Rank: 🌱 B-Rank (Cozy Friend) | Weight: 5g | Hungry: ♥♥♥· 3/4 (65%) • Happy:
-♥♥♥· 3/4 (80%) • Discipline: 25% • Energy: 90% • Health: 100% • Clean: 100% •
-Bond: 10% | Mistakes: 0 | Coins: 0
-💭 👁 Sight (Looking at You ●) • Soft amber light filtering through the shell.
-💬 "A steady pulse beats beneath the shell."
-                ▄▄        ▄▄
-               ▄▄██████████▄▄
-            ▄██████████████████▄
-           ██████████████████████
-          ████████████████████████
-```
-
-**KOMO** (*Komorebi Pocket Soul*) is a terminal virtual companion built with
-`ratatui` and `crossterm`. Your companion hatches as an egg, grows through five
-stages, turns to look straight at you when you type, reacts to your keyboard
-rhythm through four senses — and holds you accountable.
+Most terminal dashboards just sit there and print your CPU temperature.
+**KOMO** (*Komorebi Pocket Soul*) moves into your terminal, watches your cursor, perks an ear when you type, runs up to the front glass when you come back from lunch, and judges you if you forget to turn the room lamp off before bed.
 
 <p align="center">
-  <img src="docs/screenshots/onboarding.png" alt="KOMO species picker with live auto-morph evolution preview" width="47%" />
-  <img src="docs/screenshots/habitat.png" alt="KOMO main habitat — an adult companion lives inside a retro handheld LCD frame" width="47%" />
+  <img src="docs/screenshots/komo_share_16x9.png" alt="KOMO 16:9 Pixel-Art Companion Card generated with komo --share 16:9" width="95%" />
 </p>
 
-The rule here is simple: **neglect has real consequences.**
+<p align="center">
+  <img src="docs/screenshots/onboarding.png" alt="KOMO companion selector with live auto-morph preview" width="47%" />
+  <img src="docs/screenshots/habitat.png" alt="KOMO retro handheld LCD habitat screen" width="47%" />
+</p>
 
-* A fallen companion can only be revived **once, ever**, with the Phoenix Tear.
-Death a second time is permanent.
-* You cannot adopt again while a fallen companion lies unburied. The [B] Burial
-Vigil is a mandatory three-step rite, and it leaves a permanent record in the
-Memorial Hall.
-* Force-feed a full companion and they get stomach cramps. Scold them when they
-did nothing wrong and they turn away from you. Three sweet snacks in a row
-cause a toothache.
+`komo --status`, run in a real terminal:
 
-Your keeper name is woven into every spoken line, sense, and epitaph. And your
-*Keeper Karma* follows you across companions: future hatchlings sense it.
+```text
+Mochi — 🐱 Neko Mochi Common ★ | Stage: 🌸 Adult | Mood: 💖 Joyful | Lv.7 (1450 XP) |
+Rank: 👑 S-Rank (Perfect Keeper) | Weight: 4.35kg | Hungry: ♥♥♥♥ 4/4 (88%) • Happy:
+♥♥♥♥ 4/4 (95%) • Discipline: 85% • Energy: 90% • Health: 100% • Clean: 100% •
+Bond: 92% | Mistakes: 0 | Coins: 240
+💭 👁 Sight (Looking at You ●) • Looking right at Keeper with steady eyes.
+💬 "You're back, Keeper. Let's talk [Y] anytime."
+```
+
+## Meet the Starter Trio
+
+You start by adopting one of three hand-crafted companions (each with 5 evolution stages, from a `120g` Egg up to a `6.50kg` Starlight Elder):
+
+* **🐱 Neko Mochi** — A squishy sweet rice-cake kitty who loves Taiyaki Fish (`🐟`), naps on woven mats, and awakens into *Byakko Tiger Shogun*.
+* **🐶 Boba Pup** — A loyal milk-tea puppy who wags his tail at the front glass, snacks on Honey Biscuits (`🦴`), and grows into *Fenrir Dire Wolf*.
+* **🐰 Cloud Bun** — A cotton-soft sky bunny who munches Sweet Carrots (`🥕`) and commands storm clouds as *Raijin Valkyrie*.
+
+## Why Keepers Fall in Love With It (and Occasionally Panic)
+
+* **🏡 They actually welcome you home.** Close your laptop for lunch or a night's sleep. When you open `komo` again, your companion won't randomly drop dead — they run up to the front glass (`TowardKeeper`) to greet you, tell you what they did while you were out, and occasionally hand you a lucky coin they dug up in the garden.
+* **🍱 Real appetite, real weight (`g` / `kg`), real table manners.** Press `[F]` and watch them eat from a steaming bowl (`*nom* 🍱 *munch*`). Feed three sweet snacks in a row and they get a throbbing toothache (`🦷`). Force-feed them when they're already `4/4 ♥` full and they'll complain about stomach cramps. Forget to wash the floor (`[C]`) and buzzing flies (`🪰`) will start circling their head.
+* **🎀 Wardrobe Studio (`[V]`) & Pixel Photo Booth (`[X]`).** Dress your companion in *Sakura Mochi*, *Calico Sunset*, *Shiba Gold*, or *Midnight Tuxedo* coats, top it off with a *Tiny Crown*, *Wizard Hat*, or *Silk Ribbon*, and press `[X]` (or `komo --share 16:9|9:16|4:3|3:4`) to snap a crisp PNG card ready for X, Instagram Stories, or GitHub.
+* **👁 Four senses running live.**
+  * **Sight** tracks the window weather (`🌞 DAY` / `🌸 BREEZE` / `🌧️ RAIN` / `🌠 NIGHT`) and which bezel icon you're hovering.
+  * **Hearing** perks an ear at steady typing and flattens when you mash keys.
+  * **Feeling** reports warm headpats, heavy eyelids, or a rumbling belly.
+  * **Speech (`[Y]`)** lets you have heart-to-heart chats where your companion addresses you by your chosen title (`Boss`, `Aqsan`, `Captain`, `Keeper`).
+* **🕯 Consequences that matter.** A fallen companion can only be revived **once in their entire life** with a Sacred Phoenix Tear (`[H]`). A second death is permanent — and you cannot adopt a new pet until you complete the three-step Burial Vigil (`[B]`) and etch their name into the Memorial Hall.
 
 > [!TIP]
-> People who skip the guide usually meet consequence #3 the hard way. The
-> full handbook lives in [GUIDE.md](./GUIDE.md).
-
-## Features
-
-* **A pet-shaped device, not a dashboard.** A fixed retro-handheld frame with
-  a TrueColor 40×22 half-block LCD screen, an 8-icon bezel, and 10 species ×
-  5 evolution stages of 16-bit-style pixel art with full-body poses (sleep,
-  slouch, fever) and 3-way gaze.
-* **Four senses running live.** `👁 Sight` tracks the window weather and which
-  bezel icon you're hovering; `👂 Hearing` perks an ear at steady typing and
-  startles when you spam; `🫳 Feeling` reports stomach cramps and warm hands;
-  `💬 Speech` answers in grounded, first-person English — no canned fluff.
-* **Heart-to-Heart dialogue & Welcome Home Hosting.** Press [Y] to talk, or
-  return after being away and watch your companion run up to the front glass
-  to greet you with interactive replies and found gifts.
-* **Companion Wardrobe & Photo Booth.** Press [V] to unlock and equip new fur
-  coats, hats, ribbons, or crowns, and press [X] (or `komo --share 16:9`) to
-  snap crisp pixel-art share cards in `16:9`, `9:16`, `4:3`, or `3:4`.
-* **A 3-in-1 retro arcade.** Snack Catcher with combo multipliers, Mind
-  Reader, and Dash Runner — all feeding XP and coins back into real care.
-* **Pantry of 5 snacks and 2 meals.** Watch your companion eat from a steaming
-  bowl (`[F]`), track realistic weight in `g`/`kg`, and wash away buzzing flies
-  when the floor gets messy (`[C]`).
-* **Living environment.** Animated window diorama (DAY / BREEZE / RAIN /
-  NIGHT), woven sleeping mat, habitat floor that gets dirty if you're late
-  with the [C] wash, and lamps that actually matter at night.
-* **Sound without the bloat.** 8-bit chiptune square-wave effects synthesized
-  in pure Rust at 22,050 Hz — no heavy audio crates, no streaming.
-* **Sanctuary roster.** Raise multiple companions, switch active ones with
-  [L] or `komo --switch`, and keep every death on record in the Memorial Hall.
+> The full keeper's handbook (every mood, food item, coat unlock, and care rank secret) lives in [GUIDE.md](./GUIDE.md).
 
 ## Installation
 
-Rust 1.87+ is required everywhere. No accounts, no sign-ups — the only
-network traffic is cargo fetching its dependencies on the first build, and
-after that the whole game is one binary and two save files.
+Requires **Rust 1.87+**. Zero accounts, zero telemetry, zero background daemons — just one binary and your local Sanctuary save files.
 
-### Linux (Debian / Arch / Fedora / openSUSE)
+### Linux (Debian / Ubuntu / Arch / Fedora / openSUSE)
 
 ```bash
 git clone https://github.com/NojinNojs/komo.git
@@ -93,54 +64,19 @@ cargo build --release
 mkdir -p ~/.local/bin && cp target/release/mochigotchi ~/.local/bin/komo
 ```
 
-`~/.local/bin` is already on `PATH` in most desktop distributions (it is added
-by your `~/.profile`). If `komo` is not found, log out and back in, or add
-this to `~/.profile` and re-login:
-
-```bash
-export PATH="$HOME/.local/bin:$PATH"
-```
-
-Full-color chiptune sound needs a PipeWire or PulseAudio session
-(`pw-play` / `paplay` / `aplay` — one of them, no extra setup on modern
-distros). Mute anytime with `[U]`.
+Make sure `~/.local/bin` is on your `PATH` (add `export PATH="$HOME/.local/bin:$PATH"` to `~/.bashrc` or `~/.zshrc` if needed).
+8-bit chiptune audio works out of the box via PipeWire/PulseAudio/ALSA (`pw-play` / `paplay` / `aplay`) and can be muted anytime with `[U]`.
 
 ### NixOS
 
-Two ways that both work. Each has a reason.
-
-**Imperative, permanent install** — build once and let NixOS's flat home
-toolchain pick it up:
-
 ```bash
-nix-shell -p cargo rustc          # or use rustup if you prefer
+nix-shell -p cargo rustc
 git clone https://github.com/NojinNojs/komo.git
 cd komo && cargo build --release
-cp target/release/mochigotchi ~/.local/bin/komo
+mkdir -p ~/.local/bin && cp target/release/mochigotchi ~/.local/bin/komo
 ```
 
-Then make `~/.local/bin` part of your declared `PATH` (NixOS does not assume
-it). With home-manager, add to `home-manager.users.<you>.home.sessionPath`:
-
-```nix
-home.sessionPath = [ "$HOME/.local/bin" ];
-```
-
-Or, without home-manager, inject it at shell level in `configuration.nix`:
-
-```nix
-environment.shellInit = ''
-  export PATH="$HOME/.local/bin:$PATH"
-'';
-```
-
-then `sudo nixos-rebuild switch`. After that, `komo` is callable in every tty,
-tmux pane, and `nix shell` alike.
-
-**Declarative, pinned to your system** — treat it like any other package. This
-route is heavier to set up: a tiny `flake.nix` wrapping `buildRustPackage`
-would let `nix build` and `nix profile install .#komo` do the plumbing. One
-is not shipped in this repo yet; open an issue if you want it.
+Ensure `~/.local/bin` is in your NixOS `PATH` (via `home.sessionPath = [ "$HOME/.local/bin" ];` in Home Manager or `environment.shellInit` in `configuration.nix`).
 
 ### macOS
 
@@ -148,141 +84,75 @@ is not shipped in this repo yet; open an issue if you want it.
 brew install rust          # or https://rustup.rs
 git clone https://github.com/NojinNojs/komo.git
 cd komo && cargo install --path .
+ln -sf ~/.cargo/bin/mochigotchi ~/.cargo/bin/komo
 ```
 
-`cargo install` puts the binary into `~/.cargo/bin`, which the rustup/brew
-toolchains already place on `PATH` for `zsh`/`bash`. Piece of cake — but
-two caveats:
+Works great in Ghostty, iTerm2, Kitty, Alacritty, and Terminal.app.
 
-1. Terminal.app and iTerm2 both render the TrueColor half-block sprites
-   correctly. Ghostty, Kitty and Alacritty are also known-good.
-2. Chiptune audio is currently Linux-first (`pw-play` / `paplay` / `aplay`
-   palette). On macOS the game runs fully but stays silent. This is on us,
-   not on your Mac.
-
-### Windows
+### Windows (PowerShell + Windows Terminal)
 
 ```powershell
 winget install Rustlang.Rustup
 git clone https://github.com/NojinNojs/komo.git
 cd komo
-cargo build --release
-cargo install --path .    # installs as 'mochigotchi' in %USERPROFILE%\.cargo\bin
-```
-
-`rustup` adds `%USERPROFILE%\.cargo\bin` to `PATH` for you on install, so
-`mochigotchi` is callable from any new shell without further setup. Prefer
-aliasing to the short name in PowerShell:
-
-```powershell
+cargo install --path .
 New-Alias komo $env:USERPROFILE\.cargo\bin\mochigotchi.exe
 ```
 
-(Add that line to `$PROFILE` to make the alias permanent.)
+*(Add the `New-Alias` line to your PowerShell `$PROFILE` so `komo` works in every new tab.)*
 
-Two Windows caveats:
+## 🔄 How to Update (Your Companion Save Data Stays 100% Safe!)
 
-1. Use **Windows Terminal** (not the legacy conhost) — the retro LCD needs
-   TrueColor ANSI escape passthrough, and the terminal must be at least
-   68 columns × 24 rows tall for the handheld frame to fit.
-2. Chiptune audio is currently Linux-first. On Windows the game runs fully
-   but stays silent, just like macOS.
+Already raising a companion? Updating takes a few seconds and never touches your save files in `~/.local/share/mochigotchi/`. The moment you launch the updated `komo`, an in-game **🎉 What's New** card will pop up on your handheld screen!
 
-### Calling it from any terminal (the `komo` short name)
-
-The built binary is `mochigotchi` (that's its Cargo `name`). If you want the
-short `komo` alias across platforms:
-
-| OS | Command |
-|:---|:---|
-| Linux / NixOS | `cp target/release/mochigotchi ~/.local/bin/komo` (as above) |
-| macOS | `cp target/release/mochigotchi /usr/local/bin/komo` (or `~/.local/bin` on PATH) |
-| Windows (PowerShell, permanent) | `New-Alias komo $env:USERPROFILE\.cargo\bin\mochigotchi.exe` + add that line to `$PROFILE` |
-
-After that, `komo`, `mochi`, and `mochigotchi` all launch the same handheld
-LCD interface from any directory, any shell.
-
-### Updating to the Latest Version (Save Data Stays Safe!)
-
-Already have KOMO installed? Updating takes one command and keeps your
-companions, coins, and Sanctuary progress 100% intact. As soon as you open
-the updated `komo`, an in-game **What's New** screen will appear automatically!
-
-* **If you cloned the repository (Linux / NixOS / macOS):**
+* **If you cloned the repo (Linux / NixOS / macOS):**
   ```bash
   cd komo
   git pull
   cargo build --release
   cp target/release/mochigotchi ~/.local/bin/komo
   ```
-* **If you installed via Cargo (`macOS` / `Windows` / `Linux`):**
+* **If you installed via Cargo (macOS / Windows / Linux):**
   ```bash
   cargo install --git https://github.com/NojinNojs/komo.git --force
   ```
 
-You can also view the update guide anytime via `komo --update` or revisit the
-feature highlights via `komo --changelog` (or press `[Z]` inside the habitat).
-See [CHANGELOG.md](./CHANGELOG.md) for full patch notes.
+You can also run `komo --update` anytime for quick instructions, or `komo --changelog` (or press `[Z]` in-game) to read the latest feature highlights. Full release notes live in [CHANGELOG.md](./CHANGELOG.md).
 
-### First 3 Minutes
+## Quick Controls & CLI Cheat Sheet
+
+Inside the TUI (`komo`):
+
+* **`[←/→]` + `[Enter]`** — Browse and activate the 8 hardware bezel icons
+* **`[F]` / `[M]`** — Quick meal (`[F]`) or open the 5-item Pantry menu (`[M]`)
+* **`[Y]`** — Heart-to-Heart Talk with your companion
+* **`[V]`** — Open the Companion Wardrobe (Coats & Accessories)
+* **`[X]`** — Open the Pixel Photo Booth (`16:9`, `9:16`, `4:3`, `3:4` PNG cards)
+* **`[G]`** — Launch the 3-in-1 Retro Arcade (`Snack Catcher`, `Mind Reader`, `Dash Runner`)
+* **`[S]` / `[K]`** — Tuck into bed (`[S]`) and switch the room lamp ON/OFF (`[K]`)
+* **`[C]` / `[H]` / `[D]`** — Warm bath (`[C]`), herbal medicine / Phoenix Tear (`[H]`), or scold (`[D]`)
+* **`[I]` / `[L]` / `[Z]` / `[?]`** — 4-page Status Meter (`[I]`), Sanctuary Roster (`[L]`), What's New (`[Z]`), Help (`[?]`)
+
+From your shell without opening the full TUI:
 
 ```bash
-komo                       # Launch the handheld LCD interface
+komo --status                    # Print live vitals, senses, and 40x22 sprite
+komo --feed                      # Toss a quick meal from the terminal
+komo --share 16:9                # Export a crisp 16:9 PNG promo card
+komo --share 9:16 -o story.png   # Export a 9:16 vertical story card
+komo --call-me "Boss"            # Change how your companion addresses you
+komo --changelog                 # View What's New in the current version
+komo --update                    # Print step-by-step update instructions
 ```
-
-1. Pick a species (Step 1), a shell color (Step 2), and tell it what to call
-   you (Step 3, press Tab) — for example `Boss`, `Keeper`, or `Captain`.
-2. Warm the egg with [W]. It incubates +20% per 3 minutes; patience matters
-   not only in the egg stage.
-3. Once hatched, try [F] to feed, [Y] to talk, [P] to play, and [U] for
-   chiptune sound. Notice how it reacts differently to steady typing vs.
-   button spam.
-
-## Command-Line Usage
-
-| Command | Effect |
-|:---|:---|
-| `komo` | Open the interactive handheld LCD interface |
-| `komo --call-me <title>` | Set what it calls you (woven into all speech) |
-| `komo --name <name>` | Set or rename the companion |
-| `komo --species fox` | Spawn as cat, pup, bun, pengu, dragon, wyrm, fox, phoenix, uni, or slime |
-| `komo --theme pink` | Shell palette: pink, matcha, blue, lavender, gold |
-| `komo --status` | Print live vitals, senses, and the 40×22 sprite |
-| `komo --roster` | List companions and the Memorial Hall |
-| `komo --adopt` / `--switch <id name>` | Add companions to the Sanctuary, or pick one as active |
-| `komo --vigil` | Advance one step of the Burial Vigil |
-| `komo --feed / --warm / --snack` | Quick care actions, same as in-game |
-| `komo --play / --pet / --talk` | Quick emotional actions |
-| `komo --train / --sleep / --light` | Discipline & body state |
-| `komo --scold / --clean / --heal` | Corrective actions (scold involves consequences) |
-| `komo --reset` | Clear saves for a fresh start |
-| `komo -V` | Print version |
 
 ## Under the Hood
 
-* **Pixel pipeline:** 40×22 bitmaps → pose & expression transforms → gaze
-  layer → palette mapping → half-block terminal glyphs (`▀▄█`). Transparent
-  pixels stay background-free so your terminal theme shows through.
-* **Persistence:** every save is written twice — an atomic JSON file + SQLite
-  (via `rusqlite` bundled). Legacy single-pet saves transparently upgrade to
-  a full Sanctuary roster on load.
-* **Audio:** pure-Rust RIFF WAV synthesis (16-bit mono, square waves, soft
-  attack/decay envelopes), cached in `std::env::temp_dir()`, played in the
-  background by `pw-play` / `paplay` / `aplay` — mute via [U].
-* **Architecture gate:** the whole `src/` tree is 80+ atomic modules, none
-  larger than 200 lines — enforced by `tests/architecture_gate.rs`, so the
-  modular structure can't rot.
-
-If you want to work on it:
-
-```bash
-cargo fmt --check                          # zero diffs
-cargo clippy --all-targets -- -D warnings  # zero warnings
-cargo test                                 # 29 tests pass
-```
+* **TrueColor 40×22 half-block pixel engine** (`▀▄█`) with dynamic 3-way gaze (`Left`, `Right`, `Center/TowardKeeper`), coat palette swaps, and pixel accessory overlays.
+* **Pure-Rust PNG card renderer** (`src/share/`) with a custom 5×7 bitmap font, cut-corner retro panels, dithered sky gradients, and zero external image libraries.
+* **Dual persistence** (atomic JSON + bundled SQLite) with automatic migration from older versions.
+* **Strict Atomic Architecture**: 90+ focused Rust modules in `src/`, every single file enforced `<= 200 LOC` by `tests/architecture_gate.rs`.
 
 ## License
 
-Released under the [MIT License](./LICENSE) — © 2026 Muhammad Raffi Aqsan
-(NojinNojs). Use it, fork it, ship it. Just be kind to whatever hatches in
-your terminal.
+Released under the [MIT License](./LICENSE) — © 2026 Muhammad Raffi Aqsan ([NojinNojs](https://github.com/NojinNojs)).
+Use it, fork it, share your companion cards. Just remember to turn off the lamp when they go to sleep.
