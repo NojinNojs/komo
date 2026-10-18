@@ -84,15 +84,8 @@ pub fn render_animated_sprite(pet: &Pet, tick: usize) -> Vec<String> {
 pub fn render_colored_sprite(pet: &Pet, tick: usize) -> Vec<Line<'static>> {
     let frame_idx = usize::from(tick % 8 == 7);
     let (walk_offset, gaze) = compute_posture_and_gaze(pet, tick, 0);
-    let grid = build_grid_with_gaze(
-        pet.species,
-        pet.stage,
-        pet.mood,
-        frame_idx,
-        walk_offset,
-        gaze,
-    );
-    let (_, secondary, accent) = species_palette(pet.species);
+    let grid = build_pet_grid(pet, frame_idx, walk_offset, gaze);
+    let (_, secondary, accent) = species_palette_with_coat(pet.species, pet.coat);
     let floor_color = if !pet.light_on {
         Color::Rgb(55, 65, 95)
     } else {
@@ -101,11 +94,29 @@ pub fn render_colored_sprite(pet: &Pet, tick: usize) -> Vec<Line<'static>> {
 
     let mut out = Vec::with_capacity(15);
     out.push(render_window_backdrop(pet, tick));
+    let particle_line = if pet.is_alive
+        && pet.stage != EvolutionStage::Egg
+        && (pet.cleanliness <= 45 || pet.poop_count > 0)
+    {
+        if (tick / 4).is_multiple_of(2) {
+            "~   🪰  ~   🤢  ~   🪰  ~   💩  ~".to_string()
+        } else {
+            "🪰  ~   🤢  ~   🪰  ~   💩  ~   🪰".to_string()
+        }
+    } else if pet.mood == PetMood::Eating {
+        if (tick / 3).is_multiple_of(2) {
+            "🍱  *nom*   🍡   *munch*   🍙   ♥".to_string()
+        } else {
+            "🍡  *munch* 🍱   *nom*     ♥   🍙".to_string()
+        }
+    } else {
+        get_mood_particles(pet.mood, tick).to_string()
+    };
     out.push(Line::from(Span::styled(
-        get_mood_particles(pet.mood, tick).to_string(),
+        particle_line,
         Style::default().fg(accent),
     )));
-    out.extend(render_grid_colored(&grid, pet.species));
+    out.extend(render_grid_colored_with_coat(&grid, pet.species, pet.coat));
     out.push(Line::from(vec![
         Span::styled("▀▀▄▄", Style::default().fg(accent)),
         Span::styled(

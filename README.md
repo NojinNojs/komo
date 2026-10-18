@@ -1,8 +1,9 @@
 # KOMO — a small soul that lives in your terminal
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+[![Version](https://img.shields.io/badge/version-1.1.0-blueviolet.svg)](./CHANGELOG.md)
 [![Rust](https://img.shields.io/badge/rust-1.87%2B-orange.svg)](/Cargo.toml)
-[![Tests](https://img.shields.io/badge/tests-29%2F29%20passing-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-38%2F38%20passing-brightgreen.svg)]()
 
 `komo --status`, run for real:
 
@@ -58,12 +59,17 @@ Your keeper name is woven into every spoken line, sense, and epitaph. And your
   bezel icon you're hovering; `👂 Hearing` perks an ear at steady typing and
   startles when you spam; `🫳 Feeling` reports stomach cramps and warm hands;
   `💬 Speech` answers in grounded, first-person English — no canned fluff.
-* **Heart-to-Heart dialogue.** Press [Y], pick a reply, and your choice moves
-  bond, happiness, and coins. Speak thoughtfully; they listen.
+* **Heart-to-Heart dialogue & Welcome Home Hosting.** Press [Y] to talk, or
+  return after being away and watch your companion run up to the front glass
+  to greet you with interactive replies and found gifts.
+* **Companion Wardrobe & Photo Booth.** Press [V] to unlock and equip new fur
+  coats, hats, ribbons, or crowns, and press [X] (or `komo --share 16:9`) to
+  snap crisp pixel-art share cards in `16:9`, `9:16`, `4:3`, or `3:4`.
 * **A 3-in-1 retro arcade.** Snack Catcher with combo multipliers, Mind
   Reader, and Dash Runner — all feeding XP and coins back into real care.
-* **Pantry of 5 snacks and 2 meals.** Choose wisely: sweets are loved, but
-  KOMO will remember what sugar does to molars.
+* **Pantry of 5 snacks and 2 meals.** Watch your companion eat from a steaming
+  bowl (`[F]`), track realistic weight in `g`/`kg`, and wash away buzzing flies
+  when the floor gets messy (`[C]`).
 * **Living environment.** Animated window diorama (DAY / BREEZE / RAIN /
   NIGHT), woven sleeping mat, habitat floor that gets dirty if you're late
   with the [C] wash, and lamps that actually matter at night.
@@ -195,6 +201,28 @@ short `komo` alias across platforms:
 
 After that, `komo`, `mochi`, and `mochigotchi` all launch the same handheld
 LCD interface from any directory, any shell.
+
+### Updating to the Latest Version (Save Data Stays Safe!)
+
+Already have KOMO installed? Updating takes one command and keeps your
+companions, coins, and Sanctuary progress 100% intact. As soon as you open
+the updated `komo`, an in-game **What's New** screen will appear automatically!
+
+* **If you cloned the repository (Linux / NixOS / macOS):**
+  ```bash
+  cd komo
+  git pull
+  cargo build --release
+  cp target/release/mochigotchi ~/.local/bin/komo
+  ```
+* **If you installed via Cargo (`macOS` / `Windows` / `Linux`):**
+  ```bash
+  cargo install --git https://github.com/NojinNojs/komo.git --force
+  ```
+
+You can also view the update guide anytime via `komo --update` or revisit the
+feature highlights via `komo --changelog` (or press `[Z]` inside the habitat).
+See [CHANGELOG.md](./CHANGELOG.md) for full patch notes.
 
 ### First 3 Minutes
 

@@ -88,15 +88,15 @@ impl Pet {
         self.bond = (self.bond + 4).min(100);
         self.coins = self.coins.saturating_add(5);
         let base_w = self.stage.base_weight_grams();
-        self.weight_grams = self.weight_grams.saturating_sub(2).max(base_w);
+        self.weight_grams = self.weight_grams.saturating_sub(35).max(base_w);
         self.last_played_at = Some(now);
         self.last_updated = now;
         self.add_xp(15);
         self.set_pet_reaction(
             PetAction::Play,
             format!(
-                "💬 \"Good match, {caretaker}! Trimmed down to {}g and found +5 coins.\"",
-                self.weight_grams
+                "💬 \"Good match, {caretaker}! Trimmed down to {} and found +5 coins.\"",
+                self.format_weight()
             ),
             format!("💭 (Feeling: Warm and energized after playing with {caretaker}.)"),
             Some(PetMood::Playful),
@@ -104,8 +104,9 @@ impl Pet {
         self.refresh_attention();
 
         let msg = format!(
-            "🎾 Played Left/Right Game with {}! (+18 Happy, Weight {}g, +5 coins, +15 XP)",
-            self.name, self.weight_grams
+            "🎾 Played Left/Right Game with {}! (+18 Happy, Weight {}, +5 coins, +15 XP)",
+            self.name,
+            self.format_weight()
         );
         self.log_action(msg.clone());
         msg

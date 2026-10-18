@@ -21,6 +21,10 @@ OPTIONS:
     --switch <INDEX|NAME>     Switch active companion by 1-based index or name
     --json-path <PATH>        Custom path for JSON save file
     --db-path <PATH>          Custom path for SQLite save database
+    --share <RATIO>           Render a pixel-art promo PNG card (16:9 | 9:16 | 4:3 | 3:4)
+    --out, -o <PATH>          Custom output path for --share PNG card
+    --changelog, --whats-new  Show What's New feature highlights for this version
+    --update                  Show easy step-by-step instructions to update KOMO
     --status                  Print active companion status, 4 senses, and 40x22 pixel sprite
     --roster                  List all companions and Memorial Hall records in your Sanctuary
     --vigil                   Perform one step (1..3) of the Burial Vigil Rite for a fallen companion

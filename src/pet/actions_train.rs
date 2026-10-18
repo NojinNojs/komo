@@ -86,7 +86,7 @@ impl Pet {
         self.bond = (self.bond + 4).min(100);
         self.coins = self.coins.saturating_add(10);
         let base_w = self.stage.base_weight_grams();
-        self.weight_grams = self.weight_grams.saturating_sub(2).max(base_w);
+        self.weight_grams = self.weight_grams.saturating_sub(40).max(base_w);
         self.last_updated = now;
         self.add_xp(22);
         self.set_pet_reaction(
@@ -99,8 +99,9 @@ impl Pet {
         );
 
         let msg = format!(
-            "🥋 {} finished a focus training session! (Weight {}g, +8% Discipline, +22 XP, +10 coins)",
-            self.name, self.weight_grams
+            "🥋 {} finished a focus training session! (Weight {}, +8% Discipline, +22 XP, +10 coins)",
+            self.name,
+            self.format_weight()
         );
         self.log_action(msg.clone());
         msg

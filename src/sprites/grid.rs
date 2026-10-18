@@ -131,6 +131,44 @@ pub fn build_grid_with_gaze(
     grid
 }
 
+/// Build the 40×22 grid for a full [`Pet`] with equipped Coat palette, Accessory, and Hygiene/Activity props.
+pub fn build_pet_grid(
+    pet: &Pet,
+    frame_idx: usize,
+    walk_offset: isize,
+    gaze: PetGaze,
+) -> [[char; CANVAS_W]; CANVAS_H] {
+    let mut grid = build_grid_with_gaze(
+        pet.species,
+        pet.stage,
+        pet.mood,
+        frame_idx,
+        walk_offset,
+        gaze,
+    );
+    apply_accessory_overlay(&mut grid, pet.stage, pet.mood, pet.accessory);
+    if pet.stage != EvolutionStage::Egg
+        && pet.is_alive
+        && (pet.cleanliness <= 45 || pet.poop_count > 0)
+    {
+        // Animated stink waves & buzzing flies around a dirty/smelly companion
+        let wy = if frame_idx.is_multiple_of(2) { 2 } else { 3 };
+        for x in [6usize, 33usize] {
+            if grid[wy][x] == '.' {
+                grid[wy][x] = 'G';
+            }
+            if grid[wy + 1][x] == '.' {
+                grid[wy + 1][x] = 'O';
+            }
+        }
+        let fx = if frame_idx.is_multiple_of(2) { 9 } else { 30 };
+        if grid[4][fx] == '.' {
+            grid[4][fx] = 'K';
+        }
+    }
+    grid
+}
+
 pub(super) fn build_grid_with_motion(
     species: PetSpecies,
     stage: EvolutionStage,

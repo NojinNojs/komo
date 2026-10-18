@@ -40,6 +40,8 @@ impl App {
         self.adopting_new = true;
         self.pantry_open = false;
         self.talk_open = false;
+        self.wardrobe_open = false;
+        self.photo_booth_open = false;
         self.show_meter = false;
         self.show_help = false;
         self.screen = AppScreen::Onboarding;
@@ -48,7 +50,7 @@ impl App {
         self.selected_theme_idx = 0;
         self.preview_stage_idx = 0;
         self.preview_auto_morph = true;
-        self.onboarding_name_input = PetSpecies::all()[0].default_name().to_string();
+        self.onboarding_name_input = PetSpecies::curated()[0].default_name().to_string();
         self.onboarding_caretaker_input = self.pet.caretaker_label().to_string();
         self.onboarding_edit_caretaker = false;
         self.sound.play(SoundEffect::BeepConfirm);

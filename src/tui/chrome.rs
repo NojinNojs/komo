@@ -139,12 +139,18 @@ pub fn draw_ui(f: &mut Frame, app: &App) {
     let device = handheld_rect(area);
     f.render_widget(Clear, device);
 
-    if let Some(report) = app.offline_report.as_ref() {
+    if app.show_changelog {
+        draw_changelog_screen(f, device, app);
+    } else if let Some(report) = app.offline_report.as_ref() {
         draw_offline_report_screen(f, device, app, report);
     } else if app.show_help {
         draw_help_screen(f, device, app);
     } else if app.show_meter {
         draw_meter_screen(f, device, app);
+    } else if app.wardrobe_open {
+        draw_wardrobe_screen(f, device, app);
+    } else if app.photo_booth_open {
+        draw_photo_booth_screen(f, device, app);
     } else if app.talk_open {
         draw_talk_screen(f, device, app);
     } else if app.pantry_open {

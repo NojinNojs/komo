@@ -80,3 +80,23 @@ fn test_colors_particles_and_previews() {
     }
     let _ = sky_scene(500);
 }
+
+#[test]
+fn test_coat_palettes_and_accessory_overlays() {
+    let mut pet = Pet::new("Mochi");
+    pet.stage = EvolutionStage::Adult;
+    pet.mood = PetMood::Excited;
+    let base_grid = build_pet_grid(&pet, 1, 0, PetGaze::TowardKeeper);
+    for &coat in CoatPreset::all() {
+        pet.coat = coat;
+        let _ = species_palette_with_coat(pet.species, coat);
+        assert!(pixel_color_with_coat('B', pet.species, coat).is_some());
+    }
+    for &acc in Accessory::all() {
+        if acc != Accessory::None {
+            pet.accessory = acc;
+            let acc_grid = build_pet_grid(&pet, 1, 0, PetGaze::TowardKeeper);
+            assert_ne!(base_grid, acc_grid, "accessory {acc:?} should modify grid");
+        }
+    }
+}

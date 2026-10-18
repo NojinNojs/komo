@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use mochigotchi::{PetAction, PetSpecies, ShellTheme};
+use mochigotchi::{PetAction, PetSpecies, ShareRatio, ShellTheme};
 
 use crate::cli_help::{parse_species, parse_theme, print_help};
 
@@ -16,9 +16,13 @@ pub struct CliArgs {
     pub switch_query: Option<String>,
     pub json_path: Option<PathBuf>,
     pub db_path: Option<PathBuf>,
+    pub share_ratio: Option<ShareRatio>,
+    pub share_out: Option<PathBuf>,
     pub cli_actions: Vec<PetAction>,
     pub status_only: bool,
     pub roster_only: bool,
+    pub changelog_only: bool,
+    pub update_guide: bool,
     pub reset: bool,
 }
 
@@ -35,9 +39,13 @@ impl CliArgs {
             switch_query: None,
             json_path: None,
             db_path: None,
+            share_ratio: None,
+            share_out: None,
             cli_actions: Vec::new(),
             status_only: false,
             roster_only: false,
+            changelog_only: false,
+            update_guide: false,
             reset: false,
         };
 
@@ -56,6 +64,8 @@ impl CliArgs {
                 "--vigil" => cli.vigil_flag = true,
                 "--status" => cli.status_only = true,
                 "--roster" => cli.roster_only = true,
+                "--changelog" | "--whats-new" => cli.changelog_only = true,
+                "--update" => cli.update_guide = true,
                 "--reset" => cli.reset = true,
                 "--name" => cli.custom_name = value(args, &mut i),
                 "--call-me" | "--caretaker" => cli.custom_caretaker = value(args, &mut i),
@@ -64,6 +74,11 @@ impl CliArgs {
                 "--switch" => cli.switch_query = value(args, &mut i),
                 "--json-path" => cli.json_path = value(args, &mut i).map(PathBuf::from),
                 "--db-path" => cli.db_path = value(args, &mut i).map(PathBuf::from),
+                "--share" => {
+                    cli.share_ratio = value(args, &mut i)
+                        .map(|v| ShareRatio::parse(&v).unwrap_or(ShareRatio::Landscape16x9));
+                }
+                "--out" | "-o" => cli.share_out = value(args, &mut i).map(PathBuf::from),
                 other => {
                     if let Some(action) = action_for(other) {
                         cli.cli_actions.push(action);

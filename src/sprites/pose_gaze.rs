@@ -13,17 +13,10 @@ pub(super) fn apply_front_gaze(
     }
 
     // Find the first eye pixel ('E' or 'K') to anchor the face center
-    let mut eye_pos: Option<(usize, usize)> = None;
-    'search: for (y, row) in grid.iter().enumerate() {
-        for (x, &c) in row.iter().enumerate() {
-            if c == 'E' || c == 'K' {
-                eye_pos = Some((x, y));
-                break 'search;
-            }
-        }
-    }
-
-    let Some((_, eye_y)) = eye_pos else {
+    let Some(eye_y) = grid
+        .iter()
+        .position(|row| row.iter().any(|&c| c == 'E' || c == 'K'))
+    else {
         return;
     };
 
@@ -49,23 +42,25 @@ pub(super) fn apply_front_gaze(
                 grid[y1][x] = 'B';
             }
         }
-        // Left eye looking at you
-        grid[y0][cx - 3] = 'E';
-        grid[y0][cx - 2] = 'K';
-        grid[y1][cx - 3] = 'K';
-        grid[y1][cx - 2] = 'K';
-        // Right eye looking at you
-        grid[y0][cx + 2] = 'E';
-        grid[y0][cx + 3] = 'K';
-        grid[y1][cx + 2] = 'K';
-        grid[y1][cx + 3] = 'K';
-        // Rosy cheeks & center nose/beak
+        // Symmetric front-facing eyes & ear/cheek framing
+        for ox in [cx - 3, cx + 2] {
+            grid[y0][ox] = 'E';
+            grid[y0][ox + 1] = 'K';
+            grid[y1][ox] = 'K';
+            grid[y1][ox + 1] = 'K';
+        }
+        grid[y0][cx - 5] = 'B';
+        grid[y0][cx + 5] = 'B';
+        // Rosy cheeks, center nose/beak, and warm welcoming smile
         grid[y1][cx - 4] = 'P';
         grid[y1][cx + 4] = 'P';
         grid[y1][cx] = match species {
             PetSpecies::StarPengu | PetSpecies::PhoenixChick => 'G',
             _ => 'O',
         };
+        if y1 + 1 < CANVAS_H - 1 {
+            grid[y1 + 1][cx] = 'P';
+        }
     }
 }
 
@@ -130,7 +125,7 @@ pub(super) fn apply_pose_and_expression(
         return;
     }
 
-    // 3. Full / Eating / Overstuffed Pose: happy curved eyes, warm blush, plump belly
+    // 3. Full / Eating / Overstuffed Pose: happy curved eyes, warm blush, animated food bowl & steam!
     if matches!(mood, PetMood::Eating | PetMood::Overstuffed) {
         for row in grid.iter_mut() {
             for cell in row.iter_mut() {
@@ -145,6 +140,15 @@ pub(super) fn apply_pose_and_expression(
                 }
             }
         }
+        if mood == PetMood::Eating {
+            // Animated food bowl + rising steam in front of the companion
+            let steam_y = if frame_idx.is_multiple_of(2) { 15 } else { 14 };
+            grid[steam_y][4] = 'W';
+            grid[steam_y][6] = 'W';
+            grid[17][3..=7].fill('G');
+            grid[18][3..=7].fill('R');
+            grid[19][3..=7].fill('O');
+        }
     }
 
     // 4. Sick / Feverish Pose: heavy half-lidded eyes, fever cheeks, cold sweat drop
@@ -158,5 +162,26 @@ pub(super) fn apply_pose_and_expression(
         }
         grid[4][8] = 'A';
         grid[5][8] = 'W';
+    }
+
+    // 5. Happy / Excited / Loved / Playful: rosy cheeks + celebratory sparkles/hearts
+    if matches!(
+        mood,
+        PetMood::Happy | PetMood::Excited | PetMood::Loved | PetMood::Playful
+    ) {
+        for y in 0..CANVAS_H - 1 {
+            for x in 1..CANVAS_W {
+                if grid[y][x] == 'E' && grid[y + 1][x - 1] == 'B' {
+                    grid[y + 1][x - 1] = 'P';
+                }
+            }
+        }
+        if frame_idx % 2 == 1 || matches!(mood, PetMood::Excited | PetMood::Loved) {
+            for (y, x, c) in [(5, 5, 'G'), (6, 5, 'P'), (5, 34, 'P'), (6, 34, 'G')] {
+                if grid[y][x] == '.' {
+                    grid[y][x] = c;
+                }
+            }
+        }
     }
 }

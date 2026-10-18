@@ -8,7 +8,7 @@ impl Pet {
 
     pub fn status_summary(&self) -> String {
         format!(
-            "{} — {} {} | Stage: {} | Mood: {} | Lv.{} ({} XP) | Rank: {} | Weight: {}g | Hungry: {} ({}%) • Happy: {} ({}%) • Discipline: {}% • Energy: {}% • Health: {}% • Clean: {}% • Bond: {}% | Mistakes: {} | Coins: {}",
+            "{} — {} {} | Stage: {} | Mood: {} | Lv.{} ({} XP) | Rank: {} | Weight: {} | Hungry: {} ({}%) • Happy: {} ({}%) • Discipline: {}% • Energy: {}% • Health: {}% • Clean: {}% • Bond: {}% | Mistakes: {} | Coins: {}",
             self.name,
             self.species.display_name(),
             self.species.rarity(),
@@ -17,7 +17,7 @@ impl Pet {
             self.level,
             self.xp,
             self.care_rank().badge(),
-            self.weight_grams,
+            self.format_weight(),
             format_hearts(self.hungry_hearts()),
             self.hunger,
             format_hearts(self.happy_hearts()),

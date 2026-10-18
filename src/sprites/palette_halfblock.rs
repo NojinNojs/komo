@@ -57,6 +57,18 @@ pub fn species_palette(species: PetSpecies) -> (Color, Color, Color) {
     }
 }
 
+/// Coat-aware palette: a non-`Classic` coat overrides the species' base RGB triple.
+pub fn species_palette_with_coat(species: PetSpecies, coat: CoatPreset) -> (Color, Color, Color) {
+    if let Some(((pr, pg, pb), (sr, sg, sb), (ar, ag, ab))) = coat.palette_override() {
+        return (
+            Color::Rgb(pr, pg, pb),
+            Color::Rgb(sr, sg, sb),
+            Color::Rgb(ar, ag, ab),
+        );
+    }
+    species_palette(species)
+}
+
 pub(super) fn scale_rgb(color: Color, factor: f32) -> Color {
     match color {
         Color::Rgb(r, g, b) => Color::Rgb(
@@ -68,8 +80,8 @@ pub(super) fn scale_rgb(color: Color, factor: f32) -> Color {
     }
 }
 
-pub(super) fn pixel_color(code: char, species: PetSpecies) -> Option<Color> {
-    let (primary, secondary, accent) = species_palette(species);
+pub fn pixel_color_with_coat(code: char, species: PetSpecies, coat: CoatPreset) -> Option<Color> {
+    let (primary, secondary, accent) = species_palette_with_coat(species, coat);
     match code {
         '.' => None,
         'O' | '0' => Some(Color::Rgb(27, 22, 44)),
@@ -87,9 +99,14 @@ pub(super) fn pixel_color(code: char, species: PetSpecies) -> Option<Color> {
     }
 }
 
-pub(super) fn render_grid_colored(
+pub fn pixel_color(code: char, species: PetSpecies) -> Option<Color> {
+    pixel_color_with_coat(code, species, CoatPreset::Classic)
+}
+
+pub(super) fn render_grid_colored_with_coat(
     grid: &[[char; CANVAS_W]; CANVAS_H],
     species: PetSpecies,
+    coat: CoatPreset,
 ) -> Vec<Line<'static>> {
     let mut lines = Vec::with_capacity(CANVAS_H / 2);
     for pair in 0..(CANVAS_H / 2) {
@@ -98,8 +115,8 @@ pub(super) fn render_grid_colored(
         let mut spans = Vec::with_capacity(CANVAS_W);
 
         for x in 0..CANVAS_W {
-            let t = pixel_color(top_row[x], species);
-            let b = pixel_color(bot_row[x], species);
+            let t = pixel_color_with_coat(top_row[x], species, coat);
+            let b = pixel_color_with_coat(bot_row[x], species, coat);
             let span = match (t, b) {
                 (None, None) => Span::raw(" "),
                 (Some(tc), None) => Span::styled("▀", Style::default().fg(tc)),
@@ -112,6 +129,13 @@ pub(super) fn render_grid_colored(
         lines.push(Line::from(spans));
     }
     lines
+}
+
+pub(super) fn render_grid_colored(
+    grid: &[[char; CANVAS_W]; CANVAS_H],
+    species: PetSpecies,
+) -> Vec<Line<'static>> {
+    render_grid_colored_with_coat(grid, species, CoatPreset::Classic)
 }
 
 pub(super) fn render_grid_plain(grid: &[[char; CANVAS_W]; CANVAS_H]) -> String {

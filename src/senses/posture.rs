@@ -3,6 +3,16 @@ use super::*;
 /// Compute the companion's current gaze (`Left`, `Center` at the player, or `Right`)
 /// and horizontal stroll offset (`-2..=2`).
 pub fn compute_posture_and_gaze(pet: &Pet, tick: usize, recent_key_ticks: u8) -> (isize, PetGaze) {
+    // Arriving home triggers a "welcome host" stance: run to the front of the glass
+    // and look straight at the keeper until they answer the greeting.
+    if pet.pending_hosting.is_some()
+        && pet.is_alive
+        && pet.stage != EvolutionStage::Egg
+        && pet.mood != PetMood::Angry
+    {
+        return (0, PetGaze::TowardKeeper);
+    }
+
     if !pet.is_alive
         || pet.stage == EvolutionStage::Egg
         || pet.is_sleeping

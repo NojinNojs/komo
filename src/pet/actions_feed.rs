@@ -114,14 +114,14 @@ impl Pet {
 
         let (hunger_gain, happy_gain, energy_gain, health_gain, bond_gain, xp_gain, weight_gain) =
             match choice {
-                FoodChoice::FavoriteSnack => (25, 6, 0, 2, 3, 10, 1),
-                FoodChoice::HeartyBento => (40, 8, 5, 4, 3, 14, 2),
-                FoodChoice::WarmMilkTea => (5, 25, 8, 0, 4, 10, 2),
+                FoodChoice::FavoriteSnack => (25, 6, 0, 2, 3, 10, 35),
+                FoodChoice::HeartyBento => (40, 8, 5, 4, 3, 14, 70),
+                FoodChoice::WarmMilkTea => (5, 25, 8, 0, 4, 10, 45),
                 FoodChoice::HerbalSoup => {
                     self.is_sick = false;
-                    (25, 5, 4, 20, 3, 14, 1)
+                    (25, 5, 4, 20, 3, 14, 30)
                 }
-                FoodChoice::StarlightDelight => (15, 35, 10, 5, 8, 25, 3),
+                FoodChoice::StarlightDelight => (15, 35, 10, 5, 8, 25, 80),
             };
 
         self.hunger = (self.hunger + hunger_gain).min(100);
@@ -129,7 +129,7 @@ impl Pet {
         self.energy = (self.energy + energy_gain).min(100);
         self.health = (self.health + health_gain).min(100);
         self.bond = (self.bond + bond_gain).min(100);
-        self.weight_grams = (self.weight_grams + weight_gain).min(99);
+        self.weight_grams = (self.weight_grams + weight_gain).min(9_999);
 
         if is_snack {
             self.snacks_in_a_row = self.snacks_in_a_row.saturating_add(1);
@@ -152,9 +152,10 @@ impl Pet {
         self.add_xp(xp_gain);
 
         let food_name = choice.title(self.species);
+        let weight_str = self.format_weight();
         let mut msg = format!(
-            "🍡 Fed {} {}! (+{}g weight -> {}g, +{} XP)",
-            self.name, food_name, weight_gain, self.weight_grams, xp_gain
+            "🍡 Fed {} {}! (+{}g weight -> {}, +{} XP)",
+            self.name, food_name, weight_gain, weight_str, xp_gain
         );
 
         if self.snacks_in_a_row >= 3 {
@@ -162,11 +163,8 @@ impl Pet {
             self.care_mistakes = self.care_mistakes.saturating_add(1);
             self.set_pet_reaction(
                 PetAction::FeedSnack,
-                format!(
-                    "💬 \"OUCH! Three sweets in a row gave me a sharp toothache, {caretaker}! Need medicine [H]!\""
-                ),
-                "💭 (Feeling: Throbbing molar ache from three consecutive sugary treats.)"
-                    .to_string(),
+                format!("💬 \"OUCH! Three sweets in a row gave me a sharp toothache, {caretaker}! Need medicine [H]!\""),
+                "💭 (Feeling: Throbbing molar ache from three consecutive sugary treats.)".to_string(),
                 Some(PetMood::Sick),
             );
             msg.push_str(

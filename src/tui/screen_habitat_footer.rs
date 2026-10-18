@@ -48,7 +48,11 @@ pub(super) fn draw_habitat_vitals(f: &mut Frame, area: Rect, pet: &Pet) {
                 }),
             ),
             Span::styled(
-                format!("⚡ {}%   ⚖ {}g{poop_suffix}", pet.energy, pet.weight_grams),
+                format!(
+                    "⚡ {}%   ⚖ {}{poop_suffix}",
+                    pet.energy,
+                    pet.format_weight()
+                ),
                 Style::default().fg(Color::Yellow),
             ),
         ])
@@ -105,7 +109,7 @@ pub(super) fn draw_habitat_footer(
                 Style::default().fg(Color::LightGreen),
             )),
             Line::from(Span::styled(
-                "[←/→+Enter] Bezel  [F] Meal  [Y] Talk  [O] Call-Me  [G] Arcade  [I] Meter  [?] Keys",
+                "[←/→+Enter] Bezel  [F] Meal  [Y] Talk  [V] Wardrobe  [X] Photo  [G] Arcade  [I] Meter  [?]",
                 Style::default().fg(Color::DarkGray),
             )),
         ]

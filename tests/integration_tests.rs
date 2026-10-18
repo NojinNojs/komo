@@ -192,8 +192,8 @@ fn onboarding_wizard_auto_morphs_evolution_and_adopts_into_sanctuary() {
         app.handle_key(KeyCode::Down);
     }
     assert_eq!(
-        PetSpecies::all()[app.selected_species_idx],
-        PetSpecies::IgnisDragon
+        PetSpecies::curated()[app.selected_species_idx],
+        PetSpecies::BobaPup
     );
 
     app.handle_key(KeyCode::Enter);
@@ -208,7 +208,7 @@ fn onboarding_wizard_auto_morphs_evolution_and_adopts_into_sanctuary() {
 
     app.handle_key(KeyCode::Enter);
     assert_eq!(app.onboarding_step, OnboardingStep::EnterName);
-    assert_eq!(app.onboarding_name_input, "Ignis");
+    assert_eq!(app.onboarding_name_input, "Boba");
 
     for _ in 0..10 {
         app.handle_key(KeyCode::Backspace);
@@ -220,7 +220,7 @@ fn onboarding_wizard_auto_morphs_evolution_and_adopts_into_sanctuary() {
 
     assert_eq!(app.screen, AppScreen::Habitat);
     assert_eq!(app.pet.name, "Draco");
-    assert_eq!(app.pet.species, PetSpecies::IgnisDragon);
+    assert_eq!(app.pet.species, PetSpecies::BobaPup);
     assert_eq!(app.pet.theme, ShellTheme::SkyBlue);
     assert!(save_exists(&paths));
 
@@ -285,7 +285,7 @@ fn three_in_one_arcade_modes_work_and_reward_pet() {
     let paths = unique_test_paths("arcade_3in1");
     let mut pet = Pet::new_custom("Boba", PetSpecies::BobaPup, ShellTheme::MatchaGreen);
     pet.stage = EvolutionStage::Baby;
-    pet.weight_grams = 12;
+    pet.weight_grams = 600;
     let mut app = App::new(pet, paths.clone());
 
     app.handle_key(KeyCode::Char('g'));
@@ -316,7 +316,7 @@ fn three_in_one_arcade_modes_work_and_reward_pet() {
     app.handle_key(KeyCode::Esc);
     assert_eq!(app.screen, AppScreen::Habitat);
     assert!(app.pet.coins >= 8);
-    assert!(app.pet.weight_grams < 12);
+    assert!(app.pet.weight_grams < 600);
 
     let _ = fs::remove_dir_all(paths.json_path.parent().unwrap());
 }
@@ -336,7 +336,7 @@ fn full_pet_lifecycle_from_egg_to_cyber_elder() {
     assert_eq!(pet.stage, EvolutionStage::Baby);
     assert!(pet.coins >= 20);
 
-    for cycle in 0..160 {
+    for cycle in 0..220 {
         pet.clear_cooldowns();
         pet.age_seconds += 3_600;
         if pet.is_sleeping {
@@ -372,7 +372,7 @@ fn full_pet_lifecycle_from_egg_to_cyber_elder() {
     }
 
     assert_eq!(pet.stage, EvolutionStage::CyberElder);
-    assert!(pet.xp >= 1_200);
+    assert!(pet.xp >= 2_200);
     assert!(pet.bond >= 50);
 }
 
@@ -499,6 +499,130 @@ fn tui_renders_every_screen_cleanly() {
     let _ = MiniGame::new(20, 8, 10);
     let _ = render_animated_sprite(&app.pet, 0);
     let _ = PetAction::WarmEgg.label();
+
+    let _ = fs::remove_dir_all(paths.json_path.parent().unwrap());
+}
+
+#[test]
+fn talk_dialogue_reward_cooldown_and_sleep_light_exploit_guard_work() {
+    let mut pet = Pet::new_custom("Mochi", PetSpecies::MochiCat, ShellTheme::StrawberryPink);
+    pet.stage = EvolutionStage::Adult;
+    pet.set_caretaker_title("Aqsan");
+
+    let xp0 = pet.xp;
+    let coins0 = pet.coins;
+    let msg1 = pet.answer_dialogue(2);
+    assert!(msg1.contains("+5 coins"));
+    assert_eq!(pet.xp, xp0 + 8);
+    assert_eq!(pet.coins, coins0 + 5);
+    assert!(pet.last_talk_reward_at.is_some());
+    assert!(pet.talk_reward_cooldown_remaining(Utc::now()) > 0);
+
+    // Immediate 2nd talk while on 180s cooldown: chats playfully without granting XP or coins!
+    let xp_after_first = pet.xp;
+    let coins_after_first = pet.coins;
+    let msg2 = pet.answer_dialogue(1);
+    assert!(msg2.contains("throat's getting dry"));
+    assert_eq!(pet.xp, xp_after_first);
+    assert_eq!(pet.coins, coins_after_first);
+
+    // After 181s elapsed, talk reward grants again
+    pet.last_talk_reward_at = Some(Utc::now() - Duration::seconds(181));
+    assert_eq!(pet.talk_reward_cooldown_remaining(Utc::now()), 0);
+    let _ = pet.answer_dialogue(1);
+    assert_eq!(pet.xp, xp_after_first + 12);
+
+    // Sleep light toggle spam guard: only grants XP once per cooldown window
+    pet.is_sleeping = true;
+    pet.light_on = true;
+    let xp_before_light = pet.xp;
+    let _ = pet.toggle_light(); // OFF -> grants +5 XP
+    assert_eq!(pet.xp, xp_before_light + 5);
+    let _ = pet.toggle_light(); // ON
+    let _ = pet.toggle_light(); // OFF again on cooldown -> 0 XP
+    assert_eq!(pet.xp, xp_before_light + 5);
+}
+
+#[test]
+fn welcome_home_hosting_greets_keeper_with_toward_keeper_gaze_and_choices() {
+    let mut pet = Pet::new_custom("Boba", PetSpecies::BobaPup, ShellTheme::MatchaGreen);
+    pet.stage = EvolutionStage::Adult;
+    pet.set_caretaker_title("Boss");
+
+    // Medium absence (2 hours): companion greets TowardKeeper and finds lucky coins
+    let future = Utc::now() + Duration::hours(2);
+    let (elapsed, report) = pet.apply_offline_decay_with_report(future);
+    assert!(elapsed >= 7_200);
+    assert!(report.is_some());
+
+    let host = pet
+        .pending_hosting
+        .as_ref()
+        .expect("should prepare welcome hosting event");
+    assert_eq!(host.gaze, PetGaze::TowardKeeper);
+    assert!(host.greeting_speech.contains("Boss"));
+    assert_eq!(
+        compute_posture_and_gaze(&pet, 0, 0).1,
+        PetGaze::TowardKeeper
+    );
+
+    let coins_before = pet.coins;
+    let bond_before = pet.bond;
+    let reply = pet.respond_welcome_hosting(3);
+    assert!(reply.contains("while away"));
+    assert!(pet.pending_hosting.is_none());
+    assert!(pet.coins >= coins_before + 5);
+    assert!(pet.bond > bond_before);
+}
+
+#[test]
+fn wardrobe_customization_and_photo_booth_share_card_work_end_to_end() {
+    let paths = unique_test_paths("wardrobe_photo");
+    let mut pet = Pet::new_custom("Cloudy", PetSpecies::CloudBun, ShellTheme::SkyBlue);
+    pet.stage = EvolutionStage::Adult;
+    pet.coins = 150;
+    pet.level = 5;
+
+    // Equip/buy CoatPreset and Accessory
+    let coat_msg = pet.equip_or_buy_coat(mochigotchi::CoatPreset::SakuraMochi);
+    assert!(coat_msg.contains("Sakura Mochi"));
+    assert_eq!(pet.coat, mochigotchi::CoatPreset::SakuraMochi);
+
+    let acc_msg = pet.equip_or_buy_accessory(mochigotchi::Accessory::TinyCrown);
+    assert!(acc_msg.contains("Tiny Crown"));
+    assert_eq!(pet.accessory, mochigotchi::Accessory::TinyCrown);
+
+    // Persist and reload via Sanctuary
+    let sanctuary = Sanctuary::new_with_pet(pet);
+    save_sanctuary(&sanctuary, &paths).unwrap();
+    let loaded = load_sanctuary(&paths).unwrap();
+    assert_eq!(
+        loaded.active_pet().coat,
+        mochigotchi::CoatPreset::SakuraMochi
+    );
+    assert_eq!(
+        loaded.active_pet().accessory,
+        mochigotchi::Accessory::TinyCrown
+    );
+
+    // Open Wardrobe [V] and Photo Booth [X] in TUI and export PNG card
+    let mut app = App::new_with_sanctuary(loaded, paths.clone(), false);
+    assert!(app.show_changelog);
+    app.handle_key(KeyCode::Enter);
+    assert!(!app.show_changelog);
+    app.handle_key(KeyCode::Char('v'));
+    assert!(app.wardrobe_open);
+    app.handle_key(KeyCode::Esc);
+    assert!(!app.wardrobe_open);
+
+    app.handle_key(KeyCode::Char('x'));
+    assert!(app.photo_booth_open);
+    app.handle_key(KeyCode::Right);
+    assert_eq!(app.photo_ratio, mochigotchi::ShareRatio::Story9x16);
+
+    let card_bytes =
+        mochigotchi::render_share_card_png(&app.pet, mochigotchi::ShareRatio::Landscape16x9);
+    assert_eq!(&card_bytes[..8], b"\x89PNG\r\n\x1a\n");
 
     let _ = fs::remove_dir_all(paths.json_path.parent().unwrap());
 }

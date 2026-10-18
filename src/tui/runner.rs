@@ -81,10 +81,7 @@ mod tests {
         for _ in 0..AUTO_MORPH_TICKS {
             app.on_tick();
         }
-        assert_ne!(
-            app.preview_stage_idx, initial_stage,
-            "Step 1 must auto-animate evolution stages every AUTO_MORPH_TICKS"
-        );
+        assert_ne!(app.preview_stage_idx, initial_stage);
 
         for _ in 0..4 {
             app.handle_key(KeyCode::Down);
@@ -102,7 +99,10 @@ mod tests {
         app.handle_key(KeyCode::Enter);
 
         assert_eq!(app.screen, AppScreen::Habitat);
-        assert_eq!(app.pet.species, PetSpecies::IgnisDragon);
+        assert!(app.show_changelog);
+        app.handle_key(KeyCode::Enter);
+        assert!(!app.show_changelog);
+        assert_eq!(app.pet.species, PetSpecies::BobaPup);
         assert_eq!(app.pet.name, "X");
 
         app.handle_key(KeyCode::Char('y'));

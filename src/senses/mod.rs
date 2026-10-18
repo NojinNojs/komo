@@ -9,9 +9,10 @@ use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
 };
+use serde::{Deserialize, Serialize};
 
 /// Which way the companion is currently looking.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub enum PetGaze {
     Left,
     #[default]
@@ -20,6 +21,9 @@ pub enum PetGaze {
 }
 
 impl PetGaze {
+    #[allow(non_upper_case_globals)]
+    pub const TowardKeeper: Self = Self::Center;
+
     pub fn label(&self) -> &'static str {
         match self {
             Self::Left => "Looking Left ◀",

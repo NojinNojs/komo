@@ -1,7 +1,7 @@
 use super::*;
 
 pub(super) const TICK_MS: u64 = 250;
-pub(super) const DECAY_EVERY_TICKS: usize = 24;
+pub(super) const DECAY_EVERY_TICKS: usize = 96;
 pub(super) const AUTO_MORPH_TICKS: usize = 18;
 
 pub const MIN_TERM_WIDTH: u16 = 68;
@@ -62,9 +62,18 @@ pub struct App {
     pub pantry_selected_idx: usize,
     pub talk_open: bool,
     pub talk_selected_idx: u8,
+    pub wardrobe_open: bool,
+    pub wardrobe_tab: u8,
+    pub wardrobe_coat_idx: usize,
+    pub wardrobe_acc_idx: usize,
+    pub photo_booth_open: bool,
+    pub photo_ratio: ShareRatio,
+    pub photo_status: Option<String>,
+    pub hosting_selected_idx: u8,
     pub show_meter: bool,
     pub meter_page: usize,
     pub show_help: bool,
+    pub show_changelog: bool,
     pub offline_report: Option<OfflineReport>,
     pub onboarding_name_input: String,
     pub onboarding_caretaker_input: String,
@@ -78,4 +87,53 @@ pub struct App {
     pub rename_buffer: Option<String>,
     pub caretaker_buffer: Option<String>,
     pub last_storage_status: String,
+}
+
+impl App {
+    pub fn on_tick(&mut self) {
+        self.tick_count = self.tick_count.wrapping_add(1);
+        if self.recent_key_ticks > 0 {
+            self.recent_key_ticks -= 1;
+            if self.recent_key_ticks == 0 {
+                self.key_burst = 0;
+            }
+        }
+        if self.screen == AppScreen::Onboarding
+            && self.onboarding_step == OnboardingStep::SelectSpecies
+            && self.preview_auto_morph
+            && self.tick_count.is_multiple_of(AUTO_MORPH_TICKS)
+        {
+            self.preview_stage_idx = (self.preview_stage_idx + 1) % EvolutionStage::all().len();
+        }
+        if self.screen == AppScreen::MiniGame {
+            let finished = {
+                let Some(game) = self.minigame.as_mut() else {
+                    self.screen = AppScreen::Habitat;
+                    return;
+                };
+                game.step();
+                game.is_finished()
+            };
+            if finished {
+                self.finish_minigame();
+            }
+            return;
+        }
+        if self.screen != AppScreen::Onboarding && self.tick_count.is_multiple_of(DECAY_EVERY_TICKS)
+        {
+            let call_before = self.pet.attention_call;
+            let alive_before = self.pet.is_alive;
+            self.sanctuary.sync_active(&self.pet);
+            self.sanctuary.tick_decay_all();
+            self.pet = self.sanctuary.active_pet().clone();
+            if alive_before && !self.pet.is_alive {
+                self.sound.play(SoundEffect::ErrorBuzz);
+            } else if !call_before.is_active() && self.pet.attention_call.is_active() {
+                self.sound.play(SoundEffect::AttentionBeep);
+            }
+            if self.tick_count.is_multiple_of(DECAY_EVERY_TICKS * 4) {
+                self.save_now();
+            }
+        }
+    }
 }

@@ -39,9 +39,21 @@ impl App {
                 self.meter_page = 0;
             }
             KeyCode::Char('y') | KeyCode::Char('Y') => {
+                if self.pet.pending_hosting.is_some() {
+                    let _ = self.pet.respond_welcome_hosting(1);
+                    self.save_now();
+                }
                 self.sound.play(SoundEffect::ChatChirp);
                 self.talk_open = true;
                 self.talk_selected_idx = 1;
+            }
+            KeyCode::Char('v') | KeyCode::Char('V') => {
+                self.sound.play(SoundEffect::BeepConfirm);
+                self.wardrobe_open = true;
+            }
+            KeyCode::Char('x') | KeyCode::Char('X') => {
+                self.sound.play(SoundEffect::BeepConfirm);
+                self.photo_booth_open = true;
             }
             KeyCode::Char('k') | KeyCode::Char('K') => {
                 let msg = self.pet.toggle_light();
@@ -124,6 +136,10 @@ impl App {
             KeyCode::Char('[') => self.cycle_pet(false),
             KeyCode::Char(']') => self.cycle_pet(true),
             KeyCode::Char('n') | KeyCode::Char('N') => self.start_adopting(),
+            KeyCode::Char('z') | KeyCode::Char('Z') => {
+                self.sound.play(SoundEffect::BeepConfirm);
+                self.show_changelog = true;
+            }
             KeyCode::Char('r') | KeyCode::Char('R') => {
                 self.rename_buffer = Some(self.pet.name.clone());
             }
@@ -136,56 +152,6 @@ impl App {
                 self.save_now();
             }
             _ => {}
-        }
-    }
-
-    pub fn on_tick(&mut self) {
-        self.tick_count = self.tick_count.wrapping_add(1);
-        if self.recent_key_ticks > 0 {
-            self.recent_key_ticks -= 1;
-            if self.recent_key_ticks == 0 {
-                self.key_burst = 0;
-            }
-        }
-
-        if self.screen == AppScreen::Onboarding
-            && self.onboarding_step == OnboardingStep::SelectSpecies
-            && self.preview_auto_morph
-            && self.tick_count.is_multiple_of(AUTO_MORPH_TICKS)
-        {
-            self.preview_stage_idx = (self.preview_stage_idx + 1) % EvolutionStage::all().len();
-        }
-
-        if self.screen == AppScreen::MiniGame {
-            let finished = {
-                let Some(game) = self.minigame.as_mut() else {
-                    self.screen = AppScreen::Habitat;
-                    return;
-                };
-                game.step();
-                game.is_finished()
-            };
-            if finished {
-                self.finish_minigame();
-            }
-            return;
-        }
-
-        if self.screen != AppScreen::Onboarding && self.tick_count.is_multiple_of(DECAY_EVERY_TICKS)
-        {
-            let call_before = self.pet.attention_call;
-            let alive_before = self.pet.is_alive;
-            self.sanctuary.sync_active(&self.pet);
-            self.sanctuary.tick_decay_all();
-            self.pet = self.sanctuary.active_pet().clone();
-            if alive_before && !self.pet.is_alive {
-                self.sound.play(SoundEffect::ErrorBuzz);
-            } else if !call_before.is_active() && self.pet.attention_call.is_active() {
-                self.sound.play(SoundEffect::AttentionBeep);
-            }
-            if self.tick_count.is_multiple_of(DECAY_EVERY_TICKS * 4) {
-                self.save_now();
-            }
         }
     }
 }

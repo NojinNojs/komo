@@ -51,7 +51,8 @@ pub(super) fn render_evolution_morph_bar(
 /// Step-by-step Onboarding with a balanced 3-Zone vertical layout (Header / Sprite Stage / Footer)
 /// so nothing is cramped at the top and there is no empty void at the bottom!
 pub(super) fn draw_onboarding_step_screen(f: &mut Frame, device: Rect, app: &App) {
-    let species = PetSpecies::all()[app.selected_species_idx];
+    let roster = PetSpecies::curated();
+    let species = roster[app.selected_species_idx % roster.len()];
     let theme = ShellTheme::all()[app.selected_theme_idx];
     let preview_stage = EvolutionStage::all()[app.preview_stage_idx % EvolutionStage::all().len()];
     let (sp_primary, _, sp_accent) = species_palette(species);
@@ -103,8 +104,9 @@ pub(super) fn draw_onb_species(
             Span::styled("◀  ", Style::default().fg(Color::LightYellow)),
             Span::styled(
                 format!(
-                    "{:02}/10  {}  ",
-                    app.selected_species_idx + 1,
+                    "{:02}/{:02}  {}  ",
+                    (app.selected_species_idx % PetSpecies::curated().len()) + 1,
+                    PetSpecies::curated().len(),
                     species.display_name()
                 ),
                 Style::default().fg(sp_primary).add_modifier(Modifier::BOLD),

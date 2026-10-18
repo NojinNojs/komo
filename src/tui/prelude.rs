@@ -21,10 +21,12 @@ pub(super) use ratatui::{
 
 pub(super) use crate::minigame::{GameMode, MiniGame};
 pub(super) use crate::pet::{
-    format_duration_human, format_hearts, AttentionCall, EvolutionStage, FoodChoice, LcdIcon,
-    OfflineReport, Pet, PetSpecies, Sanctuary, ShellTheme,
+    format_duration_human, format_hearts, AbsenceTier, Accessory, AttentionCall, CoatPreset,
+    EvolutionStage, FoodChoice, LcdIcon, OfflineReport, Pet, PetSpecies, Sanctuary, ShellTheme,
+    WelcomeHostEvent, CURRENT_APP_VERSION, WHATS_NEW_FEATURES,
 };
 pub(super) use crate::senses::sense_environment;
+pub(super) use crate::share::{default_share_output_path, save_share_card_png, ShareRatio};
 pub(super) use crate::sound::{SoundEffect, SoundEngine};
 pub(super) use crate::sprites::{
     mood_color, render_colored_preview, render_colored_sprite, sky_scene, species_palette,

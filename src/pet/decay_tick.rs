@@ -37,9 +37,13 @@ impl Pet {
             self.hunger = self.hunger.saturating_sub(1);
         } else {
             let weight_penalty = u8::from(self.is_overweight());
-            self.hunger = self.hunger.saturating_sub(2);
-            self.happiness = self.happiness.saturating_sub(1);
-            self.energy = self.energy.saturating_sub(1 + weight_penalty);
+            if self.age_seconds.is_multiple_of(2) {
+                self.hunger = self.hunger.saturating_sub(1);
+                self.happiness = self.happiness.saturating_sub(1);
+                self.energy = self.energy.saturating_sub(1 + weight_penalty);
+            } else {
+                self.hunger = self.hunger.saturating_sub(1);
+            }
 
             if self.attention_call == AttentionCall::None
                 && self.discipline < 100

@@ -15,18 +15,38 @@ impl Pet {
 
         let msg = if !self.light_on {
             if self.is_sleeping {
-                self.bond = (self.bond + 3).min(100);
-                self.add_xp(5);
-                self.set_pet_reaction(
-                    PetAction::ToggleLight,
-                    format!("💬 \"*exhales softly* Thanks for dimming the lamp, {caretaker}...\""),
-                    "💭 (Feeling: Deep, uninterrupted sleep in the dark.)".to_string(),
-                    Some(PetMood::Sleeping),
-                );
-                format!(
-                    "🌙 Switched room light OFF. {} sleeps soundly in the dark! (+3 Bond, +5 XP)",
-                    self.name
-                )
+                let now = Utc::now();
+                let rem = self.light_reward_cooldown_remaining(now);
+                if rem == 0 {
+                    self.bond = (self.bond + 3).min(100);
+                    self.add_xp(5);
+                    self.last_light_reward_at = Some(now);
+                    self.set_pet_reaction(
+                        PetAction::ToggleLight,
+                        format!(
+                            "💬 \"*exhales softly* Thanks for dimming the lamp, {caretaker}...\""
+                        ),
+                        "💭 (Feeling: Deep, uninterrupted sleep in the dark.)".to_string(),
+                        Some(PetMood::Sleeping),
+                    );
+                    format!(
+                        "🌙 Switched room light OFF. {} sleeps soundly in the dark! (+3 Bond, +5 XP)",
+                        self.name
+                    )
+                } else {
+                    self.set_pet_reaction(
+                        PetAction::ToggleLight,
+                        format!(
+                            "💬 \"*snuggles deeper* Mmm, still cozy, {caretaker}. Sleep tight.\""
+                        ),
+                        format!("💭 (Feeling: Cozy rest; next dimming reward in {}s.)", rem),
+                        Some(PetMood::Sleeping),
+                    );
+                    format!(
+                        "🌙 Switched room light OFF. {} stays snug (next dimming reward in {}s).",
+                        self.name, rem
+                    )
+                }
             } else {
                 self.set_pet_reaction(
                     PetAction::ToggleLight,

@@ -15,25 +15,28 @@ impl App {
             return;
         }
 
-        if self.offline_report.is_some() {
+        if self.show_changelog {
             if matches!(
                 code,
-                KeyCode::Enter | KeyCode::Esc | KeyCode::Char(' ') | KeyCode::Char('q')
+                KeyCode::Esc | KeyCode::Enter | KeyCode::Char(' ' | 'q' | 'n' | 'N')
             ) {
                 self.sound.play(SoundEffect::BeepConfirm);
-                self.offline_report = None;
+                self.show_changelog = false;
+                self.sanctuary.last_seen_version = CURRENT_APP_VERSION.to_string();
+                self.save_now();
             }
+            return;
+        }
+
+        if self.offline_report.is_some() {
+            self.handle_offline_report_key(code);
             return;
         }
 
         if self.show_help {
             if matches!(
                 code,
-                KeyCode::Esc
-                    | KeyCode::Enter
-                    | KeyCode::Char('?')
-                    | KeyCode::Char('q')
-                    | KeyCode::Char(' ')
+                KeyCode::Esc | KeyCode::Enter | KeyCode::Char('?' | 'q' | ' ')
             ) {
                 self.sound.play(SoundEffect::BeepMove);
                 self.show_help = false;
@@ -74,6 +77,16 @@ impl App {
             return;
         }
 
+        if self.wardrobe_open {
+            self.handle_wardrobe_key(code);
+            return;
+        }
+
+        if self.photo_booth_open {
+            self.handle_photo_booth_key(code);
+            return;
+        }
+
         if self.talk_open {
             self.handle_talk_key(code);
             return;
@@ -83,7 +96,6 @@ impl App {
             self.handle_pantry_key(code);
             return;
         }
-
         match self.screen {
             AppScreen::Onboarding => self.handle_onboarding_key(code),
             AppScreen::SanctuaryRoster => self.handle_roster_key(code),
@@ -98,21 +110,14 @@ impl App {
                 self.sound.play(SoundEffect::BeepMove);
                 self.talk_selected_idx = if self.talk_selected_idx == 1 { 2 } else { 1 };
             }
-            KeyCode::Char('1') => {
-                let _ = self.pet.answer_dialogue(1);
+            KeyCode::Char(c @ ('1' | '2')) => {
+                let _ = self.pet.answer_dialogue((c as u8) - b'0');
                 self.sound.play(SoundEffect::ChatChirp);
                 self.talk_open = false;
                 self.save_now();
             }
-            KeyCode::Char('2') => {
-                let _ = self.pet.answer_dialogue(2);
-                self.sound.play(SoundEffect::ChatChirp);
-                self.talk_open = false;
-                self.save_now();
-            }
-            KeyCode::Enter | KeyCode::Char(' ') | KeyCode::Char('y') | KeyCode::Char('Y') => {
-                let choice = self.talk_selected_idx;
-                let _ = self.pet.answer_dialogue(choice);
+            KeyCode::Enter | KeyCode::Char(' ' | 'y' | 'Y') => {
+                let _ = self.pet.answer_dialogue(self.talk_selected_idx);
                 self.sound.play(SoundEffect::ChatChirp);
                 self.talk_open = false;
                 self.save_now();
@@ -122,6 +127,49 @@ impl App {
                 self.talk_open = false;
             }
             _ => {}
+        }
+    }
+
+    pub(super) fn handle_offline_report_key(&mut self, code: KeyCode) {
+        if self.pet.pending_hosting.is_some() {
+            match code {
+                KeyCode::Up | KeyCode::Left => {
+                    self.sound.play(SoundEffect::BeepMove);
+                    self.hosting_selected_idx = if self.hosting_selected_idx <= 1 {
+                        3
+                    } else {
+                        self.hosting_selected_idx - 1
+                    };
+                }
+                KeyCode::Down | KeyCode::Right | KeyCode::Tab => {
+                    self.sound.play(SoundEffect::BeepMove);
+                    self.hosting_selected_idx = (self.hosting_selected_idx % 3) + 1;
+                }
+                KeyCode::Char(c @ ('1' | '2' | '3')) => {
+                    let _ = self.pet.respond_welcome_hosting((c as u8) - b'0');
+                    self.sound.play(SoundEffect::ChatChirp);
+                    self.offline_report = None;
+                    self.save_now();
+                }
+                KeyCode::Enter | KeyCode::Char(' ') => {
+                    let _ = self.pet.respond_welcome_hosting(self.hosting_selected_idx);
+                    self.sound.play(SoundEffect::ChatChirp);
+                    self.offline_report = None;
+                    self.save_now();
+                }
+                KeyCode::Esc | KeyCode::Char('q') => {
+                    self.sound.play(SoundEffect::BeepConfirm);
+                    self.pet.pending_hosting = None;
+                    self.offline_report = None;
+                }
+                _ => {}
+            }
+        } else if matches!(
+            code,
+            KeyCode::Enter | KeyCode::Esc | KeyCode::Char(' ' | 'q')
+        ) {
+            self.sound.play(SoundEffect::BeepConfirm);
+            self.offline_report = None;
         }
     }
 }

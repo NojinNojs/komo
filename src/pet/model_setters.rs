@@ -49,7 +49,15 @@ impl Pet {
     }
 
     pub fn is_overweight(&self) -> bool {
-        self.weight_grams >= self.stage.base_weight_grams() + 18
+        self.weight_grams >= self.stage.base_weight_grams() + 500
+    }
+
+    pub fn format_weight(&self) -> String {
+        if self.weight_grams >= 1_000 {
+            format!("{:.2}kg", f64::from(self.weight_grams) / 1000.0)
+        } else {
+            format!("{}g", self.weight_grams)
+        }
     }
 
     pub fn care_rank(&self) -> CareRank {

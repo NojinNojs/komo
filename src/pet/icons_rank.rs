@@ -5,6 +5,8 @@ pub const FEED_COOLDOWN_SECS: i64 = 120;
 pub const PLAY_COOLDOWN_SECS: i64 = 150;
 pub const TRAIN_COOLDOWN_SECS: i64 = 240;
 pub const PET_COOLDOWN_SECS: i64 = 45;
+pub const TALK_REWARD_COOLDOWN_SECS: i64 = 180;
+pub const LIGHT_REWARD_COOLDOWN_SECS: i64 = 180;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub enum LcdIcon {

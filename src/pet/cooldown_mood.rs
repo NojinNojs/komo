@@ -23,6 +23,8 @@ impl Pet {
         self.last_played_at = None;
         self.last_trained_at = None;
         self.last_petted_at = None;
+        self.last_talk_reward_at = None;
+        self.last_light_reward_at = None;
     }
 
     pub(super) fn remaining_secs(
@@ -61,6 +63,14 @@ impl Pet {
 
     pub fn pet_cooldown_remaining(&self, now: DateTime<Utc>) -> u64 {
         Self::remaining_secs(self.last_petted_at, PET_COOLDOWN_SECS, now)
+    }
+
+    pub fn talk_reward_cooldown_remaining(&self, now: DateTime<Utc>) -> u64 {
+        Self::remaining_secs(self.last_talk_reward_at, TALK_REWARD_COOLDOWN_SECS, now)
+    }
+
+    pub fn light_reward_cooldown_remaining(&self, now: DateTime<Utc>) -> u64 {
+        Self::remaining_secs(self.last_light_reward_at, LIGHT_REWARD_COOLDOWN_SECS, now)
     }
 
     pub fn refresh_attention(&mut self) {

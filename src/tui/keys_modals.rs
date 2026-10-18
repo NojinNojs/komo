@@ -79,4 +79,92 @@ impl App {
             _ => self.caretaker_buffer = Some(buffer),
         }
     }
+
+    pub(super) fn handle_wardrobe_key(&mut self, code: KeyCode) {
+        match code {
+            KeyCode::Tab | KeyCode::Left | KeyCode::Right => {
+                self.sound.play(SoundEffect::BeepMove);
+                self.wardrobe_tab = 1 - self.wardrobe_tab;
+            }
+            KeyCode::Char(c @ ('1' | '2')) => {
+                self.sound.play(SoundEffect::BeepMove);
+                self.wardrobe_tab = (c as u8) - b'1';
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.sound.play(SoundEffect::BeepMove);
+                if self.wardrobe_tab == 0 {
+                    let n = CoatPreset::all().len();
+                    self.wardrobe_coat_idx = (self.wardrobe_coat_idx + n - 1) % n;
+                } else {
+                    let n = Accessory::all().len();
+                    self.wardrobe_acc_idx = (self.wardrobe_acc_idx + n - 1) % n;
+                }
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.sound.play(SoundEffect::BeepMove);
+                if self.wardrobe_tab == 0 {
+                    let n = CoatPreset::all().len();
+                    self.wardrobe_coat_idx = (self.wardrobe_coat_idx + 1) % n;
+                } else {
+                    let n = Accessory::all().len();
+                    self.wardrobe_acc_idx = (self.wardrobe_acc_idx + 1) % n;
+                }
+            }
+            KeyCode::Enter | KeyCode::Char(' ') => {
+                let msg = if self.wardrobe_tab == 0 {
+                    self.pet
+                        .equip_or_buy_coat(CoatPreset::all()[self.wardrobe_coat_idx])
+                } else {
+                    self.pet
+                        .equip_or_buy_accessory(Accessory::all()[self.wardrobe_acc_idx])
+                };
+                if msg.contains("🔒") {
+                    self.sound.play(SoundEffect::ErrorBuzz);
+                } else {
+                    self.sound.play(SoundEffect::BeepConfirm);
+                }
+                self.save_now();
+            }
+            KeyCode::Esc | KeyCode::Char('v') | KeyCode::Char('V') | KeyCode::Char('q') => {
+                self.sound.play(SoundEffect::BeepMove);
+                self.wardrobe_open = false;
+            }
+            _ => {}
+        }
+    }
+
+    pub(super) fn handle_photo_booth_key(&mut self, code: KeyCode) {
+        match code {
+            KeyCode::Left | KeyCode::Up => {
+                self.sound.play(SoundEffect::BeepMove);
+                self.photo_ratio = self.photo_ratio.prev();
+            }
+            KeyCode::Right | KeyCode::Down | KeyCode::Tab => {
+                self.sound.play(SoundEffect::BeepMove);
+                self.photo_ratio = self.photo_ratio.next();
+            }
+            KeyCode::Char(c @ '1'..='4') => {
+                self.sound.play(SoundEffect::BeepMove);
+                self.photo_ratio = ShareRatio::all()[(c as usize) - ('1' as usize)];
+            }
+            KeyCode::Enter | KeyCode::Char(' ') => {
+                let out = default_share_output_path(&self.pet, self.photo_ratio);
+                match save_share_card_png(&self.pet, self.photo_ratio, &out) {
+                    Ok(()) => {
+                        self.sound.play(SoundEffect::BeepConfirm);
+                        self.photo_status = Some(format!("📸 Saved PNG card -> {}", out.display()));
+                    }
+                    Err(e) => {
+                        self.sound.play(SoundEffect::ErrorBuzz);
+                        self.photo_status = Some(format!("! Save failed: {e}"));
+                    }
+                }
+            }
+            KeyCode::Esc | KeyCode::Char('x') | KeyCode::Char('X') | KeyCode::Char('q') => {
+                self.sound.play(SoundEffect::BeepMove);
+                self.photo_booth_open = false;
+            }
+            _ => {}
+        }
+    }
 }

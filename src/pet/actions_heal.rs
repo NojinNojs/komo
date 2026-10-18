@@ -131,7 +131,7 @@ impl Pet {
         self.bond = (self.bond + 3).min(100);
         self.energy = self.energy.saturating_sub(5);
         let base_w = self.stage.base_weight_grams();
-        self.weight_grams = self.weight_grams.saturating_sub(1).max(base_w);
+        self.weight_grams = self.weight_grams.saturating_sub(25).max(base_w);
         self.add_xp(xp_earned);
         self.set_pet_reaction(
             PetAction::Play,
@@ -144,7 +144,7 @@ impl Pet {
         self.refresh_mood();
 
         let msg = format!(
-            "🎮 Arcade scored {}! Earned +{} coins, +{} XP & burned -1g weight!",
+            "🎮 Arcade scored {}! Earned +{} coins, +{} XP & burned -25g weight!",
             score, coins_earned, xp_earned
         );
         self.log_action(msg.clone());

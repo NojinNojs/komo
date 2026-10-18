@@ -16,6 +16,10 @@ pub enum PetSpecies {
 }
 
 impl PetSpecies {
+    pub fn curated() -> &'static [PetSpecies] {
+        &[Self::MochiCat, Self::BobaPup, Self::CloudBun]
+    }
+
     pub fn all() -> &'static [PetSpecies] {
         &[
             Self::MochiCat,

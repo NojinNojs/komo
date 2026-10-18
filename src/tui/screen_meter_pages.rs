@@ -39,8 +39,8 @@ pub(super) fn push_meter_page_lines(
                 format_duration_human(pet.age_seconds)
             )));
             lines.push(Line::from(format!(
-                " • Weight:    {}g (Base {}g{})",
-                pet.weight_grams,
+                " • Weight:    {} (Base {}g{})",
+                pet.format_weight(),
                 pet.stage.base_weight_grams(),
                 if pet.is_overweight() {
                     " — Overweight! Play [P]"

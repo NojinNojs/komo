@@ -1,3 +1,4 @@
+use super::decay_offline_rates::offline_drop_rates;
 use super::*;
 use chrono::{DateTime, Utc};
 
@@ -56,34 +57,12 @@ impl Pet {
 
         let minutes = elapsed / 60;
         if minutes == 0 {
+            self.prepare_welcome_hosting(elapsed, coins_found, now);
             return (elapsed, None);
         }
 
-        let (hunger_drop, happy_drop, energy_delta, clean_drop) = if minutes <= 30 {
-            let m = minutes as u8;
-            if self.is_sleeping {
-                (m, m / 2, m.saturating_mul(5), m / 2)
-            } else {
-                (m.saturating_mul(2), m, m, m)
-            }
-        } else {
-            let ten_min_blocks = (minutes / 10).min(144) as u8;
-            if self.is_sleeping {
-                (
-                    ten_min_blocks.min(70),
-                    (ten_min_blocks / 2).min(50),
-                    ten_min_blocks.saturating_mul(6).min(100),
-                    (ten_min_blocks / 2).min(55),
-                )
-            } else {
-                (
-                    ten_min_blocks.saturating_add(ten_min_blocks / 5).min(95),
-                    ten_min_blocks.min(75),
-                    ten_min_blocks.min(80),
-                    ten_min_blocks.min(75),
-                )
-            }
-        };
+        let (hunger_drop, happy_drop, energy_delta, clean_drop) =
+            offline_drop_rates(minutes, self.is_sleeping);
 
         let old_hunger = self.hunger;
         let old_energy = self.energy;
@@ -157,8 +136,9 @@ impl Pet {
             ));
         }
 
-        if self.hunger <= 15 || self.cleanliness <= 20 || self.poop_count >= 4 {
-            let dmg = ((minutes / 30) as u8).clamp(5, 85);
+        if (self.hunger <= 10 || self.cleanliness <= 15 || self.poop_count >= 4) && minutes >= 360 {
+            let extra_hours = ((minutes.saturating_sub(360)) / 60) as u8;
+            let dmg = (10u8.saturating_add(extra_hours.saturating_mul(8))).clamp(10, 95);
             self.health = self.health.saturating_sub(dmg);
             self.care_mistakes = self.care_mistakes.saturating_add(1);
             if self.health == 0 {
@@ -169,7 +149,7 @@ impl Pet {
                     "👻 {} collapsed from prolonged starvation & illness! Press [H] for Phoenix Tear Revival!",
                     self.name
                 ));
-            } else if self.health <= 35 || self.poop_count >= 4 {
+            } else if self.health <= 45 || self.poop_count >= 4 {
                 self.is_sick = true;
                 events.push(format!(
                     "🤒 {} caught a chill from low hunger/cleanliness and needs Medicine [H]!",
@@ -181,7 +161,9 @@ impl Pet {
         self.check_evolution();
         self.refresh_mood();
 
-        let report = if elapsed >= 120 {
+        self.prepare_welcome_hosting(elapsed, coins_found, now);
+
+        let report = if elapsed >= 60 {
             Some(OfflineReport {
                 elapsed_seconds: elapsed,
                 pet_name: self.name.clone(),

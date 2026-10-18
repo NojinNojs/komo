@@ -2,7 +2,9 @@ use super::*;
 
 impl App {
     pub fn new(pet: Pet, paths: StoragePaths) -> Self {
-        Self::new_with_sanctuary(Sanctuary::new_with_pet(pet), paths, false)
+        let mut s = Sanctuary::new_with_pet(pet);
+        s.last_seen_version = CURRENT_APP_VERSION.to_string();
+        Self::new_with_sanctuary(s, paths, false)
     }
 
     pub fn new_with_sanctuary(
@@ -12,7 +14,7 @@ impl App {
     ) -> Self {
         let pet = sanctuary.active_pet().clone();
         let caretaker_default = pet.caretaker_label().to_string();
-        let selected_species_idx = PetSpecies::all()
+        let selected_species_idx = PetSpecies::curated()
             .iter()
             .position(|s| *s == pet.species)
             .unwrap_or(0);
@@ -20,6 +22,8 @@ impl App {
             .iter()
             .position(|t| *t == pet.theme)
             .unwrap_or(0);
+        let show_changelog =
+            !start_onboarding && sanctuary.last_seen_version != CURRENT_APP_VERSION;
         Self {
             pet,
             sanctuary,
@@ -41,9 +45,18 @@ impl App {
             pantry_selected_idx: 0,
             talk_open: false,
             talk_selected_idx: 1,
+            wardrobe_open: false,
+            wardrobe_tab: 0,
+            wardrobe_coat_idx: 0,
+            wardrobe_acc_idx: 0,
+            photo_booth_open: false,
+            photo_ratio: ShareRatio::Landscape16x9,
+            photo_status: None,
+            hosting_selected_idx: 1,
             show_meter: false,
             meter_page: 0,
             show_help: false,
+            show_changelog,
             offline_report: None,
             onboarding_name_input: String::new(),
             onboarding_caretaker_input: caretaker_default,

@@ -2,7 +2,7 @@ use super::*;
 
 impl App {
     pub(super) fn handle_onboarding_key(&mut self, code: KeyCode) {
-        let species_count = PetSpecies::all().len();
+        let species_count = PetSpecies::curated().len();
         let theme_count = ShellTheme::all().len();
         let stage_count = EvolutionStage::all().len();
 
@@ -33,7 +33,8 @@ impl App {
                 KeyCode::Enter => {
                     self.sound.play(SoundEffect::BeepConfirm);
                     self.onboarding_step = OnboardingStep::SelectTheme;
-                    self.onboarding_name_input = PetSpecies::all()[self.selected_species_idx]
+                    self.onboarding_name_input = PetSpecies::curated()
+                        [self.selected_species_idx % species_count]
                         .default_name()
                         .to_string();
                 }
@@ -106,7 +107,8 @@ impl App {
     }
 
     pub(super) fn finish_adoption(&mut self) {
-        let species = PetSpecies::all()[self.selected_species_idx];
+        let curated = PetSpecies::curated();
+        let species = curated[self.selected_species_idx % curated.len()];
         let theme = ShellTheme::all()[self.selected_theme_idx];
         let name = self.onboarding_name_input.trim().to_string();
         let caretaker = self.onboarding_caretaker_input.trim().to_string();
@@ -124,9 +126,11 @@ impl App {
             self.sanctuary = Sanctuary::new_with_pet(new_pet.clone());
         }
 
+        self.sanctuary.last_seen_version = CURRENT_APP_VERSION.to_string();
         self.pet = self.sanctuary.active_pet().clone();
         self.roster_selected_idx = self.sanctuary.active_index;
         self.adopting_new = false;
+        self.show_changelog = true;
         self.screen = AppScreen::Habitat;
         self.sound.play(SoundEffect::HatchFanfare);
         self.save_now();

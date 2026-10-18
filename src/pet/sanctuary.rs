@@ -1,6 +1,17 @@
 use super::*;
 use serde::{Deserialize, Serialize};
 
+pub const CURRENT_APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Player-friendly What's New items shown automatically once after updating!
+pub const WHATS_NEW_FEATURES: &[&str] = &[
+    "🏡 Welcome Home Hosting: your companion now runs up to the front glass to greet you when you return, with interactive replies and found gifts!",
+    "🎀 Companion Wardrobe [V]: customize fur coats/palettes (Sakura Mochi, Calico, Shiba Gold, Tuxedo) and equip hats, ribbons, or crowns!",
+    "📸 Pixel Photo Booth [X]: snap & export crisp pixel-art share cards in 16:9, 9:16, 4:3, or 3:4 right from the habitat or via `komo --share`!",
+    "🍱 Lifelike Care & Animations: safe lunch/sleep breaks without sudden death, realistic weight in g/kg, steaming food bowls when eating, and buzzing flies when dirty!",
+    "✨ Curated Starter Trio: begin your journey with Neko Mochi, Boba Pup, or Cloud Bun — each with richer expressions and balanced leveling!",
+];
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Sanctuary {
@@ -10,6 +21,7 @@ pub struct Sanctuary {
     pub caretaker_title: String,
     pub caretaker_karma: i32,
     pub memorials: Vec<MemorialRecord>,
+    pub last_seen_version: String,
 }
 
 impl Default for Sanctuary {
@@ -29,6 +41,7 @@ impl Sanctuary {
             caretaker_title: title,
             caretaker_karma: 0,
             memorials: Vec::new(),
+            last_seen_version: String::new(),
         }
     }
 

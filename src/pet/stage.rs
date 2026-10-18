@@ -49,11 +49,11 @@ impl EvolutionStage {
 
     pub fn base_weight_grams(&self) -> u16 {
         match self {
-            Self::Egg => 5,
-            Self::Baby => 5,
-            Self::Teen => 15,
-            Self::Adult => 30,
-            Self::CyberElder => 45,
+            Self::Egg => 120,
+            Self::Baby => 450,
+            Self::Teen => 1_800,
+            Self::Adult => 4_200,
+            Self::CyberElder => 6_500,
         }
     }
 
@@ -61,9 +61,9 @@ impl EvolutionStage {
         match self {
             Self::Egg => 0,
             Self::Baby => 100,
-            Self::Teen => 250,
-            Self::Adult => 600,
-            Self::CyberElder => 1_200,
+            Self::Teen => 400,
+            Self::Adult => 1_000,
+            Self::CyberElder => 2_200,
         }
     }
 
@@ -92,11 +92,11 @@ impl EvolutionStage {
     }
 
     pub fn from_xp(xp: u32) -> EvolutionStage {
-        if xp >= 1_200 {
+        if xp >= 2_200 {
             Self::CyberElder
-        } else if xp >= 600 {
+        } else if xp >= 1_000 {
             Self::Adult
-        } else if xp >= 250 {
+        } else if xp >= 400 {
             Self::Teen
         } else if xp >= 100 {
             Self::Baby

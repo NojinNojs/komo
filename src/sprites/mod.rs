@@ -13,6 +13,7 @@
 //! 5. `🌟 CyberElder`: Massive Apex Sovereign boss form with golden armor & aura.
 //! 6. `👻 PassedOut`: Floating spirit & pixel memorial when a pet faints/dies.
 
+mod accessories;
 mod adult_classic;
 mod adult_mythic;
 mod baby_egg;
@@ -25,9 +26,9 @@ mod pose_gaze;
 mod render_api;
 mod teen;
 #[cfg(test)]
-#[cfg(test)]
 mod tests;
 
+pub use accessories::*;
 use adult_classic::*;
 use adult_mythic::*;
 use baby_egg::*;
@@ -40,7 +41,9 @@ use pose_gaze::*;
 pub use render_api::*;
 use teen::*;
 
-use crate::pet::{EvolutionStage, LcdIcon, Pet, PetMood, PetSpecies, ShellTheme};
+use crate::pet::{
+    Accessory, CoatPreset, EvolutionStage, LcdIcon, Pet, PetMood, PetSpecies, ShellTheme,
+};
 use crate::senses::{compute_posture_and_gaze, render_window_backdrop, sense_environment, PetGaze};
 use ratatui::{
     style::{Color, Style},

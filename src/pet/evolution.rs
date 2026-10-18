@@ -1,7 +1,7 @@
 use super::*;
 impl Pet {
     pub fn level_up_threshold(&self) -> u32 {
-        100
+        200
     }
 
     pub fn add_xp(&mut self, amount: u32) -> bool {
