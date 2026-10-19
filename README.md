@@ -45,7 +45,7 @@ You start by adopting one of three hand-crafted companions (each with 5 evolutio
   * **Sight** tracks the window weather (`🌞 DAY` / `🌸 BREEZE` / `🌧️ RAIN` / `🌠 NIGHT`) and which bezel icon you're hovering.
   * **Hearing** perks an ear at steady typing and flattens when you mash keys.
   * **Feeling** reports warm headpats, heavy eyelids, or a rumbling belly.
-  * **Speech (`[Y]`)** lets you have heart-to-heart chats where your companion addresses you by your chosen title (`Boss`, `Aqsan`, `Captain`, `Keeper`).
+  * **Speech (`[Y]`)** lets you have heart-to-heart chats where your companion addresses you by your chosen title (`Boss`, `Nojin`, `Captain`, `Keeper`).
 * **🕯 Consequences that matter.** A fallen companion can only be revived **once in their entire life** with a Sacred Phoenix Tear (`[H]`). A second death is permanent — and you cannot adopt a new pet until you complete the three-step Burial Vigil (`[B]`) and etch their name into the Memorial Hall.
 
 > [!TIP]
@@ -154,5 +154,5 @@ komo --update                    # Print step-by-step update instructions
 
 ## License
 
-Released under the [MIT License](./LICENSE) — © 2026 Muhammad Raffi Aqsan ([NojinNojs](https://github.com/NojinNojs)).
+Released under the [MIT License](./LICENSE) — © 2026 Nojin ([NojinNojs](https://github.com/NojinNojs)).
 Use it, fork it, share your companion cards. Just remember to turn off the lamp when they go to sleep.
